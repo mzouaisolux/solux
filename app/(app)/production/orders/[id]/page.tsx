@@ -1097,29 +1097,26 @@ export default async function ProductionOrderDetailPage({
               value={fmtDate(liveStatus.currentEta)}
             />
             <SummaryStat
+              emph
               label="Total delay"
               value={`${delayBreakdown.factoryDays + delayBreakdown.externalDays} d`}
-              tone={
-                delayBreakdown.factoryDays + delayBreakdown.externalDays > 0
-                  ? "warn"
-                  : "success"
-              }
             />
             <SummaryStat
+              emph
               label="Factory delay"
               value={`${delayBreakdown.factoryDays} d`}
-              tone={delayBreakdown.factoryDays > 0 ? "warn" : "muted"}
             />
             <SummaryStat
+              emph
               label="External delay"
               value={`${delayBreakdown.externalDays} d`}
-              tone={delayBreakdown.externalDays > 0 ? "warn" : "muted"}
             />
             <SummaryStat
               label="Last delay reason"
               value={
                 history && history[0]?.reason ? String(history[0].reason) : "—"
               }
+              tone={history && history[0]?.reason ? "default" : "muted"}
             />
           </SummaryRow>
         }

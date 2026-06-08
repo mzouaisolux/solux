@@ -99,15 +99,18 @@ export function SummaryStat({
   label,
   value,
   tone = "default",
+  emph = false,
 }: {
   label: string;
   value: ReactNode;
   tone?: "default" | "muted" | "warn" | "success" | "danger";
+  /** Tinted cell (#FAFAFA) — used for the delay-breakdown cells. */
+  emph?: boolean;
 }) {
   const muted = tone === "muted";
   const success = tone === "success";
   return (
-    <div className="po-cell">
+    <div className={`po-cell ${emph ? "emph" : ""}`}>
       <div className="po-ck">{label}</div>
       <div className={`po-cv ${muted ? "muted" : ""}`}>
         {success && <span className="gdot" aria-hidden />}
