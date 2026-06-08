@@ -85,9 +85,20 @@ export default async function OperationsPage({
     scope?: string;
     q?: string;
     sales?: string | string[];
+    status?: string;
   };
 }) {
   const scope: ListScope = parseListScope(searchParams?.scope);
+  // Optional status-group deep link from the Orders submenu (m099):
+  // in_production / shipping / delivered. When set it OVERRIDES the scope
+  // filter (so e.g. "delivered" shows even though the default "active" scope
+  // hides terminal statuses). "archived" is handled by scope, not here.
+  const statusGroup = (searchParams?.status ?? "").trim();
+  const STATUS_GROUP_LABEL: Record<string, string> = {
+    in_production: "In production",
+    shipping: "Shipping",
+    delivered: "Delivered",
+  };
   // Free-text filter — searches order number, quotation number, task
   // list number, client name/code/country. Composes with the scope.
   const searchQuery = (searchParams?.q ?? "").trim().toLowerCase();
@@ -339,8 +350,26 @@ export default async function OperationsPage({
     return haystack.includes(searchQuery);
   }
 
+  // Status-group predicate (Orders submenu). Overrides scope when present.
+  function inStatusGroup(e: EnrichedRow, g: string): boolean {
+    const s = e.order.status;
+    switch (g) {
+      case "in_production":
+        return (
+          !e.archived &&
+          ["awaiting_deposit", "deposit_received", "production_scheduled", "in_production", "production_delayed", "production_completed"].includes(s)
+        );
+      case "shipping":
+        return !e.archived && ["shipment_booked", "shipped"].includes(s);
+      case "delivered":
+        return s === "delivered";
+      default:
+        return inScope(e, scope);
+    }
+  }
+
   const filtered = enriched
-    .filter((e) => inScope(e, scope))
+    .filter((e) => inStatusGroup(e, statusGroup))
     .filter(matchesSearch);
 
   // Counts feed the [Active] [All] [Archived] tabs. Computed off the
@@ -654,6 +683,17 @@ export default async function OperationsPage({
           counts={scopeCounts}
           preserveParams={{ q: searchQuery }}
         />
+        {/* Status-group filter indicator (from the Orders submenu). */}
+        {statusGroup && STATUS_GROUP_LABEL[statusGroup] && (
+          <div className="flex items-center gap-2 rounded-lg border border-sky-200 bg-sky-50 px-3 py-1.5 text-xs text-sky-800">
+            <span>
+              Filtered to <b>{STATUS_GROUP_LABEL[statusGroup]}</b> — {filtered.length} order{filtered.length === 1 ? "" : "s"}
+            </span>
+            <a href="/operations" className="font-medium underline hover:no-underline">
+              Show all
+            </a>
+          </div>
+        )}
         {/* GET form — preserves the scope param in a hidden field so
             search doesn't reset you to the default scope. */}
         <form method="GET" className="flex items-end gap-2">

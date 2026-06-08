@@ -218,7 +218,36 @@ export const NAVIGATION: NavCategory[] = [
     label: "Orders",
     href: "/operations",
     visibility: { kind: "always" },
-    groups: [],
+    groups: [
+      {
+        title: "Orders",
+        items: [
+          { label: "All orders", href: "/operations", visibility: { kind: "always" } },
+          {
+            label: "In Production",
+            href: "/operations?status=in_production",
+            visibility: { kind: "always" },
+            description: "Active production",
+          },
+          {
+            label: "Shipping",
+            href: "/operations?status=shipping",
+            visibility: { kind: "always" },
+            description: "Booked & shipped",
+          },
+          {
+            label: "Delivered",
+            href: "/operations?status=delivered",
+            visibility: { kind: "always" },
+          },
+          {
+            label: "Archived",
+            href: "/operations?scope=archived",
+            visibility: { kind: "always" },
+          },
+        ],
+      },
+    ],
   },
 
   // 5) Pricing — its own top-level category, split by single responsibility:
