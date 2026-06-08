@@ -88,21 +88,17 @@ export function OrderOperationsStrip({
 }: OrderOperationsStripProps) {
   const totalDelay = factoryDelayDays + externalDelayDays;
   return (
-    <section className="grid grid-cols-2 lg:grid-cols-5 gap-3">
-      <Card label="Initial ETA" tone="neutral">
-        <div className="text-base font-semibold text-neutral-900 tabular-nums">
-          {fmtLongDate(initialEta)}
-        </div>
-        <div className="text-[11px] text-neutral-500 mt-0.5">
-          Baseline · locked at activation
-        </div>
-      </Card>
+    <section className="grid grid-cols-2 lg:grid-cols-5 gap-3.5">
+      <div className="po-kpi">
+        <div className="k">Initial ETA</div>
+        <div className="val">{fmtLongDate(initialEta)}</div>
+        <div className="sub">Baseline · locked at activation</div>
+      </div>
 
-      <Card label="Current ETA" tone="neutral">
-        <div className="text-base font-semibold text-neutral-900 tabular-nums">
-          {fmtLongDate(currentEta)}
-        </div>
-        <div className="text-[11px] text-neutral-500 mt-0.5">
+      <div className="po-kpi">
+        <div className="k">Current ETA</div>
+        <div className="val">{fmtLongDate(currentEta)}</div>
+        <div className="sub">
           {daysToEta == null
             ? "—"
             : daysToEta < 0
@@ -111,7 +107,7 @@ export function OrderOperationsStrip({
             ? "Due today"
             : `In ${daysToEta}d`}
         </div>
-      </Card>
+      </div>
 
       <DelayCard
         factoryDays={factoryDelayDays}
@@ -132,33 +128,9 @@ export function OrderOperationsStrip({
   );
 }
 
-function Card({
-  label,
-  tone,
-  children,
-}: {
-  label: string;
-  tone: "neutral" | "rose" | "amber" | "emerald" | "sky";
-  children: React.ReactNode;
-}) {
-  const ring: Record<typeof tone, string> = {
-    neutral: "border-neutral-200 bg-white",
-    rose: "border-rose-300 bg-rose-50/50",
-    amber: "border-amber-300 bg-amber-50/50",
-    emerald: "border-emerald-300 bg-emerald-50/50",
-    sky: "border-sky-300 bg-sky-50/50",
-  };
-  return (
-    <div className={`rounded-xl border ${ring[tone]} p-3.5`}>
-      <div className="text-[10px] font-bold uppercase tracking-widerx text-neutral-500 mb-1">
-        {label}
-      </div>
-      {children}
-    </div>
-  );
-}
-
-/** The most important card: distinguishes factory vs external responsibility. */
+/** The most important card: distinguishes factory vs external responsibility.
+ *  Slipping → Hazard treatment (ink frame + danger stripe + ▲); on schedule
+ *  → calm card with a Flash-Green positive value. No rainbow. */
 function DelayCard({
   factoryDays,
   externalDays,
@@ -170,54 +142,54 @@ function DelayCard({
   latestType: DelayType | null;
   totalDays: number;
 }) {
-  // No slip at all → calm green.
+  // No slip at all → calm card, positive (green) value.
   if (totalDays <= 0) {
     return (
-      <Card label="Delay" tone="emerald">
-        <div className="text-base font-semibold text-emerald-900 tabular-nums">
-          On schedule
+      <div className="po-kpi">
+        <div className="k">Delay</div>
+        <div className="val">
+          <span className="pos">On schedule</span>
         </div>
-        <div className="text-[11px] text-emerald-700/80 mt-0.5">
-          No deadline shift recorded.
-        </div>
-      </Card>
+        <div className="sub">No deadline shift recorded.</div>
+      </div>
     );
   }
   // Mixed: show the dominant axis at the top, the other axis as a sub-line.
   const factoryDominant = factoryDays >= externalDays;
   if (factoryDominant && factoryDays > 0) {
     return (
-      <Card label="Delay" tone="rose">
-        <div className="text-base font-semibold text-rose-900 tabular-nums">
-          +{factoryDays}d <span className="text-[12px] font-medium">Factory</span>
+      <div className="po-kpi alert">
+        <div className="k">Delay</div>
+        <div className="val">
+          <span className="tri">▲</span>
+          <span>+{factoryDays}d Factory</span>
         </div>
-        <div className="text-[11px] text-rose-800/80 mt-0.5">
-          {externalDays > 0
-            ? `+${externalDays}d external · `
-            : ""}
+        <div className="sub">
+          {externalDays > 0 ? `+${externalDays}d external · ` : ""}
           counts toward factory KPI
         </div>
-      </Card>
+      </div>
     );
   }
-  // External-only or external-dominant slip → amber, NOT factory-attributable.
+  // External-only or external-dominant slip → still Hazard (urgency, no color).
+  const extLabel =
+    latestType && latestType !== "production"
+      ? DELAY_TYPE_LABEL[latestType].replace(" delay", "")
+      : "External";
   return (
-    <Card label="Delay" tone="amber">
-      <div className="text-base font-semibold text-amber-900 tabular-nums">
-        +{externalDays}d{" "}
-        <span className="text-[12px] font-medium">
-          {latestType && latestType !== "production"
-            ? DELAY_TYPE_LABEL[latestType].replace(" delay", "")
-            : "External"}
+    <div className="po-kpi alert">
+      <div className="k">Delay</div>
+      <div className="val">
+        <span className="tri">▲</span>
+        <span>
+          +{externalDays}d {extLabel}
         </span>
       </div>
-      <div className="text-[11px] text-amber-800/80 mt-0.5">
-        {factoryDays > 0
-          ? `+${factoryDays}d factory · `
-          : ""}
+      <div className="sub">
+        {factoryDays > 0 ? `+${factoryDays}d factory · ` : ""}
         does not affect factory KPI
       </div>
-    </Card>
+    </div>
   );
 }
 
@@ -234,46 +206,59 @@ function PaymentCard({
 }) {
   if (state === "paid_in_full" || state === "no_deposit_required") {
     return (
-      <Card label="Payment" tone="emerald">
-        <div className="text-base font-semibold text-emerald-900">
-          {state === "paid_in_full" ? "Paid in full" : "No deposit required"}
+      <div className="po-kpi">
+        <div className="k">Payment</div>
+        <div className="val">
+          <span className="pos">
+            {state === "paid_in_full" ? "Paid in full" : "No deposit required"}
+          </span>
         </div>
-        <div className="text-[11px] text-emerald-700/80 mt-0.5">
+        <div className="sub">
           {state === "paid_in_full"
             ? "Balance settled."
             : "Cash-on-receipt terms."}
         </div>
-      </Card>
+      </div>
     );
   }
   if (state === "awaiting_deposit") {
     return (
-      <Card label="Payment" tone="rose">
-        <div className="text-base font-semibold text-rose-900">
-          Awaiting deposit
-        </div>
-        <div className="text-[11px] text-rose-800/80 mt-0.5">
-          Production gated on the deposit.
-        </div>
-      </Card>
+      <div className="po-kpi">
+        <div className="k">Payment</div>
+        <div className="val">Awaiting deposit</div>
+        <div className="sub">Production gated on the deposit.</div>
+      </div>
     );
   }
   // Partial / deposit received → show balance remaining.
   const money = fmtMoney(balanceRemaining ?? null, currency);
-  const tone =
-    daysToEta != null && daysToEta <= 7 ? "amber" : ("neutral" as const);
   return (
-    <Card label="Payment" tone={tone}>
-      <div className="text-base font-semibold text-neutral-900">
-        Balance pending
-      </div>
-      <div className="text-[11px] text-neutral-600 mt-0.5">
+    <div className="po-kpi">
+      <div className="k">Payment</div>
+      <div className="val">Balance pending</div>
+      <div className="sub">
         {money ? `${money} remaining` : "Balance not yet received"}
-        {daysToEta != null && daysToEta >= 0
-          ? ` · due in ${daysToEta}d`
-          : ""}
+        {daysToEta != null && daysToEta >= 0 ? ` · due in ${daysToEta}d` : ""}
       </div>
-    </Card>
+    </div>
+  );
+}
+
+function ShipKpi({
+  title,
+  sub,
+  pos = false,
+}: {
+  title: string;
+  sub?: string | null;
+  pos?: boolean;
+}) {
+  return (
+    <div className="po-kpi">
+      <div className="k">Shipping</div>
+      <div className="val">{pos ? <span className="pos">{title}</span> : title}</div>
+      {sub ? <div className="sub">{sub}</div> : null}
+    </div>
   );
 }
 
@@ -281,62 +266,21 @@ function ShippingCard({ state }: { state: OperationsShippingState }) {
   switch (state) {
     case "delivered":
       return (
-        <Card label="Shipping" tone="emerald">
-          <div className="text-base font-semibold text-emerald-900">
-            Delivered
-          </div>
-          <div className="text-[11px] text-emerald-700/80 mt-0.5">
-            Project closed on the logistics side.
-          </div>
-        </Card>
+        <ShipKpi title="Delivered" sub="Project closed on the logistics side." pos />
       );
     case "shipped":
-      return (
-        <Card label="Shipping" tone="sky">
-          <div className="text-base font-semibold text-sky-900">In transit</div>
-          <div className="text-[11px] text-sky-800/80 mt-0.5">
-            Container has sailed.
-          </div>
-        </Card>
-      );
+      return <ShipKpi title="In transit" sub="Container has sailed." />;
     case "booked":
-      return (
-        <Card label="Shipping" tone="sky">
-          <div className="text-base font-semibold text-sky-900">Booked</div>
-          <div className="text-[11px] text-sky-800/80 mt-0.5">
-            Carrier confirmed · awaiting load.
-          </div>
-        </Card>
-      );
+      return <ShipKpi title="Booked" sub="Carrier confirmed · awaiting load." />;
     case "ready_to_ship":
       return (
-        <Card label="Shipping" tone="amber">
-          <div className="text-base font-semibold text-amber-900">
-            Waiting booking
-          </div>
-          <div className="text-[11px] text-amber-800/80 mt-0.5">
-            Production complete · book the carrier.
-          </div>
-        </Card>
+        <ShipKpi title="Waiting booking" sub="Production complete · book the carrier." />
       );
     case "cancelled":
-      return (
-        <Card label="Shipping" tone="neutral">
-          <div className="text-base font-semibold text-neutral-700">
-            Cancelled
-          </div>
-        </Card>
-      );
+      return <ShipKpi title="Cancelled" />;
     default:
       return (
-        <Card label="Shipping" tone="neutral">
-          <div className="text-base font-semibold text-neutral-700">
-            Not started
-          </div>
-          <div className="text-[11px] text-neutral-500 mt-0.5">
-            Surfaces once production is complete.
-          </div>
-        </Card>
+        <ShipKpi title="Not started" sub="Surfaces once production is complete." />
       );
   }
 }

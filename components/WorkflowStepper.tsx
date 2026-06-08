@@ -27,16 +27,16 @@ export type WorkflowStage = {
 export default function WorkflowStepper({
   stages,
   compact = false,
+  premium = false,
 }: {
   stages: WorkflowStage[];
   compact?: boolean;
+  /** Opt-in Premium skin (Production Order page). Default keeps the legacy
+   *  look used on document / task-list detail — byte-identical. */
+  premium?: boolean;
 }) {
   return (
-    <div
-      className={`flex items-stretch ${
-        compact ? "gap-0" : "gap-0"
-      } w-full overflow-x-auto`}
-    >
+    <div className={`flex items-stretch gap-0 w-full overflow-x-auto`}>
       {stages.map((stage, i) => {
         const isLast = i === stages.length - 1;
         const next = stages[i + 1];
@@ -45,55 +45,82 @@ export default function WorkflowStepper({
         const connectorPassed =
           stage.state === "done" ||
           (stage.state === "current" && next && next.state !== "pending");
+
+        const dotClass = premium
+          ? `po-step-dot ${
+              stage.state === "current"
+                ? "po-step-dot--current"
+                : stage.state === "done"
+                ? "po-step-dot--done"
+                : "po-step-dot--todo"
+            }`
+          : `inline-flex h-3 w-3 rounded-full transition-all ${
+              stage.state === "current"
+                ? "bg-solux ring-4 ring-solux/20"
+                : stage.state === "done"
+                ? "bg-neutral-900"
+                : stage.state === "skipped"
+                ? "bg-neutral-200 border border-neutral-300"
+                : "bg-white border border-neutral-300"
+            }`;
+
+        const nameClass = premium
+          ? `po-step-name block ${
+              stage.state === "current" || stage.state === "done"
+                ? "text-[color:var(--ink)]"
+                : "text-[color:var(--mute)]"
+            } ${stage.state === "skipped" ? "line-through" : ""}`
+          : `block text-[11px] font-semibold uppercase tracking-widerx ${
+              stage.state === "current"
+                ? "text-neutral-900"
+                : stage.state === "done"
+                ? "text-neutral-700"
+                : stage.state === "skipped"
+                ? "text-neutral-400 line-through"
+                : "text-neutral-400"
+            }`;
+
+        const subClass = premium
+          ? `block text-[10px] mt-0.5 ${
+              stage.state === "current"
+                ? "text-[color:var(--green-deep)] font-semibold"
+                : "text-[color:var(--mute)]"
+            }`
+          : `block text-[10px] mt-0.5 ${
+              stage.state === "current" ? "text-neutral-700" : "text-neutral-400"
+            }`;
+
+        const connClass = premium
+          ? `flex-1 mx-1 po-step-conn ${
+              connectorPassed ? "po-step-conn--done" : "po-step-conn--todo"
+            }`
+          : `flex-1 h-[2px] mx-1 ${
+              connectorPassed ? "bg-neutral-900" : "bg-neutral-200"
+            }`;
+
         const inner = (
           <div
             className={`flex items-center gap-2 ${
               compact ? "py-1" : "py-2"
             } px-2 rounded-md transition-colors ${
-              stage.href ? "hover:bg-neutral-100/70" : ""
+              stage.href
+                ? premium
+                  ? "hover:bg-[color:var(--canvas)]"
+                  : "hover:bg-neutral-100/70"
+                : ""
             }`}
           >
             <span className="relative flex items-center justify-center">
-              <span
-                className={`inline-flex h-3 w-3 rounded-full transition-all ${
-                  stage.state === "current"
-                    ? "bg-solux ring-4 ring-solux/20"
-                    : stage.state === "done"
-                    ? "bg-neutral-900"
-                    : stage.state === "skipped"
-                    ? "bg-neutral-200 border border-neutral-300"
-                    : "bg-white border border-neutral-300"
-                }`}
-              />
+              <span className={dotClass} />
             </span>
             <span
               className={`text-left ${
                 compact ? "leading-tight" : "leading-snug"
               }`}
             >
-              <span
-                className={`block text-[11px] font-semibold uppercase tracking-widerx ${
-                  stage.state === "current"
-                    ? "text-neutral-900"
-                    : stage.state === "done"
-                    ? "text-neutral-700"
-                    : stage.state === "skipped"
-                    ? "text-neutral-400 line-through"
-                    : "text-neutral-400"
-                }`}
-              >
-                {stage.label}
-              </span>
+              <span className={nameClass}>{stage.label}</span>
               {stage.sub && !compact && (
-                <span
-                  className={`block text-[10px] mt-0.5 ${
-                    stage.state === "current"
-                      ? "text-neutral-700"
-                      : "text-neutral-400"
-                  }`}
-                >
-                  {stage.sub}
-                </span>
+                <span className={subClass}>{stage.sub}</span>
               )}
             </span>
           </div>
@@ -110,13 +137,7 @@ export default function WorkflowStepper({
             ) : (
               inner
             )}
-            {!isLast && (
-              <div
-                className={`flex-1 h-[2px] mx-1 ${
-                  connectorPassed ? "bg-neutral-900" : "bg-neutral-200"
-                }`}
-              />
-            )}
+            {!isLast && <div className={connClass} />}
           </div>
         );
       })}

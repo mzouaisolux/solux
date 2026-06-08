@@ -1,0 +1,555 @@
+/* =====================================================================
+   SOLUX — Production Order "Premium" reskin (purely visual)
+   ---------------------------------------------------------------------
+   Every rule here is SCOPED under `.po-premium`, which wraps ONLY the
+   Production Order detail page. Nothing outside that wrapper is affected.
+   Design tokens live in :root (additive — harmless to the rest of the
+   app since nothing else references them).
+   Source of truth: docs brief §2–§7. No hardcoded colors in components.
+   ===================================================================== */
+
+:root {
+  /* Typographie — Plus Jakarta Sans is loaded in app/layout.tsx as
+     --font-jakarta and only applied under .po-premium. */
+  --font-ui: var(--font-jakarta), system-ui, sans-serif;
+
+  /* Couleurs — charte Solux */
+  --ink: #0f0f0f;
+  --ink-soft: #2a2a2c;
+  --mute: #67646f;
+  --mute-2: #aeaaba;
+  --on-dark: #eceaf2;
+
+  --line: #e7e7ea;
+  --line-2: #dcdde1;
+  --canvas: #eeeef0;
+  --card: #ffffff;
+
+  --green: #55ff7e;
+  --green-tint: rgba(85, 255, 126, 0.14);
+  --green-deep: #0b7a39;
+
+  /* Forme */
+  --radius: 4px;
+  --radius-sm: 4px;
+  --shadow: 0 1px 2px rgba(15, 15, 15, 0.05), 0 1px 0 rgba(15, 15, 15, 0.02);
+
+  /* Alerte "Hazard" */
+  --hazard-stripe: repeating-linear-gradient(
+    -45deg,
+    var(--ink) 0 7px,
+    #ededed 7px 14px
+  );
+  --hazard-stripe-sm: repeating-linear-gradient(
+    -45deg,
+    var(--ink) 0 6px,
+    #ededed 6px 12px
+  );
+}
+
+/* ---------------------------------------------------------------------
+   BASE — font, color, sharp corners, no monospace
+   --------------------------------------------------------------------- */
+.po-premium {
+  font-family: var(--font-ui);
+  color: var(--ink-soft);
+  text-wrap: pretty;
+}
+.po-premium :is(h1, h2, h3) {
+  color: var(--ink);
+}
+
+/* Kill the old monospace everywhere on this page (identifiers stay
+   tabular). Higher specificity than the `.font-mono` utility, so no
+   !important needed — and the rest of the app keeps its mono. */
+.po-premium .font-mono {
+  font-family: var(--font-ui);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.005em;
+}
+
+/* Sharp 4px corners on the page's cards / cells / controls (pills keep
+   their pill radius — see .po-pill below). */
+.po-premium :is(.panel, .input, .input-sm, .select, .btn-secondary, .btn-primary),
+.po-premium .rounded-md,
+.po-premium .rounded-lg,
+.po-premium .rounded-xl,
+.po-premium .rounded-2xl {
+  border-radius: var(--radius);
+}
+
+/* Readable micro-labels — tighter tracking than the global .14em. */
+.po-premium .eyebrow {
+  letter-spacing: 0.07em;
+  color: var(--mute);
+}
+
+/* Focus ring — ink, visible. */
+.po-premium :is(a, button, [tabindex]):focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+}
+
+/* ---------------------------------------------------------------------
+   §6 STATUS PILLS  (.po-pill + variants)
+   --------------------------------------------------------------------- */
+.po-premium .po-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 999px;
+  padding: 4px 11px;
+  font-size: 11.5px;
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+}
+.po-premium .po-pill .pdot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+}
+/* Positif / OK */
+.po-premium .po-pill--pos {
+  background: var(--green-tint);
+  color: var(--ink);
+  border: 1px solid rgba(85, 255, 126, 0.45);
+}
+.po-premium .po-pill--pos .pdot {
+  background: var(--green);
+}
+/* Alerte (Hazard look = ink fill + green dot) */
+.po-premium .po-pill--ink {
+  background: var(--ink);
+  color: #fff;
+}
+.po-premium .po-pill--ink .pdot {
+  background: var(--green);
+}
+/* Neutre */
+.po-premium .po-pill--line {
+  background: #fff;
+  color: var(--ink-soft);
+  border: 1px solid var(--line-2);
+}
+.po-premium .po-pill--line .pdot {
+  background: var(--mute-2);
+}
+
+/* ---------------------------------------------------------------------
+   §5.3 ORDER HEADER — title + meta row
+   --------------------------------------------------------------------- */
+.po-premium .po-order-id {
+  font-size: 38px;
+  font-weight: 600;
+  line-height: 1.05;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+.po-premium .po-metarow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 26px;
+}
+.po-premium .po-k {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--mute);
+}
+.po-premium .po-v {
+  font-size: 13.5px;
+  font-weight: 500;
+  color: var(--ink);
+}
+.po-premium .po-v.num {
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------------------------------------------------------------------
+   §5.2 TABS — active = ink underline
+   --------------------------------------------------------------------- */
+.po-premium .po-tabbar {
+  display: flex;
+  gap: 28px;
+  border-bottom: 1px solid var(--line);
+}
+.po-premium .po-tab {
+  position: relative;
+  padding: 8px 2px;
+  font-size: 13.5px;
+  color: var(--mute);
+  border: 0;
+}
+.po-premium .po-tab.active {
+  color: var(--ink);
+  font-weight: 600;
+}
+.po-premium .po-tab.active::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 2px;
+  background: var(--ink);
+}
+.po-premium .po-tab-count {
+  margin-left: 6px;
+  background: var(--line);
+  color: var(--mute);
+  border-radius: 999px;
+  padding: 1px 7px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+/* ---------------------------------------------------------------------
+   §5.6 KPI CARDS  +  §7.1 DELAY card (Hazard)
+   --------------------------------------------------------------------- */
+.po-premium .po-kpi {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 18px 18px 16px;
+}
+.po-premium .po-kpi .k {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--mute);
+  margin-bottom: 6px;
+}
+.po-premium .po-kpi .val {
+  font-size: 21px;
+  font-weight: 500;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.005em;
+}
+.po-premium .po-kpi .sub {
+  font-size: 12px;
+  color: var(--mute);
+  margin-top: 4px;
+  line-height: 1.5;
+}
+.po-premium .po-kpi .val .pos {
+  color: var(--green-deep);
+}
+
+/* Hazard alert card (DELAY) */
+.po-premium .po-kpi.alert {
+  position: relative;
+  overflow: hidden;
+  background: #fff;
+  border: 1.5px solid var(--ink);
+  padding-top: 22px;
+}
+.po-premium .po-kpi.alert::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  right: 0;
+  height: 7px;
+  background: var(--hazard-stripe);
+}
+.po-premium .po-kpi.alert .k {
+  color: var(--ink);
+  font-weight: 700;
+}
+.po-premium .po-kpi.alert .val {
+  color: var(--ink);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.po-premium .po-kpi.alert .val .tri {
+  color: var(--ink);
+  font-size: 13px;
+}
+.po-premium .po-kpi.alert .sub {
+  color: var(--mute);
+}
+
+/* ---------------------------------------------------------------------
+   §5.7 SECTION CELL GRID  (closed-state summary)
+   --------------------------------------------------------------------- */
+.po-premium .po-cellgrid {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  background: var(--card);
+}
+.po-premium .po-cell {
+  padding: 14px 15px;
+  border-right: 1px solid var(--line);
+  min-width: 0;
+}
+.po-premium .po-cell:last-child {
+  border-right: 0;
+}
+.po-premium .po-cell.tint {
+  background: #fafafa;
+}
+.po-premium .po-ck {
+  font-size: 10.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--mute);
+}
+.po-premium .po-cv {
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--ink);
+  margin-top: 4px;
+  font-variant-numeric: tabular-nums;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.po-premium .po-cv.muted {
+  color: var(--mute);
+}
+.po-premium .po-cv .gdot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--green);
+  flex: none;
+}
+/* Responsive: 2-up under 1080px */
+@media (max-width: 1080px) {
+  .po-premium .po-cellgrid {
+    grid-auto-flow: row;
+    grid-template-columns: 1fr 1fr;
+  }
+  .po-premium .po-cell:nth-child(even) {
+    border-right: 0;
+  }
+  .po-premium .po-cell {
+    border-bottom: 1px solid var(--line);
+  }
+}
+
+/* ---------------------------------------------------------------------
+   §7.4 SECTION "attention" — hazard left rail
+   --------------------------------------------------------------------- */
+.po-premium .po-attention {
+  position: relative;
+  overflow: hidden;
+}
+.po-premium .po-attention::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 5px;
+  background: var(--hazard-stripe-sm);
+}
+
+/* "Open / Close" section control */
+.po-premium .po-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--line-2);
+  background: #fff;
+  border-radius: var(--radius);
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-soft);
+}
+.po-premium .po-toggle:hover {
+  border-color: var(--ink);
+}
+
+/* Section title */
+.po-premium .po-sec-title {
+  font-size: 15.5px;
+  font-weight: 500;
+  color: var(--ink);
+}
+
+/* ---------------------------------------------------------------------
+   §5.8 LIVE STATUS rail  +  §7.3 Factory subchip (Hazard)
+   --------------------------------------------------------------------- */
+.po-premium .po-rk {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--mute);
+}
+.po-premium .po-rv {
+  font-size: 13.5px;
+  font-weight: 500;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+.po-premium .po-subchip {
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius);
+  padding: 6px 8px;
+  background: #fff;
+}
+.po-premium .po-subchip .sk {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--mute);
+}
+.po-premium .po-subchip .sv {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink-soft);
+  font-variant-numeric: tabular-nums;
+}
+/* Hazard treatment for the Factory subchip */
+.po-premium .po-subchip.dark {
+  background: #fff;
+  border: 1.5px solid var(--ink);
+}
+.po-premium .po-subchip.dark .sk,
+.po-premium .po-subchip.dark .sv {
+  color: var(--ink);
+}
+
+/* Status dots */
+.po-premium .po-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: none;
+}
+.po-premium .po-dot--green {
+  background: var(--green);
+}
+.po-premium .po-dot--ink {
+  background: var(--ink);
+}
+.po-premium .po-dot--mute {
+  background: var(--mute-2);
+}
+
+/* ---------------------------------------------------------------------
+   §5.5 LIFECYCLE STEPPER (premium variant)
+   --------------------------------------------------------------------- */
+.po-premium .po-step-name {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.po-premium .po-step-dot {
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  box-sizing: border-box;
+}
+.po-premium .po-step-dot--done {
+  background: var(--ink);
+}
+.po-premium .po-step-dot--current {
+  background: var(--green);
+  box-shadow: 0 0 0 4px var(--green-tint);
+}
+.po-premium .po-step-dot--todo {
+  background: #fff;
+  border: 2px solid var(--mute-2);
+}
+.po-premium .po-step-conn {
+  height: 2px;
+}
+.po-premium .po-step-conn--done {
+  background: var(--ink);
+}
+.po-premium .po-step-conn--todo {
+  background: var(--line-2);
+}
+
+/* ---------------------------------------------------------------------
+   §5.4 DEV SIMULATION banner (premium)
+   --------------------------------------------------------------------- */
+.po-premium .po-devsim {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--ink);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+.po-premium .po-btn-ink {
+  background: var(--ink);
+  color: #fff;
+  border-radius: var(--radius);
+  font-weight: 600;
+}
+.po-premium .po-btn-ink:hover {
+  background: #000;
+}
+
+/* ---------------------------------------------------------------------
+   DE-RAINBOW SAFETY NET
+   Retone leftover Tailwind status utilities that appear inside expanded
+   section bodies (payment / baseline / override banners, shared badges).
+   Positive → Flash-Green family; alerts → ink/neutral (urgency stays
+   monochrome, per the charter — no red/amber/blue). Descendant selectors
+   (.po-premium .x) outrank the base utilities, so no !important — and the
+   rest of the app is untouched.
+   --------------------------------------------------------------------- */
+/* Positive (emerald → Flash Green) */
+.po-premium .text-emerald-700,
+.po-premium .text-emerald-800,
+.po-premium .text-emerald-900 {
+  color: var(--green-deep);
+}
+.po-premium .border-emerald-200,
+.po-premium .border-emerald-300 {
+  border-color: rgba(85, 255, 126, 0.45);
+}
+.po-premium .bg-emerald-50,
+.po-premium .bg-emerald-50\/40,
+.po-premium .bg-emerald-50\/50 {
+  background-color: var(--green-tint);
+}
+
+/* Alerts (amber / rose / red → ink text, neutral surfaces) */
+.po-premium .text-amber-700,
+.po-premium .text-amber-800,
+.po-premium .text-amber-900,
+.po-premium .text-rose-700,
+.po-premium .text-rose-800,
+.po-premium .text-rose-900,
+.po-premium .text-red-700,
+.po-premium .text-red-800 {
+  color: var(--ink);
+}
+.po-premium .border-amber-200,
+.po-premium .border-amber-300,
+.po-premium .border-rose-200,
+.po-premium .border-red-200 {
+  border-color: var(--line-2);
+}
+.po-premium .bg-amber-50,
+.po-premium .bg-amber-50\/40,
+.po-premium .bg-amber-50\/50,
+.po-premium .bg-amber-50\/60,
+.po-premium .bg-rose-50,
+.po-premium .bg-rose-50\/40,
+.po-premium .bg-red-50 {
+  background-color: #fafafa;
+}
+.po-premium .bg-amber-500,
+.po-premium .bg-rose-500,
+.po-premium .bg-red-500 {
+  background-color: var(--ink);
+}

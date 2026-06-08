@@ -87,6 +87,15 @@ function shippingSummary(
   }
 }
 
+/** Premium status dot: green = positive/active, ink = attention, mute = idle. */
+const DOT_PREMIUM: Record<StageTone, string> = {
+  neutral: "po-dot--mute",
+  amber: "po-dot--ink",
+  rose: "po-dot--ink",
+  emerald: "po-dot--green",
+  sky: "po-dot--green",
+};
+
 export function LiveStatusSidebar(props: LiveStatusSidebarProps) {
   const {
     initialEta,
@@ -106,10 +115,8 @@ export function LiveStatusSidebar(props: LiveStatusSidebarProps) {
 
   return (
     <aside className="sticky top-6 self-start space-y-3">
-      <div className="text-[10px] font-bold uppercase tracking-widerx text-neutral-400 px-1">
-        Live status
-      </div>
-      <div className="rounded-2xl border border-neutral-200 bg-white shadow-sm overflow-hidden">
+      <div className="eyebrow px-1">Live status</div>
+      <div className="panel overflow-hidden">
         {/* ETA cluster */}
         <div className="p-4 space-y-3">
           <DateRow label="Initial ETA" value={fmt(initialEta)} />
@@ -130,25 +137,18 @@ export function LiveStatusSidebar(props: LiveStatusSidebarProps) {
             <DateRow
               label="Actual completion"
               value={fmt(actualCompletion)}
-              tone="emerald"
+              pos
             />
           )}
         </div>
 
         {/* Delay breakdown */}
-        <div className="px-4 py-3 border-t border-neutral-100 space-y-2">
+        <div className="px-4 py-3 border-t border-[color:var(--line)] space-y-2">
           <div className="flex items-baseline justify-between">
-            <span className="text-[11px] uppercase tracking-widerx text-neutral-500 font-semibold">
-              Total delay
-            </span>
+            <span className="po-rk uppercase tracking-[0.07em]">Total delay</span>
             <span
-              className={`text-base font-semibold tabular-nums ${
-                totalDelay > 0
-                  ? "text-rose-700"
-                  : totalDelay < 0
-                  ? "text-emerald-700"
-                  : "text-neutral-500"
-              }`}
+              className="po-rv"
+              style={{ fontSize: "16px" }}
               title={
                 latestDelayType
                   ? `Latest event: ${DELAY_TYPE_LABEL[latestDelayType]}`
@@ -164,27 +164,19 @@ export function LiveStatusSidebar(props: LiveStatusSidebarProps) {
           </div>
           {(factoryDelayDays !== 0 || externalDelayDays !== 0) && (
             <div className="grid grid-cols-2 gap-2 pt-1">
-              <SplitChip
+              <SubChip
                 label="Factory"
                 days={factoryDelayDays}
-                tone="rose"
+                hazard={factoryDelayDays > 0}
               />
-              <SplitChip
-                label="External"
-                days={externalDelayDays}
-                tone="amber"
-              />
+              <SubChip label="External" days={externalDelayDays} />
             </div>
           )}
         </div>
 
         {/* Operational state */}
-        <div className="px-4 py-3 border-t border-neutral-100 space-y-2.5">
-          <StateRow
-            label="Payment"
-            value={payment.label}
-            tone={payment.tone}
-          />
+        <div className="px-4 py-3 border-t border-[color:var(--line)] space-y-2.5">
+          <StateRow label="Payment" value={payment.label} tone={payment.tone} />
           <StateRow
             label="Shipping"
             value={shippingState.label}
@@ -205,63 +197,48 @@ function DateRow({
   label,
   value,
   sub,
-  tone,
+  pos,
 }: {
   label: string;
   value: string;
   sub?: string | null;
-  tone?: "emerald";
+  pos?: boolean;
 }) {
   return (
     <div className="flex items-baseline justify-between gap-3">
-      <span className="text-[11px] uppercase tracking-widerx text-neutral-500 font-semibold">
-        {label}
-      </span>
+      <span className="po-rk uppercase tracking-[0.07em]">{label}</span>
       <div className="text-right">
         <div
-          className={`text-sm font-semibold tabular-nums ${
-            tone === "emerald" ? "text-emerald-700" : "text-neutral-900"
-          }`}
+          className="po-rv"
+          style={pos ? { color: "var(--green-deep)" } : undefined}
         >
           {value}
         </div>
         {sub && (
-          <div className="text-[10px] text-neutral-500 tabular-nums">{sub}</div>
+          <div className="text-[10px] text-[color:var(--mute)] tabular-nums">
+            {sub}
+          </div>
         )}
       </div>
     </div>
   );
 }
 
-function SplitChip({
+/** Factory / External split chip. Factory with a slip → Hazard treatment. */
+function SubChip({
   label,
   days,
-  tone,
+  hazard = false,
 }: {
   label: string;
   days: number;
-  tone: "rose" | "amber";
+  hazard?: boolean;
 }) {
-  const bg =
-    tone === "rose"
-      ? "bg-rose-50 text-rose-800 border-rose-200"
-      : "bg-amber-50 text-amber-800 border-amber-200";
-  const muted = days === 0;
   return (
-    <div
-      className={`rounded-md border px-2 py-1 ${
-        muted ? "bg-neutral-50 text-neutral-400 border-neutral-200" : bg
-      }`}
-    >
-      <div className="text-[10px] uppercase tracking-widerx font-semibold">
-        {label}
-      </div>
-      <div className="text-sm font-semibold tabular-nums">
-        {days === 0
-          ? "0d"
-          : days > 0
-          ? `+${days}d`
-          : `${days}d`}
+    <div className={`po-subchip ${hazard ? "dark" : ""}`}>
+      <div className="sk">{label}</div>
+      <div className="sv">
+        {days === 0 ? "0d" : days > 0 ? `+${days}d` : `${days}d`}
       </div>
     </div>
   );
@@ -278,15 +255,10 @@ function StateRow({
 }) {
   return (
     <div className="flex items-center justify-between gap-3">
-      <span className="text-[11px] uppercase tracking-widerx text-neutral-500 font-semibold">
-        {label}
-      </span>
+      <span className="po-rk uppercase tracking-[0.07em]">{label}</span>
       <div className="flex items-center gap-2 min-w-0">
-        <span
-          className={`h-2 w-2 rounded-full shrink-0 ${DOT[tone]}`}
-          aria-hidden
-        />
-        <span className="text-xs font-medium text-neutral-800 truncate">
+        <span className={`po-dot ${DOT_PREMIUM[tone]}`} aria-hidden />
+        <span className="text-xs font-medium text-[color:var(--ink)] truncate">
           {value}
         </span>
       </div>

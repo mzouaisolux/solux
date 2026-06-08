@@ -1,3 +1,4 @@
+import "./premium.css";
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { notFound } from "next/navigation";
@@ -7,6 +8,7 @@ import {
   SummaryStat,
   SummaryRow,
 } from "@/components/production/CollapsibleSection";
+import { PremiumPill } from "@/components/production/premium-ui";
 import { getEffectiveRole } from "@/lib/auth";
 import { resolveUserLabelStrings } from "@/lib/user-display";
 import { ATTACHMENTS_BUCKET } from "@/lib/attachments";
@@ -26,6 +28,7 @@ import WorkflowStepper, {
 import {
   PRODUCTION_ORDER_STATUSES,
   PRODUCTION_ORDER_STATUS_LABEL,
+  PRODUCTION_PAYMENT_STATE_LABEL,
   computeExpectedBalance,
   computeExpectedDeposit,
   computeProductionDelay,
@@ -557,22 +560,20 @@ export default async function ProductionOrderDetailPage({
   ];
 
   return (
-    <div className="mx-auto max-w-screen-2xl px-6 py-8 space-y-6">
+    <div className="po-premium mx-auto max-w-[1320px] px-8 py-8 space-y-5">
       {/* ---------- TABS (m099) ---------- */}
-      <div className="flex gap-1 border-b border-neutral-200">
+      <div className="po-tabbar">
         {ORDER_TABS.map((t) => (
           <Link
             key={t.key}
             href={`/production/orders/${params.id}${t.key === "documents" ? "?tab=documents" : ""}`}
             scroll={false}
-            className={`-mb-px border-b-2 px-3 py-2 text-sm ${
-              activeTab === t.key
-                ? "border-solux font-medium text-solux-dark"
-                : "border-transparent text-neutral-500 hover:text-neutral-800"
-            }`}
+            className={`po-tab ${activeTab === t.key ? "active" : ""}`}
           >
             {t.label}
-            {t.key === "documents" && docCount > 0 ? ` (${docCount})` : ""}
+            {t.key === "documents" && docCount > 0 ? (
+              <span className="po-tab-count">{docCount}</span>
+            ) : null}
           </Link>
         ))}
       </div>
@@ -591,19 +592,33 @@ export default async function ProductionOrderDetailPage({
         <div className="min-w-0">
           <div className="flex items-center gap-3 flex-wrap">
             <div className="eyebrow">Production order</div>
-            <ProductionOrderStatusBadge
-              status={status}
-              archived={!!(order as any).archived_at}
-            />
+            <PremiumPill variant={poStatusPillVariant(status)}>
+              {PRODUCTION_ORDER_STATUS_LABEL[status]}
+              {(order as any).archived_at ? " · archived" : ""}
+            </PremiumPill>
             {(order as any).deposit_override_at && (
-              <DepositOverrideBadge
-                activatedAt={(order as any).deposit_override_at}
-                reason={(order as any).deposit_override_reason}
-              />
+              <PremiumPill
+                variant="line"
+                title={(order as any).deposit_override_reason ?? undefined}
+              >
+                Started w/o deposit
+              </PremiumPill>
             )}
-            <DelayBadge delayDays={delay} />
+            {delay != null && delay > 0 && (
+              <PremiumPill
+                variant="ink"
+                title={`Original deadline pushed back by ${delay} day${
+                  delay === 1 ? "" : "s"
+                }`}
+              >
+                ▲ +{delay} day{delay === 1 ? "" : "s"}
+              </PremiumPill>
+            )}
+            {delay === 0 && <PremiumPill variant="pos">On time</PremiumPill>}
             {operationsAlert.level !== "ok" && (
-              <OperationsAlertBadge alert={operationsAlert} />
+              <PremiumPill variant="ink" title={operationsAlert.message}>
+                {operationsAlert.label}
+              </PremiumPill>
             )}
           </div>
           {/* Lead with the PROJECT name so the page is instantly
@@ -611,54 +626,51 @@ export default async function ProductionOrderDetailPage({
               right under it. */}
           {affairName ? (
             <>
-              <h1 className="doc-title mt-1 leading-tight">{affairName}</h1>
-              <div className="font-mono text-sm text-neutral-500 mt-0.5">
+              <h1 className="po-order-id mt-2">{affairName}</h1>
+              <div className="font-mono text-sm text-neutral-500 mt-1">
                 {order.number ?? "—"}
               </div>
             </>
           ) : (
-            <h1 className="doc-title mt-1 font-mono">{order.number ?? "—"}</h1>
+            <h1 className="po-order-id mt-2 font-mono">{order.number ?? "—"}</h1>
           )}
           {/* Customer · Sales · linked docs — everything needed to identify
               the deal without opening another page. */}
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-neutral-500 mt-2">
-            <span>
-              <span className="text-neutral-400">Client:</span>{" "}
+          <div className="po-metarow mt-4">
+            <div>
+              <div className="po-k">Client</div>
               <Link
                 href={`/clients/${order.client_id}`}
-                className="text-neutral-700 hover:underline font-medium"
+                className="po-v hover:underline"
               >
                 {(order.clients as any)?.company_name ?? "—"}
                 {(order.clients as any)?.client_code
                   ? ` (${(order.clients as any).client_code})`
                   : ""}
               </Link>
-            </span>
-            <span className="text-neutral-300">·</span>
-            <span>
-              <span className="text-neutral-400">Sales:</span>{" "}
-              <b className="text-neutral-700 font-medium">{salesLabel}</b>
-            </span>
-            <span className="text-neutral-300">·</span>
-            <span>
-              <span className="text-neutral-400">Quotation:</span>{" "}
+            </div>
+            <div>
+              <div className="po-k">Sales</div>
+              <div className="po-v">{salesLabel}</div>
+            </div>
+            <div>
+              <div className="po-k">Quotation</div>
               <Link
                 href={`/documents/${order.quotation_id}`}
-                className="font-mono text-neutral-700 hover:underline"
+                className="po-v num hover:underline"
               >
                 {(order.documents as any)?.number ?? "—"}
               </Link>
-            </span>
-            <span className="text-neutral-300">·</span>
-            <span>
-              <span className="text-neutral-400">Task list:</span>{" "}
+            </div>
+            <div>
+              <div className="po-k">Task list</div>
               <Link
                 href={`/task-lists/${order.task_list_id}`}
-                className="font-mono text-neutral-700 hover:underline"
+                className="po-v num hover:underline"
               >
                 {(order.task_lists as any)?.number ?? "—"}
               </Link>
-            </span>
+            </div>
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -673,7 +685,7 @@ export default async function ProductionOrderDetailPage({
           and offering a Reset View-As button for super-admins stuck on
           a simulated role. Always renders something — green for
           technical users (reassurance), amber/neutral otherwise. */}
-      <RoleContextBanner />
+      <RoleContextBanner premium />
 
       {/* ---------- CANCELLATION BANNER (terminal states only) ---------- */}
       {status === "cancelled" && (
@@ -705,7 +717,7 @@ export default async function ProductionOrderDetailPage({
             </p>
           </div>
         </div>
-        <WorkflowStepper stages={lifecycle} />
+        <WorkflowStepper stages={lifecycle} premium />
       </section>
 
       {/* ---------- TOP OPERATIONAL STRIP (m072) ----------
@@ -721,7 +733,7 @@ export default async function ProductionOrderDetailPage({
           Single source of truth — both surfaces consume `liveStatus`. The
           sidebar hides on narrow screens; the top strip stays as the
           fallback KPI view. */}
-      <div className="lg:grid lg:grid-cols-[minmax(0,1fr)_300px] lg:gap-6">
+      <div className="lg:grid lg:grid-cols-[minmax(0,1fr)_320px] lg:gap-[22px]">
         <div className="space-y-6 min-w-0">
 
       {/* ---------- PRODUCTION (status workflow + baseline) ---------- */}
@@ -730,10 +742,9 @@ export default async function ProductionOrderDetailPage({
         attention={status === "production_delayed"}
         attentionLabel="Delayed"
         badge={
-          <ProductionOrderStatusBadge
-            status={status}
-            archived={!!(order as any).archived_at}
-          />
+          <PremiumPill variant={poStatusPillVariant(status)}>
+            {PRODUCTION_ORDER_STATUS_LABEL[status]}
+          </PremiumPill>
         }
         summary={
           <SummaryRow>
@@ -1066,7 +1077,19 @@ export default async function ProductionOrderDetailPage({
         title="Delay & timeline"
         attention={delayBreakdown.factoryDays + delayBreakdown.externalDays > 0}
         attentionLabel="Behind schedule"
-        badge={<DelayBadge delayDays={delay} />}
+        badge={
+          delay == null ? (
+            <PremiumPill variant="line" dot={false}>
+              —
+            </PremiumPill>
+          ) : delay > 0 ? (
+            <PremiumPill variant="ink">
+              ▲ +{delay} day{delay === 1 ? "" : "s"}
+            </PremiumPill>
+          ) : (
+            <PremiumPill variant="pos">On time</PremiumPill>
+          )
+        }
         summary={
           <SummaryRow>
             <SummaryStat
@@ -1156,7 +1179,21 @@ export default async function ProductionOrderDetailPage({
         title="Payment"
         attention={!productionCanStart && !(order as any).deposit_override_at}
         attentionLabel="Deposit due"
-        badge={<PaymentStatusBadge state={paymentState} />}
+        badge={
+          <PremiumPill
+            variant={
+              paymentState === "awaiting_deposit"
+                ? "ink"
+                : paymentState === "paid_in_full" ||
+                  paymentState === "no_deposit_required" ||
+                  paymentState === "deposit_received"
+                ? "pos"
+                : "line"
+            }
+          >
+            {PRODUCTION_PAYMENT_STATE_LABEL[paymentState]}
+          </PremiumPill>
+        }
         summary={
           <SummaryRow>
             <SummaryStat
@@ -1470,20 +1507,11 @@ export default async function ProductionOrderDetailPage({
         attention={status === "production_completed" && !order.shipment_booked}
         attentionLabel="Book shipment"
         badge={
-          <span
-            className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[11px] font-medium ${
-              order.shipment_booked
-                ? "border-violet-300 bg-violet-50 text-violet-800"
-                : "border-neutral-200 bg-neutral-50 text-neutral-500"
-            }`}
-          >
-            <span
-              className={`h-1.5 w-1.5 rounded-full ${
-                order.shipment_booked ? "bg-violet-500" : "bg-neutral-300"
-              }`}
-            />
-            {order.shipment_booked ? "Booked" : "Not booked"}
-          </span>
+          order.shipment_booked ? (
+            <PremiumPill variant="pos">Booked</PremiumPill>
+          ) : (
+            <PremiumPill variant="line">Not booked</PremiumPill>
+          )
         }
         summary={
           <SummaryRow>
@@ -1773,6 +1801,26 @@ export default async function ProductionOrderDetailPage({
       )}
     </div>
   );
+}
+
+/**
+ * Map a production-order status to a disciplined premium pill variant
+ * (brief §6): ink = needs attention, line = terminal/neutral, pos =
+ * active/progressing/done. Purely presentational — the status value and
+ * its label are unchanged.
+ */
+function poStatusPillVariant(
+  status: ProductionOrderStatus
+): "pos" | "ink" | "line" {
+  switch (status) {
+    case "production_delayed":
+    case "awaiting_deposit":
+      return "ink";
+    case "cancelled":
+      return "line";
+    default:
+      return "pos";
+  }
 }
 
 function DeadlineCell({
