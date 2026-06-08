@@ -116,7 +116,7 @@ export default function ViewAsSwitcher({
         className={`inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-[11px] font-medium transition-colors ${
           isSimulating
             ? "border-amber-300 bg-amber-50 text-amber-900 hover:bg-amber-100"
-            : "border-neutral-300 bg-white text-neutral-700 hover:bg-neutral-50"
+            : "border-[#34341f] bg-[rgba(85,255,126,0.08)] text-[#E9F7ED] hover:bg-[rgba(85,255,126,0.14)]"
         }`}
         title="Preview the UI as another role — does not affect backend permissions."
       >

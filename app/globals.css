@@ -2,6 +2,25 @@
 @tailwind components;
 @tailwind utilities;
 
+/* =====================================================================
+   SOLUX design tokens — exposed globally so the top command bar (and the
+   Production Order premium scope) can reference them everywhere. Additive:
+   nothing else in the app references these names, so the rest is untouched.
+   ===================================================================== */
+:root {
+  --ink: #0f0f0f;
+  --ink-soft: #2a2a2c;
+  --mute: #67646f;
+  --mute-2: #aeaaba;
+  --on-dark: #eceaf2;
+  --line: #e7e7ea;
+  --line-2: #dcdde1;
+  --canvas: #eeeef0;
+  --green: #55ff7e;
+  --green-tint: rgba(85, 255, 126, 0.14);
+  --green-deep: #0b7a39;
+}
+
 html,
 body {
   height: 100%;
@@ -9,6 +28,13 @@ body {
 
 body {
   @apply bg-neutral-50 text-neutral-900 antialiased;
+  /* Brand liseré — 2px Flash Green at the very top of every page. */
+  border-top: 2px solid var(--green);
+}
+
+/* Top command bar uses Plus Jakarta Sans (loaded in app/layout.tsx). */
+.solux-navbar {
+  font-family: var(--font-jakarta), system-ui, sans-serif;
 }
 
 * {

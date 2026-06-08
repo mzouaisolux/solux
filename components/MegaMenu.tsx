@@ -35,7 +35,7 @@ export default function MegaMenu({
     if (n <= 0) return null;
     return (
       <span
-        className="ml-1 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-rose-500 px-1 text-[10px] font-semibold leading-none text-white"
+        className="ml-1.5 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-[var(--green)] px-1.5 text-[10px] font-semibold leading-none text-[var(--ink)]"
         aria-label={`${n} item${n === 1 ? "" : "s"} need action`}
       >
         {n > 99 ? "99+" : n}
@@ -73,7 +73,7 @@ export default function MegaMenu({
   };
 
   return (
-    <nav ref={rootRef} className="flex items-center gap-1">
+    <nav ref={rootRef} className="flex items-center gap-5">
       {categories.map((cat) => {
         const hasPanel = cat.groups.length > 0;
         const active = isActiveCategory(cat);
@@ -84,10 +84,10 @@ export default function MegaMenu({
             <Link
               key={cat.id}
               href={cat.href}
-              className={`rounded-md px-3 py-1.5 text-[13px] font-medium transition-colors ${
+              className={`relative inline-flex items-center px-0.5 py-1.5 text-[13.5px] font-medium transition-colors ${
                 active
-                  ? "text-neutral-900 bg-neutral-100"
-                  : "text-neutral-600 hover:text-neutral-900 hover:bg-neutral-50"
+                  ? "text-white after:absolute after:left-0 after:right-0 after:-bottom-px after:h-0.5 after:bg-[var(--green)]"
+                  : "text-[#DFDEE4] hover:text-white"
               }`}
             >
               {cat.label}
@@ -114,10 +114,10 @@ export default function MegaMenu({
               aria-expanded={open}
               aria-haspopup="true"
               onClick={() => setOpenId((cur) => (cur === cat.id ? null : cat.id))}
-              className={`flex items-center gap-1 rounded-md px-3 py-1.5 text-[13px] font-medium transition-colors ${
+              className={`relative flex items-center gap-1.5 px-0.5 py-1.5 text-[13.5px] font-medium transition-colors ${
                 active || open
-                  ? "text-neutral-900 bg-neutral-100"
-                  : "text-neutral-600 hover:text-neutral-900 hover:bg-neutral-50"
+                  ? "text-white after:absolute after:left-0 after:right-0 after:-bottom-px after:h-0.5 after:bg-[var(--green)]"
+                  : "text-[#DFDEE4] hover:text-white"
               }`}
             >
               {cat.label}
@@ -126,7 +126,7 @@ export default function MegaMenu({
                 viewBox="0 0 20 20"
                 fill="currentColor"
                 aria-hidden
-                className={`h-3.5 w-3.5 text-neutral-400 transition-transform duration-200 ${
+                className={`h-3 w-3 text-[#B9B6C4] transition-transform duration-200 ${
                   open ? "rotate-180" : ""
                 }`}
               >

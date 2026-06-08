@@ -1,5 +1,4 @@
 import Link from "next/link";
-import Image from "next/image";
 import { logout } from "@/app/login/actions";
 import {
   ROLE_LABEL,
@@ -98,7 +97,7 @@ export async function Nav({
   }
 
   return (
-    <header className="border-b border-neutral-200 bg-white sticky top-0 z-40">
+    <header className="solux-navbar border-b border-[#232325] bg-[var(--ink)] text-white sticky top-0 z-40">
       {/* Optional simulation banner — only visible while a super-admin is
           actively viewing as a non-super role. Keeps the dev mode obvious. */}
       {isSimulating && role && (
@@ -113,28 +112,28 @@ export async function Nav({
         </div>
       )}
 
-      <div className="mx-auto max-w-screen-2xl px-6 h-16 flex items-center gap-8">
+      <div className="mx-auto max-w-[1320px] px-7 h-[62px] flex items-center gap-[22px]">
         <Link
           href="/dashboard"
-          className="flex items-center"
+          className="flex flex-col leading-none gap-1 mr-1.5 shrink-0"
           aria-label="SOLUX"
         >
-          <Image
-            src="/solux-logo.png"
-            alt="SOLUX"
-            width={120}
-            height={36}
-            priority
-            className="h-8 w-auto"
-          />
+          <span className="text-[19px] font-semibold tracking-[0.34em] pl-[0.34em] text-white">
+            SOLUX
+          </span>
+          <span className="text-[8px] tracking-[0.34em] pl-[0.34em] uppercase text-[#B9B6C4]">
+            solar lighting
+          </span>
         </Link>
         {/* Top mega menu — permission-filtered server-side, rendered by the
             client component for hover/click panels. Defined centrally in
             lib/navigation.ts (label · route · capability · group · category). */}
         <MegaMenu categories={menu} badges={badges} itemBadges={itemBadges} />
-        <div className="ml-auto flex items-center gap-3 text-[13px]">
+        <div className="ml-auto flex items-center gap-[13px] text-[13px]">
           {email && (
-            <span className="text-neutral-500 hidden md:inline">{email}</span>
+            <span className="text-[#C3C0CD] text-[11.5px] hidden xl:inline">
+              {email}
+            </span>
           )}
 
           {/* Notification bell — unread operational comments across
@@ -167,7 +166,7 @@ export async function Nav({
           )}
 
           <form action={logout}>
-            <button className="rounded border border-neutral-200 px-3 py-1.5 text-[13px] text-neutral-700 hover:bg-neutral-50 transition-colors">
+            <button className="rounded-md border border-[#2C2C2F] px-3 py-1.5 text-[12.5px] text-[#DFDEE4] hover:text-white hover:border-[#444] transition-colors">
               Sign out
             </button>
           </form>
@@ -189,7 +188,7 @@ function RoleBadge({
   if (effective === "super_admin") {
     return (
       <span
-        className="rounded bg-violet-700 px-2 py-0.5 text-[10px] font-bold uppercase tracking-widerx text-white"
+        className="rounded-md border border-[rgba(85,255,126,.45)] bg-[var(--green-tint)] px-2 py-1 text-[10px] font-bold uppercase tracking-[0.12em] text-white"
         title={`Real role: ${ROLE_LABEL[realRole ?? "admin"]}`}
       >
         Super
@@ -198,7 +197,7 @@ function RoleBadge({
   }
   if (effective === "admin") {
     return (
-      <span className="rounded bg-neutral-900 px-2 py-0.5 text-[10px] font-bold uppercase tracking-widerx text-white">
+      <span className="rounded-md bg-white px-2 py-1 text-[10px] font-bold uppercase tracking-[0.12em] text-[var(--ink)]">
         Admin
       </span>
     );
