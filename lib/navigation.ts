@@ -88,10 +88,14 @@ export const NAVIGATION: NavCategory[] = [
     groups: [],
   },
 
-  // 2) Clients & Business
+  // 2) Clients & Projects — clients, the commercial overview, and the
+  //    custom-project / tender lifecycle, grouped together because a project
+  //    is always tied to a client (Client → Project → Pricing → Quotation →
+  //    Order). Merged from the former "Clients & Business" + "Projects".
+  //    Every item keeps the SAME visibility its route already enforces.
   {
-    id: "clients-business",
-    label: "Clients & Business",
+    id: "clients-projects",
+    label: "Clients & Projects",
     groups: [
       {
         title: "Clients",
@@ -108,7 +112,7 @@ export const NAVIGATION: NavCategory[] = [
         ],
       },
       {
-        title: "Sales",
+        title: "Business",
         items: [
           {
             label: "Business overview",
@@ -123,18 +127,10 @@ export const NAVIGATION: NavCategory[] = [
           { label: "Forecast", href: "/forecast", visibility: { kind: "always" } },
         ],
       },
-    ],
-  },
-
-  // 3) Projects — custom-project / tender lifecycle (m090/m091). The list is
-  //    `always`-visible (RLS scopes rows); the work-queue views mirror their
-  //    page guards: approvals→project.approve, cost→project.view_cost,
-  //    logistics→project.enter_logistics.
-  {
-    id: "projects",
-    label: "Projects",
-    groups: [
       {
+        // Custom-project / tender lifecycle (m090/m091). The list is
+        // `always`-visible (RLS scopes rows); the work-queue views mirror
+        // their page guards.
         title: "Projects",
         items: [
           {
@@ -212,10 +208,14 @@ export const NAVIGATION: NavCategory[] = [
     ],
   },
 
-  // 4) Operations — direct link (production orders / follow-up all live here).
+  // 4) Orders — order tracking (production / shipping / delivery follow-up).
+  //    Renamed from "Operations": the module shows orders, deposits, balances,
+  //    production status, ETA, shipping & delivery — business language is
+  //    "Orders", not "Operations". The route stays /operations (no broken
+  //    links); only the label + id change. Filtering lives inside the page.
   {
-    id: "operations",
-    label: "Operations",
+    id: "orders",
+    label: "Orders",
     href: "/operations",
     visibility: { kind: "always" },
     groups: [],

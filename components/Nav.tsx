@@ -14,6 +14,7 @@ import { navCapabilities, buildVisibleNavigation } from "@/lib/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { getProjectActions } from "@/lib/project-queue";
 import { projectActionTotal } from "@/lib/project-dashboard";
+import { getOrdersBadgeCount, getTaskListsBadgeCount } from "@/lib/nav-badges";
 import MegaMenu from "@/components/MegaMenu";
 import { NotificationBell } from "@/components/NotificationBell";
 import { getNotificationSummary } from "@/lib/notifications";
@@ -71,10 +72,21 @@ export async function Nav({
   const notifications = await getNotificationSummary(userId, role);
 
   // Menu action badges — count of items needing the current user's action.
-  // Projects is wired (lightweight, RLS-scoped); the mechanism is reusable for
-  // other categories once their cheap "requires action" source is defined.
-  const projectActions = await getProjectActions(createClient(), userId);
-  const badges: Record<string, number> = { projects: projectActionTotal(projectActions) };
+  // All lightweight + RLS-scoped + soft-failing, so the nav never crashes.
+  //   - Clients & Projects → pending project approvals / ready-for-pricing / etc.
+  //   - Orders             → delayed / behind-schedule production orders.
+  //   - Task Lists         → lists under validation / needing revision.
+  const supabase = createClient();
+  const [projectActions, ordersCount, taskListsCount] = await Promise.all([
+    getProjectActions(supabase, userId),
+    getOrdersBadgeCount(supabase),
+    getTaskListsBadgeCount(supabase),
+  ]);
+  const badges: Record<string, number> = {
+    "clients-projects": projectActionTotal(projectActions),
+    orders: ordersCount,
+    "task-lists": taskListsCount,
+  };
   // Per-item counts (right-aligned in the dropdown) for the dedicated work-queue
   // pages. Keyed by item href; the price/quote/draft actions target the filtered
   // /projects list (no dedicated item) so they only feed the category total.

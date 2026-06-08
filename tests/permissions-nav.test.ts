@@ -88,10 +88,9 @@ test("super-admin (all caps, admin-like) sees every category", () => {
   const cats = buildVisibleNavigation(asSuperAdmin);
   assert.deepEqual(categoryIds(cats), [
     "dashboard",
-    "clients-business",
-    "projects",
+    "clients-projects",
     "task-lists",
-    "operations",
+    "orders",
     "pricing",
     "admin",
   ]);
@@ -104,9 +103,9 @@ test("sales with no caps: Pricing and Admin categories are hidden (empty)", () =
   assert.ok(!ids.includes("pricing"), "Pricing must hide for non-admin/non-finance");
   // Always-visible categories remain.
   assert.ok(ids.includes("dashboard"));
-  assert.ok(ids.includes("clients-business"));
+  assert.ok(ids.includes("clients-projects"));
   assert.ok(ids.includes("task-lists"));
-  assert.ok(ids.includes("operations"));
+  assert.ok(ids.includes("orders"));
 });
 
 test("sales: Task Lists shows, but the Factory configuration group is pruned", () => {
