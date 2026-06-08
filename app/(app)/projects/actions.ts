@@ -22,6 +22,7 @@ import { requireCapability } from "@/lib/permissions";
 import { emitEvent } from "@/lib/events";
 import { loadPricingSettings } from "@/lib/pricing-settings";
 import { computeSectionPrice, buildCommercialDescription, computeFreightTotal, buildShippingContainers } from "@/lib/project-pricing";
+import { validityFromPeriod } from "@/lib/freight-validity";
 import { computeWaitingStatus } from "@/lib/project-dashboard";
 import { saveDocument, type SaveDocumentInput } from "@/app/(app)/documents/new/actions";
 import type { DocumentLine, DocumentContainer, Incoterm } from "@/lib/types";
@@ -491,37 +492,175 @@ export async function enterFreight(formData: FormData): Promise<void> {
   } catch {
     containers = [];
   }
+  const newTotal = computeFreightTotal(containers);
+
+  // Validity (m098): explicit date wins, else a period (days) from today.
+  const todayISO = now().slice(0, 10);
+  let validUntil: string | null = (str(formData, "valid_until") || "").trim() || null;
+  const validityDays = Number(str(formData, "validity_days") ?? "");
+  if (!validUntil && Number.isFinite(validityDays) && validityDays > 0) {
+    validUntil = validityFromPeriod(todayISO, validityDays);
+  }
+
+  // Read the existing freight row (update detection + audit). Resilient ordering
+  // like loadFreight — prefer the row that already carries a breakdown.
+  const { data: freightRows } = await supabase
+    .from("freight_cost_requests")
+    .select("id, status, containers, estimated_total_freight, valid_until, update_count")
+    .eq("project_request_id", projectId)
+    .order("created_at", { ascending: true });
+  const existingRow: any =
+    (freightRows ?? []).find((x: any) => Array.isArray(x?.containers) && x.containers.length) ??
+    (freightRows ?? [])[0] ??
+    null;
+  // A REFRESH = the freight was already completed before (re-entry after the
+  // quotation). First-time entry (pending → completed) is the normal workflow.
+  const isRefresh = existingRow?.status === "completed";
+
   const patch = {
     transport_mode: str(formData, "transport_mode"),
     incoterm: str(formData, "incoterm"),
     port_of_destination: str(formData, "port_of_destination"),
     destination_country: str(formData, "destination_country"),
     containers,
-    estimated_total_freight: computeFreightTotal(containers),
+    estimated_total_freight: newTotal,
     notes: str(formData, "notes"),
+    valid_until: validUntil,
+    update_requested_at: null, // entering freight clears any pending refresh request
+    update_requested_by: null,
+    update_count: isRefresh ? Number(existingRow.update_count ?? 0) + 1 : Number(existingRow?.update_count ?? 0),
     status: "completed" as const,
     completed_by: user?.id ?? null,
     completed_at: now(),
   };
-  const { data: existing } = await supabase
-    .from("freight_cost_requests")
-    .select("id")
-    .eq("project_request_id", projectId)
-    .limit(1)
-    .maybeSingle();
-  const { error } = existing?.id
-    ? await supabase.from("freight_cost_requests").update(patch).eq("id", existing.id)
+  const { error } = existingRow?.id
+    ? await supabase.from("freight_cost_requests").update(patch).eq("id", existingRow.id)
     : await supabase.from("freight_cost_requests").insert({ project_request_id: projectId, ...patch });
   if (error) throw new Error(error.message);
 
+  if (isRefresh) {
+    // Append-only audit (old vs new breakdown + validity).
+    await supabase.from("freight_cost_audit").insert({
+      project_request_id: projectId,
+      freight_cost_request_id: existingRow.id,
+      old_containers: existingRow.containers ?? [],
+      new_containers: containers,
+      old_total: existingRow.estimated_total_freight ?? null,
+      new_total: newTotal,
+      old_valid_until: existingRow.valid_until ?? null,
+      new_valid_until: validUntil,
+      note: str(formData, "notes") || null,
+      changed_by: user?.id ?? null,
+    });
+    // Auto-refresh ONLY the linked quotation's freight — product lines and
+    // pricing are untouched; no project request, no director. (m098)
+    await refreshQuotationFreight(supabase, projectId, containers);
+    await emitEvent({
+      entity_type: "project_request",
+      entity_id: projectId,
+      event_type: "pr.freight_updated",
+      message: `Freight updated${validUntil ? ` — valid until ${validUntil}` : ""}`,
+      bestEffort: true,
+    });
+  } else {
+    await emitEvent({
+      entity_type: "project_request",
+      entity_id: projectId,
+      event_type: "pr.freight_entered",
+      message: "Freight cost entered",
+      bestEffort: true,
+    });
+  }
+  await recomputeWaitingStatus(supabase, projectId);
+  revalidate(projectId);
+}
+
+/**
+ * After Operations updates freight (m098), refresh ONLY the linked quotation's
+ * Shipping (containers + freight_cost). Product lines stay intact — no
+ * re-pricing, no director. Draft quotations only. Best-effort (never blocks the
+ * freight update). Resilient to a missing wooden_box_cost column (m007).
+ */
+async function refreshQuotationFreight(
+  supabase: ReturnType<typeof createClient>,
+  projectId: string,
+  freightContainers: Array<{ type: string; quantity: number; freight_per_unit: number }>
+): Promise<void> {
+  try {
+    const { data: pr } = await supabase
+      .from("project_requests")
+      .select("generated_document_id, quote_include_freight")
+      .eq("id", projectId)
+      .maybeSingle();
+    const docId = (pr as any)?.generated_document_id as string | undefined;
+    if (!docId || (pr as any)?.quote_include_freight === false) return;
+    const { data: doc } = await supabase.from("documents").select("id, status").eq("id", docId).maybeSingle();
+    if (!doc || (doc as any).status !== "draft") return; // never touch a sent/won quote
+
+    const { data: pkRows } = await supabase
+      .from("packing_list_requests")
+      .select("containers")
+      .eq("project_request_id", projectId)
+      .order("created_at", { ascending: true });
+    const packing: any =
+      (pkRows ?? []).find((x: any) => Array.isArray(x?.containers) && x.containers.length) ?? (pkRows ?? [])[0] ?? null;
+    const shipping = buildShippingContainers(packing?.containers, freightContainers as any) as DocumentContainer[];
+
+    await supabase.from("document_containers").delete().eq("document_id", docId);
+    if (shipping.length) {
+      const baseRows = shipping.map((c, i) => ({
+        document_id: docId,
+        container_type: c.container_type,
+        quantity: c.quantity,
+        unit_price: c.unit_price,
+        position: i,
+      }));
+      const richRows = baseRows.map((r) => ({ ...r, wooden_box_cost: 0 }));
+      const ins = await supabase.from("document_containers").insert(richRows);
+      if (ins.error && /wooden_box_cost/.test(ins.error.message ?? "")) {
+        await supabase.from("document_containers").insert(baseRows);
+      }
+    }
+    const freightTotal = shipping.reduce((s, c) => s + c.quantity * c.unit_price, 0);
+    await supabase.from("documents").update({ freight_cost: freightTotal }).eq("id", docId);
+    revalidatePath(`/documents/${docId}`);
+  } catch {
+    // best-effort
+  }
+}
+
+/**
+ * Sales requests a freight refresh on a generated quotation (m098). Flags the
+ * freight request for Operations and notifies them. Does NOT change project
+ * status / re-open the director / pricing flow — only logistics will change.
+ */
+export async function requestFreightUpdate(formData: FormData): Promise<void> {
+  await requireCapability("project.generate_quotation");
+  const projectId = reqStr(formData, "project_id");
+  const supabase = createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  const { data: freightRows } = await supabase
+    .from("freight_cost_requests")
+    .select("id, status, containers")
+    .eq("project_request_id", projectId)
+    .order("created_at", { ascending: true });
+  const row: any =
+    (freightRows ?? []).find((x: any) => Array.isArray(x?.containers) && x.containers.length) ?? (freightRows ?? [])[0] ?? null;
+  if (!row?.id) throw new Error("No freight cost request to refresh for this project.");
+  const { error } = await supabase
+    .from("freight_cost_requests")
+    .update({ update_requested_at: now(), update_requested_by: user?.id ?? null })
+    .eq("id", row.id);
+  if (error) throw new Error(error.message);
   await emitEvent({
     entity_type: "project_request",
     entity_id: projectId,
-    event_type: "pr.freight_entered",
-    message: "Freight cost entered",
+    event_type: "pr.freight_update_requested",
+    message: "Freight update requested",
     bestEffort: true,
   });
-  await recomputeWaitingStatus(supabase, projectId);
   revalidate(projectId);
 }
 

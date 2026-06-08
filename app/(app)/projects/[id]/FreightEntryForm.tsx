@@ -6,9 +6,11 @@ import { enterFreight } from "../actions";
 import { toast } from "@/components/feedback/toast-store";
 import { SubmitButton } from "@/components/feedback/ActionForm";
 import { computeFreightTotal } from "@/lib/project-pricing";
+import { validityFromPeriod } from "@/lib/freight-validity";
 import {
   TRANSPORT_MODES,
   TRANSPORT_MODE_LABEL,
+  FREIGHT_VALIDITY_PERIODS,
   type PackingContainer,
   type FreightContainer,
 } from "@/lib/types";
@@ -43,11 +45,14 @@ export default function FreightEntryForm({
     port_of_destination: string | null;
     destination_country: string | null;
     notes: string | null;
+    valid_until: string | null;
   };
   countryFallback: string | null;
   completed: boolean;
 }) {
   const router = useRouter();
+  const todayISO = new Date().toISOString().slice(0, 10);
+  const [validUntil, setValidUntil] = useState<string>(defaults.valid_until ?? "");
   // Prefill the per-unit rate from any existing freight row of the same type.
   const seededByType = new Map<string, number>();
   for (const f of freightContainers ?? []) {
@@ -148,6 +153,43 @@ export default function FreightEntryForm({
           <span className="font-semibold tabular-nums">{money(total)}</span>
         </div>
       </div>
+
+      {/* Freight validity (m098) — freight is volatile; stamp an expiry. */}
+      <div className="rounded border border-amber-200 bg-amber-50/40 p-2">
+        <div className="mb-1 text-[11px] font-medium text-neutral-600">Freight valid until</div>
+        <div className="flex flex-wrap items-center gap-2">
+          {FREIGHT_VALIDITY_PERIODS.map((d) => {
+            const date = validityFromPeriod(todayISO, d);
+            const active = validUntil === date;
+            return (
+              <button
+                type="button"
+                key={d}
+                onClick={() => setValidUntil(date)}
+                className={`rounded-full border px-2.5 py-1 text-xs ${active ? "border-amber-500 bg-amber-500 text-white" : "bg-white"}`}
+              >
+                {d} days
+              </button>
+            );
+          })}
+          <label className="flex items-center gap-1 text-xs text-neutral-600">
+            until
+            <input
+              type="date"
+              value={validUntil}
+              min={todayISO}
+              onChange={(e) => setValidUntil(e.target.value)}
+              className="rounded border px-2 py-1 text-sm"
+            />
+          </label>
+          {validUntil && (
+            <button type="button" onClick={() => setValidUntil("")} className="text-xs text-neutral-400 hover:text-neutral-700">
+              clear
+            </button>
+          )}
+        </div>
+      </div>
+      <input type="hidden" name="valid_until" value={validUntil} />
 
       <label className="block">
         <span className="text-[11px] text-neutral-500">Freight notes</span>

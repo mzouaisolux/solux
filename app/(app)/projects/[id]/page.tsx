@@ -18,6 +18,7 @@ import { ProjectFilesUploader } from "../ProjectFilesUploader";
 import ProjectPricingCard from "./ProjectPricingCard";
 import PackingEntryForm from "./PackingEntryForm";
 import FreightEntryForm from "./FreightEntryForm";
+import { FreightStatusBadge } from "@/components/projects/FreightStatusBadge";
 import { ActionForm, SubmitButton } from "@/components/feedback/ActionForm";
 import {
   submitProjectRequest,
@@ -28,6 +29,7 @@ import {
   overrideFactoryCost,
   enterPacking,
   enterFreight,
+  requestFreightUpdate,
   generateQuotationFromProject,
   setProjectOutcome,
   setProjectClient,
@@ -113,6 +115,14 @@ export default async function ProjectDetailPage({ params }: { params: { id: stri
   // Freight is generated from the packing list — its container types/qty.
   const packingContainers: Array<{ type: string; quantity: number }> = Array.isArray(pack?.containers) ? pack.containers : [];
   const auditRows = (audits ?? []) as any[];
+  // Freight validity + update audit (m098).
+  const today = new Date().toISOString().slice(0, 10);
+  const { data: freightAudits } = await supabase
+    .from("freight_cost_audit")
+    .select("*")
+    .eq("project_request_id", params.id)
+    .order("changed_at", { ascending: false });
+  const freightAuditRows = (freightAudits ?? []) as any[];
   const fileRows = (files ?? []) as any[];
 
   const signed = new Map<string, string>();
@@ -545,10 +555,30 @@ export default async function ProjectDetailPage({ params }: { params: { id: stri
 
             {p.req_freight && (
               <section className="rounded-lg border border-neutral-200 bg-white p-4 space-y-3">
-                <div className="flex items-center justify-between">
+                <div className="flex flex-wrap items-center justify-between gap-2">
                   <div className="eyebrow">Freight cost</div>
-                  <span className="text-[10px] uppercase text-neutral-400">{freight?.status ?? "not requested"}</span>
+                  <div className="flex items-center gap-2">
+                    {freight?.valid_until && (
+                      <FreightStatusBadge validUntil={freight.valid_until} today={today} />
+                    )}
+                    <span className="text-[10px] uppercase text-neutral-400">{freight?.status ?? "not requested"}</span>
+                  </div>
                 </div>
+                {/* Request Freight Update (m098) — Sales/owner refresh, no director. */}
+                {freight?.status === "completed" && canGenerate && (
+                  freight.update_requested_at ? (
+                    <div className="rounded border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                      ⏳ Freight update requested — waiting on Operations.
+                    </div>
+                  ) : (
+                    <ActionForm action={requestFreightUpdate} success="✓ Freight update requested" className="flex">
+                      <input type="hidden" name="project_id" value={p.id} />
+                      <SubmitButton className="btn-secondary text-xs" pendingLabel="Requesting…">
+                        ↻ Request freight update
+                      </SubmitButton>
+                    </ActionForm>
+                  )
+                )}
                 {freight?.status === "completed" && (
                   <div className="space-y-1 text-sm">
                     <div>
@@ -581,6 +611,7 @@ export default async function ProjectDetailPage({ params }: { params: { id: stri
                         port_of_destination: freight.port_of_destination ?? null,
                         destination_country: freight.destination_country ?? null,
                         notes: freight.notes ?? null,
+                        valid_until: freight.valid_until ?? null,
                       }}
                       countryFallback={p.country ?? null}
                       completed={freight.status === "completed"}
@@ -591,6 +622,30 @@ export default async function ProjectDetailPage({ params }: { params: { id: stri
                       containers {p.req_packing_list ? "in the card to the left" : "first"} — then price each container here.
                     </p>
                   )
+                )}
+
+                {/* Freight update history (m098) — append-only audit. */}
+                {freightAuditRows.length > 0 && (
+                  <div className="border-t border-neutral-100 pt-3">
+                    <div className="eyebrow mb-1.5">Freight update history</div>
+                    <ul className="space-y-1.5 text-xs">
+                      {freightAuditRows.slice(0, 6).map((a) => (
+                        <li key={a.id} className="rounded border border-neutral-100 bg-neutral-50 px-2 py-1.5">
+                          <div className="flex items-center justify-between">
+                            <span className="font-medium text-neutral-700 tabular-nums">
+                              {money(a.old_total)} → {money(a.new_total)}
+                            </span>
+                            <span className="text-neutral-400">
+                              {new Date(a.changed_at).toLocaleDateString()}
+                            </span>
+                          </div>
+                          {a.new_valid_until && (
+                            <div className="text-neutral-500">New validity: {a.new_valid_until}</div>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
                 )}
               </section>
             )}

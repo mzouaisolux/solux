@@ -18,6 +18,10 @@ import {
   buildShippingContainers,
 } from "../lib/project-pricing.ts";
 import {
+  computeFreightStatus,
+  validityFromPeriod,
+} from "../lib/freight-validity.ts";
+import {
   PROJECT_REQUEST_STATUSES,
   PROJECT_REQUEST_STATUS_LABEL,
   PROJECT_FILE_CATEGORY_LABEL,
@@ -356,4 +360,37 @@ test("buildShippingContainers — falls back to freight rows when packing is emp
   assert.deepEqual(rows, [{ container_type: "LCL", quantity: 3, unit_price: 400, wooden_box_cost: 0 }]);
   // both empty → no rows, no throw
   assert.deepEqual(buildShippingContainers(undefined, undefined), []);
+});
+
+test("computeFreightStatus (m098) — valid / expiring_soon / expired / none", () => {
+  const today = "2026-06-08";
+  // none when no validity set
+  assert.equal(computeFreightStatus(null, today).status, "none");
+  // valid — far future
+  const valid = computeFreightStatus("2026-07-15", today);
+  assert.equal(valid.status, "valid");
+  assert.equal(valid.daysRemaining, 37);
+  // expiring soon — <7 days
+  const soon = computeFreightStatus("2026-06-12", today); // 4 days
+  assert.equal(soon.status, "expiring_soon");
+  assert.equal(soon.daysRemaining, 4);
+  assert.match(soon.label, /expires in 4 days/);
+  // boundary: exactly 7 days out → still valid (threshold is < 7)
+  assert.equal(computeFreightStatus("2026-06-15", today).status, "valid");
+  // expires today → expiring_soon
+  const todayExp = computeFreightStatus(today, today);
+  assert.equal(todayExp.status, "expiring_soon");
+  assert.equal(todayExp.daysRemaining, 0);
+  assert.match(todayExp.label, /today/);
+  // expired — past
+  const exp = computeFreightStatus("2026-04-16", today); // 53 days ago
+  assert.equal(exp.status, "expired");
+  assert.equal(exp.daysExpired, 53);
+  assert.match(exp.label, /Expired 53 days ago|expired 53 days ago/i);
+});
+
+test("validityFromPeriod (m098) — today + N days", () => {
+  assert.equal(validityFromPeriod("2026-06-08", 30), "2026-07-08");
+  assert.equal(validityFromPeriod("2026-06-08", 60), "2026-08-07");
+  assert.equal(validityFromPeriod("2026-06-08", 90), "2026-09-06");
 });

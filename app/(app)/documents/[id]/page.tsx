@@ -8,6 +8,9 @@ import { Timeline } from "@/components/Timeline";
 import { ForecastPanel } from "@/components/forecast/ForecastPanel";
 import { QuotationVersionsPanel } from "@/components/documents/QuotationVersionsPanel";
 import { listEventsForEntity } from "@/lib/events";
+import { computeFreightStatus, type FreightValidityStatus } from "@/lib/freight-validity";
+import { requestFreightUpdate } from "@/app/(app)/projects/actions";
+import { ActionForm, SubmitButton } from "@/components/feedback/ActionForm";
 import {
   DelayBadge,
   ProductionOrderStatusBadge,
@@ -220,6 +223,39 @@ export default async function DocumentViewPage({
     ? freightFromContainers
     : Number(doc.freight_cost || 0);
   const breakdown = containerBreakdown(containers);
+
+  // Freight validity banner (m098) — only for quotations generated from a
+  // Project Request. Reverse-link via generated_document_id, read the freight
+  // validity, and warn when expired/expiring so Sales refreshes before sending.
+  let freightValidity: {
+    status: FreightValidityStatus;
+    label: string;
+    projectId: string;
+    requested: boolean;
+  } | null = null;
+  {
+    const { data: prj } = await supabase
+      .from("project_requests")
+      .select("id")
+      .eq("generated_document_id", params.id)
+      .maybeSingle();
+    const projectId = (prj as any)?.id as string | undefined;
+    if (projectId) {
+      const { data: frRows } = await supabase
+        .from("freight_cost_requests")
+        .select("valid_until, update_requested_at, containers")
+        .eq("project_request_id", projectId)
+        .order("created_at", { ascending: true });
+      const frow: any =
+        (frRows ?? []).find((x: any) => Array.isArray(x?.containers) && x.containers.length) ?? (frRows ?? [])[0] ?? null;
+      if (frow?.valid_until) {
+        const s = computeFreightStatus(frow.valid_until, new Date().toISOString().slice(0, 10));
+        if (s.status === "expired" || s.status === "expiring_soon") {
+          freightValidity = { status: s.status, label: s.label, projectId, requested: !!frow.update_requested_at };
+        }
+      }
+    }
+  }
   const productionTime = fromProductionColumns({
     production_mode: doc.production_mode as ProductionMode | null,
     production_days: doc.production_days,
@@ -564,6 +600,35 @@ export default async function DocumentViewPage({
 
   return (
     <div className="mx-auto max-w-screen-2xl px-6 py-8 space-y-8">
+      {/* Freight validity warning (m098) — quotation generated from a project. */}
+      {freightValidity && (
+        <div
+          className={`flex flex-wrap items-center justify-between gap-3 rounded-lg border px-4 py-3 text-sm ${
+            freightValidity.status === "expired"
+              ? "border-rose-300 bg-rose-50 text-rose-800"
+              : "border-amber-300 bg-amber-50 text-amber-900"
+          }`}
+        >
+          <div>
+            <span className="font-semibold">
+              {freightValidity.status === "expired" ? "✗ Freight pricing has expired. " : "⚠ Freight pricing is expiring. "}
+            </span>
+            {freightValidity.status === "expired"
+              ? `${freightValidity.label}. Request an updated freight cost before sending this quotation.`
+              : `${freightValidity.label}. Consider refreshing freight before sending.`}
+          </div>
+          {freightValidity.requested ? (
+            <span className="shrink-0 text-xs font-medium">⏳ Update requested — waiting on Operations</span>
+          ) : (
+            <ActionForm action={requestFreightUpdate} success="✓ Freight update requested" className="shrink-0">
+              <input type="hidden" name="project_id" value={freightValidity.projectId} />
+              <SubmitButton className="btn-secondary text-xs" pendingLabel="Requesting…">
+                ↻ Request freight update
+              </SubmitButton>
+            </ActionForm>
+          )}
+        </div>
+      )}
       <div className="flex items-start justify-between pb-4 border-b border-neutral-200">
         <div>
           <div className="eyebrow-brand">{doc.type}</div>

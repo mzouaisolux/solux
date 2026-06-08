@@ -99,6 +99,8 @@ const DEFAULT_SEVERITY: Record<EventType, EventSeverity> = {
   "pr.logistics_entered": "low",
   "pr.packing_entered": "medium",
   "pr.freight_entered": "medium",
+  "pr.freight_update_requested": "medium",
+  "pr.freight_updated": "medium",
   "pr.ready_for_pricing": "medium",
   "pr.priced": "medium",
   "pr.quotation_generated": "medium",

@@ -142,6 +142,8 @@ export type EventType =
   | "pr.logistics_entered"
   | "pr.packing_entered"
   | "pr.freight_entered"
+  | "pr.freight_update_requested"
+  | "pr.freight_updated"
   | "pr.ready_for_pricing"
   | "pr.priced"
   | "pr.quotation_generated"
@@ -178,6 +180,8 @@ export const ACTIONABLE_MEDIUM_EVENTS: ReadonlySet<EventType> = new Set<EventTyp
   "pr.cost_entered", // → director
   "pr.packing_entered", // → director
   "pr.freight_entered", // → director
+  "pr.freight_update_requested", // → operations
+  "pr.freight_updated", // → sales
   "pr.ready_for_pricing", // → director
   "pr.priced", // → sales
   "pr.quotation_generated", // → sales
@@ -378,6 +382,8 @@ export function eventTypeLabel(t: EventType): string {
     "pr.logistics_entered": "Logistics entered",
     "pr.packing_entered": "Packing list entered",
     "pr.freight_entered": "Freight cost entered",
+    "pr.freight_update_requested": "Freight update requested",
+    "pr.freight_updated": "Freight updated",
     "pr.ready_for_pricing": "Ready for pricing",
     "pr.priced": "Project priced",
     "pr.quotation_generated": "Quotation generated",

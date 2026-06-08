@@ -262,9 +262,34 @@ export type FreightCostRequest = {
   freight_cost_per_container: number | null; // legacy (m091), unused
   estimated_total_freight: number | null; // auto = sum(quantity × freight_per_unit)
   notes: string | null;
+  // m098 — freight validity + update workflow
+  valid_until: string | null; // YYYY-MM-DD; freight pricing expires after this
+  update_requested_at: string | null;
+  update_requested_by: string | null;
+  update_count: number;
   completed_by: string | null;
   completed_at: string | null;
   created_at: string;
+};
+
+/** Freight validity state (m098). `none` = no validity set yet. */
+export type FreightStatus = "valid" | "expiring_soon" | "expired" | "none";
+export const FREIGHT_VALIDITY_PERIODS = [30, 60, 90] as const;
+
+/** Append-only freight update audit row (m098). */
+export type FreightCostAudit = {
+  id: string;
+  project_request_id: string;
+  freight_cost_request_id: string | null;
+  old_containers: FreightContainer[];
+  new_containers: FreightContainer[];
+  old_total: number | null;
+  new_total: number | null;
+  old_valid_until: string | null;
+  new_valid_until: string | null;
+  note: string | null;
+  changed_by: string | null;
+  changed_at: string;
 };
 
 /**
