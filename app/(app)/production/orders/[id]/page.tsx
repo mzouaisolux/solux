@@ -727,6 +727,8 @@ export default async function ProductionOrderDetailPage({
       {/* ---------- PRODUCTION (status workflow + baseline) ---------- */}
       <CollapsibleSection
         title="Production"
+        attention={status === "production_delayed"}
+        attentionLabel="Delayed"
         badge={
           <ProductionOrderStatusBadge
             status={status}
@@ -1062,6 +1064,8 @@ export default async function ProductionOrderDetailPage({
       {/* ---------- DELAY & TIMELINE (m075) ---------- */}
       <CollapsibleSection
         title="Delay & timeline"
+        attention={delayBreakdown.factoryDays + delayBreakdown.externalDays > 0}
+        attentionLabel="Behind schedule"
         badge={<DelayBadge delayDays={delay} />}
         summary={
           <SummaryRow>
@@ -1150,6 +1154,8 @@ export default async function ProductionOrderDetailPage({
       {/* ---------- PAYMENT ---------- */}
       <CollapsibleSection
         title="Payment"
+        attention={!productionCanStart && !(order as any).deposit_override_at}
+        attentionLabel="Deposit due"
         badge={<PaymentStatusBadge state={paymentState} />}
         summary={
           <SummaryRow>
@@ -1461,6 +1467,8 @@ export default async function ProductionOrderDetailPage({
       {/* ---------- SHIPPING & LOGISTICS (BL summary + shipment) ---------- */}
       <CollapsibleSection
         title="Shipping & logistics"
+        attention={status === "production_completed" && !order.shipment_booked}
+        attentionLabel="Book shipment"
         badge={
           <span
             className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[11px] font-medium ${

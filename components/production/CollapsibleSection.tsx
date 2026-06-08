@@ -3,15 +3,16 @@
 import { useState, type ReactNode } from "react";
 
 /**
- * CollapsibleSection — a compact, expandable card used to restructure the
- * production-order cockpit so the page is glanceable instead of one long wall.
+ * CollapsibleSection — a premium, glanceable summary card used to restructure
+ * the production-order cockpit so the page reads in 5 seconds instead of one
+ * long wall of forms.
  *
- *   CLOSED  → clear title + status badge (right) + a compact `summary` row
- *             (the key facts: ETA, balance remaining, booked?, …).
+ *   CLOSED  → bold title + status badge + (optional) "Action needed" chip, then
+ *             a row of KPI tiles (the key facts, colored when they matter).
  *   OPEN    → the full detail (`children`): forms, breakdowns, history.
  *
- * Server-rendered children (including <form action={serverAction}>) are passed
- * straight through — toggling open simply mounts/unmounts that subtree on the
+ * Server-rendered children (including <form action={serverAction}>) pass
+ * straight through — toggling open just mounts/unmounts that subtree on the
  * client; the server actions keep working unchanged.
  */
 export function CollapsibleSection({
@@ -21,44 +22,68 @@ export function CollapsibleSection({
   children,
   defaultOpen = false,
   icon,
+  /** When true, the card gets a subtle amber accent + "Action needed" chip. */
+  attention = false,
+  attentionLabel = "Action needed",
 }: {
   title: string;
-  /** Status chip shown on the right of the header (always visible). */
   badge?: ReactNode;
-  /** Compact key-facts row shown ONLY when collapsed. */
   summary?: ReactNode;
-  /** Full detail shown ONLY when expanded. */
   children: ReactNode;
   defaultOpen?: boolean;
   icon?: ReactNode;
+  attention?: boolean;
+  attentionLabel?: string;
 }) {
   const [open, setOpen] = useState(defaultOpen);
   return (
-    <section className="panel overflow-hidden">
+    <section
+      className={`group relative overflow-hidden rounded-xl border bg-white transition-all duration-200 ${
+        attention
+          ? "border-amber-200/90 shadow-[0_1px_2px_rgba(180,120,0,0.05)]"
+          : "border-neutral-200/90"
+      } ${
+        open
+          ? "shadow-sm ring-1 ring-neutral-100"
+          : "hover:border-neutral-300 hover:shadow-sm"
+      }`}
+    >
+      {/* Left accent bar — only when the section needs attention. */}
+      {attention && (
+        <span
+          aria-hidden
+          className="pointer-events-none absolute inset-y-0 left-0 w-1 bg-amber-400/90"
+        />
+      )}
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
-        className="group w-full flex items-start justify-between gap-3 px-5 py-4 text-left transition-colors hover:bg-neutral-50/70"
+        className="w-full flex items-start justify-between gap-4 px-5 py-4 text-left"
       >
         <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2 flex-wrap">
+          {/* Header: title · status badge · attention chip */}
+          <div className="flex items-center gap-2.5 flex-wrap">
             {icon && <span className="text-neutral-400">{icon}</span>}
-            <h2 className="text-[15px] font-semibold tracking-tight text-neutral-900">
+            <h2 className="text-base font-semibold tracking-tight text-neutral-900">
               {title}
             </h2>
             {badge}
+            {attention && (
+              <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[10.5px] font-bold uppercase tracking-wide text-amber-700">
+                <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
+                {attentionLabel}
+              </span>
+            )}
           </div>
-          {summary && !open && (
-            <div className="mt-2.5">{summary}</div>
-          )}
+          {/* KPI summary — closed state only */}
+          {summary && !open && <div className="mt-3.5">{summary}</div>}
         </div>
-        <span className="flex items-center gap-2 shrink-0 pt-0.5">
-          <span className="text-[11px] font-medium text-neutral-400 group-hover:text-neutral-600 hidden sm:inline">
-            {open ? "Close" : "Open"}
-          </span>
+        {/* Open / Close affordance */}
+        <span className="mt-0.5 shrink-0 inline-flex items-center gap-1.5 rounded-lg border border-neutral-200 bg-neutral-50/80 px-2.5 py-1.5 text-xs font-semibold text-neutral-600 transition-colors group-hover:border-neutral-300 group-hover:bg-white">
+          {open ? "Close" : "Open"}
           <svg
-            className={`h-5 w-5 text-neutral-400 transition-transform duration-200 ${
+            className={`h-4 w-4 text-neutral-400 transition-transform duration-200 ${
               open ? "rotate-180" : ""
             }`}
             viewBox="0 0 20 20"
@@ -81,8 +106,9 @@ export function CollapsibleSection({
 }
 
 /**
- * SummaryStat — one label/value pair for the compact closed-state row.
- * Kept here so both the page and any future surface render summaries the same.
+ * SummaryStat — one KPI tile for the closed-state row. A soft rounded tile
+ * with a small readable label and a large, contrasted value. Tone tints the
+ * whole tile so blocking / late / done states pop without reading the text.
  */
 export function SummaryStat({
   label,
@@ -93,31 +119,39 @@ export function SummaryStat({
   value: ReactNode;
   tone?: "default" | "muted" | "warn" | "success" | "danger";
 }) {
-  const valueClass =
+  const toneClass =
     tone === "warn"
-      ? "text-amber-700"
+      ? "bg-amber-50 text-amber-700"
       : tone === "success"
-      ? "text-emerald-700"
+      ? "bg-emerald-50 text-emerald-700"
       : tone === "danger"
-      ? "text-rose-700"
+      ? "bg-rose-50 text-rose-700"
       : tone === "muted"
-      ? "text-neutral-500"
-      : "text-neutral-800";
+      ? "bg-neutral-50 text-neutral-400"
+      : "bg-neutral-50 text-neutral-900";
+  const labelClass =
+    tone === "warn"
+      ? "text-amber-600/80"
+      : tone === "success"
+      ? "text-emerald-600/80"
+      : tone === "danger"
+      ? "text-rose-600/80"
+      : "text-neutral-400";
   return (
-    <span className="inline-flex flex-col">
-      <span className="text-[10px] uppercase tracking-widerx font-semibold text-neutral-400">
+    <div className={`rounded-lg px-3.5 py-2.5 min-w-[116px] ${toneClass}`}>
+      <div
+        className={`text-[10px] font-semibold uppercase tracking-wide ${labelClass}`}
+      >
         {label}
-      </span>
-      <span className={`text-sm font-semibold tabular-nums ${valueClass}`}>
+      </div>
+      <div className="mt-1 text-[15px] font-bold leading-tight tabular-nums">
         {value}
-      </span>
-    </span>
+      </div>
+    </div>
   );
 }
 
-/** Horizontal wrapper for a row of SummaryStat items. */
+/** Flex-wrap container for a row of SummaryStat KPI tiles. */
 export function SummaryRow({ children }: { children: ReactNode }) {
-  return (
-    <div className="flex flex-wrap gap-x-6 gap-y-2.5">{children}</div>
-  );
+  return <div className="flex flex-wrap gap-2.5">{children}</div>;
 }
