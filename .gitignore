@@ -1,0 +1,16 @@
+# dependencies
+node_modules
+node_modules */
+
+# next build (+ iCloud conflict copies like ".next 2", ".next 3")
+.next
+.next */
+.next*
+
+# env / secrets
+.env.local
+.env*.local
+
+# misc
+.DS_Store
+*.log

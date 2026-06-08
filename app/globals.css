@@ -1,0 +1,183 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  @apply bg-neutral-50 text-neutral-900 antialiased;
+}
+
+* {
+  outline: none;
+}
+
+@layer components {
+  /* =====================================================================
+     TYPOGRAPHY
+     ===================================================================== */
+
+  /* Small uppercase tracked label — used above data blocks / table sections. */
+  .eyebrow {
+    @apply text-[11px] font-semibold uppercase tracking-widerx text-neutral-500;
+  }
+
+  /* Same, but in the brand orange — used on key inline labels (Date, PO)
+     to echo the logo. Use sparingly. */
+  .eyebrow-brand {
+    @apply text-[11px] font-semibold uppercase tracking-widerx text-solux-orange;
+  }
+
+  /* Page title — bold, tight, hierarchy-leading. The PDF keeps its own. */
+  .doc-title {
+    @apply text-3xl font-bold tracking-tight text-neutral-900;
+  }
+
+  /* H2 inside a page — consistent visual rhythm under doc-title. */
+  .section-heading {
+    @apply text-lg font-semibold text-neutral-900 tracking-tight;
+  }
+
+  /* Smaller doc subtitle / number. */
+  .doc-number {
+    @apply font-mono text-sm text-neutral-600;
+  }
+
+  /* Big KPI value display — used in dashboard / business cards. */
+  .kpi-value {
+    @apply text-2xl font-bold tabular-nums tracking-tight text-neutral-900 leading-snugger;
+  }
+
+  /* =====================================================================
+     SURFACES — CARDS / PANELS
+     ===================================================================== */
+
+  /* Generic card / panel — refreshed with a subtle SaaS shadow + a slightly
+     lighter border so the surface reads as elevated, not boxed-in. */
+  .panel {
+    @apply rounded-xl border border-neutral-200/80 bg-white shadow-soft;
+  }
+
+  /* Interactive variant — lifts on hover with a stronger shadow. Apply to
+     clickable cards (KPI tiles, pipeline cards, anything that links to a
+     deeper view). Triggers translate-y for a tactile feel. */
+  .panel-hover {
+    @apply rounded-xl border border-neutral-200/80 bg-white shadow-soft transition-all duration-150 hover:border-neutral-300 hover:shadow-card-hover hover:-translate-y-px;
+  }
+
+  /* Tinted surface used as a subtle separator inside layouts — e.g.,
+     section header bands inside a panel. */
+  .surface-tint {
+    @apply bg-neutral-50;
+  }
+
+  /* Subtle section divider used inside panels. */
+  .rule {
+    @apply border-t border-neutral-200;
+  }
+
+  /* =====================================================================
+     BUTTONS
+     ===================================================================== */
+
+  /* Primary action button — green, premium press feedback. */
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-1.5 rounded-lg bg-solux px-3.5 py-2 text-sm font-semibold text-white shadow-sm transition-all duration-150 hover:bg-solux-dark hover:shadow-card-hover active:scale-[0.98] disabled:opacity-50 disabled:hover:bg-solux disabled:hover:shadow-sm disabled:active:scale-100;
+  }
+
+  /* Secondary button — clean outline. */
+  .btn-secondary {
+    @apply inline-flex items-center justify-center gap-1.5 rounded-lg border border-neutral-200 bg-white px-3.5 py-2 text-sm font-medium text-neutral-700 shadow-soft transition-all duration-150 hover:border-neutral-300 hover:bg-neutral-50 hover:text-neutral-900 active:scale-[0.98] disabled:opacity-50;
+  }
+
+  /* Ghost button — minimal text, used inside lists / context menus. */
+  .btn-ghost {
+    @apply inline-flex items-center justify-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium text-neutral-700 transition-colors duration-150 hover:bg-neutral-100 hover:text-neutral-900;
+  }
+
+  /* Tiny button — for inline row actions. */
+  .btn-xs {
+    @apply inline-flex items-center justify-center gap-1 rounded-md border border-neutral-200 bg-white px-2 py-1 text-[11px] font-medium text-neutral-600 transition-colors hover:border-neutral-300 hover:bg-neutral-50 hover:text-neutral-900;
+  }
+
+  /* "Open →" link used at the end of table rows. */
+  .row-link {
+    @apply text-sm font-medium text-neutral-900 transition-colors hover:text-solux;
+  }
+
+  /* =====================================================================
+     FORMS
+     ===================================================================== */
+
+  /* Modern input baseline — premium focus state with the SOLUX green ring. */
+  .input {
+    @apply w-full rounded-md border border-neutral-200 bg-white px-3 py-2 text-sm text-neutral-900 placeholder:text-neutral-400 transition-all duration-150 focus:border-solux focus:outline-none focus:shadow-ring-solux disabled:cursor-not-allowed disabled:bg-neutral-50 disabled:text-neutral-500;
+  }
+
+  /* Smaller variant for dense form rows. */
+  .input-sm {
+    @apply w-full rounded-md border border-neutral-200 bg-white px-2.5 py-1.5 text-sm text-neutral-900 placeholder:text-neutral-400 transition-all duration-150 focus:border-solux focus:outline-none focus:shadow-ring-solux;
+  }
+
+  /* Modern select — same look as .input but with a custom caret. Apply on
+     a <select> with `appearance-none` to get rid of native styling. */
+  .select {
+    @apply w-full rounded-md border border-neutral-200 bg-white px-3 py-2 pr-8 text-sm text-neutral-900 transition-all duration-150 focus:border-solux focus:outline-none focus:shadow-ring-solux appearance-none;
+    background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 12 12'%3e%3cpath stroke='%236b7280' stroke-width='1.5' d='m3 5 3 3 3-3'/%3e%3c/svg%3e");
+    background-repeat: no-repeat;
+    background-position: right 0.65rem center;
+    background-size: 0.7em;
+  }
+
+  /* Field label — sits above an input. */
+  .label {
+    @apply text-xs font-medium text-neutral-600 mb-1 block;
+  }
+
+  /* =====================================================================
+     TABLES — modern SaaS data list
+     ===================================================================== */
+
+  .table-modern {
+    @apply w-full text-sm;
+  }
+  .table-modern thead tr {
+    @apply bg-neutral-50 text-left;
+  }
+  .table-modern th {
+    @apply px-4 py-2.5 font-semibold text-[11px] uppercase tracking-widerx text-neutral-600 border-b border-neutral-200;
+  }
+  .table-modern tbody tr {
+    @apply border-b border-neutral-100 transition-colors hover:bg-neutral-50/70 last:border-b-0;
+  }
+  .table-modern td {
+    @apply px-4 py-3 align-middle text-neutral-800;
+  }
+
+  /* =====================================================================
+     BADGES / PILLS — small status indicators
+     ===================================================================== */
+
+  /* Generic pill — the building block. Colors come from utility classes
+     applied alongside (e.g. bg-emerald-50 text-emerald-700 border-emerald-200). */
+  .pill {
+    @apply inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11px] font-medium;
+  }
+
+  /* =====================================================================
+     MISC
+     ===================================================================== */
+
+  /* Subtle horizontal divider for sections. */
+  .divider {
+    @apply h-px w-full bg-neutral-200/70;
+  }
+
+  /* Skeleton block for future loading states. */
+  .skeleton {
+    @apply animate-pulse rounded-md bg-neutral-200/60;
+  }
+}
