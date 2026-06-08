@@ -1,6 +1,12 @@
 import Link from "next/link";
+import type { ReactNode } from "react";
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import {
+  CollapsibleSection,
+  SummaryStat,
+  SummaryRow,
+} from "@/components/production/CollapsibleSection";
 import { getEffectiveRole } from "@/lib/auth";
 import { resolveUserLabelStrings } from "@/lib/user-display";
 import { ATTACHMENTS_BUCKET } from "@/lib/attachments";
@@ -718,8 +724,55 @@ export default async function ProductionOrderDetailPage({
       <div className="lg:grid lg:grid-cols-[minmax(0,1fr)_300px] lg:gap-6">
         <div className="space-y-6 min-w-0">
 
-      {/* ---------- STATUS WORKFLOW ---------- */}
-      <section className="panel p-5">
+      {/* ---------- PRODUCTION (status workflow + baseline) ---------- */}
+      <CollapsibleSection
+        title="Production"
+        badge={
+          <ProductionOrderStatusBadge
+            status={status}
+            archived={!!(order as any).archived_at}
+          />
+        }
+        summary={
+          <SummaryRow>
+            <SummaryStat label="Status" value={productionStage.label} />
+            <SummaryStat
+              label="Start date"
+              value={
+                productionStartDate
+                  ? new Date(productionStartDate).toLocaleDateString("en-GB")
+                  : "Pending"
+              }
+              tone={productionStartDate ? "default" : "warn"}
+            />
+            <SummaryStat
+              label="Working days"
+              value={(order as any).production_working_days ?? "—"}
+            />
+            <SummaryStat
+              label="Current ETA"
+              value={fmtDate(order.current_production_deadline)}
+            />
+            <SummaryStat
+              label="Completed"
+              value={
+                order.actual_completion_date
+                  ? fmtDate(order.actual_completion_date)
+                  : status === "production_completed"
+                  ? "Yes"
+                  : "No"
+              }
+              tone={
+                order.actual_completion_date || status === "production_completed"
+                  ? "success"
+                  : "muted"
+              }
+            />
+          </SummaryRow>
+        }
+      >
+        {/* --- Operational status --- */}
+        <div className="rounded-lg border border-neutral-200 p-4">
         <div className="flex items-start justify-between gap-3 flex-wrap mb-4">
           <div>
             <div className="eyebrow">Operational status</div>
@@ -777,27 +830,11 @@ export default async function ProductionOrderDetailPage({
             );
           })}
         </div>
-      </section>
+        </div>
 
-      {/* ---------- PRODUCTION BASELINE (Deliverable B) ----------
-          The original factory commitment: Validation Date + Working
-          Days + Initial Projected Completion. This is the historical
-          reference used for delay tracking — once locked, it must
-          NEVER change (changing it destroys delay accuracy).
-
-          Lock states
-          -----------
-            LOCKED   (baseline_locked_at IS NOT NULL OR validation_date set)
-              → all three fields read-only
-              → "Locked on YYYY-MM-DD" indicator
-              → "Unlock baseline" admin button (placeholder; wired in D)
-            UNLOCKED (legacy / never validated)
-              → edit form visible to technical roles
-              → submitting it stamps baseline_locked_at via the
-                setProductionTimeline action (Deliverable C/D will
-                ensure the action sets it; for now the lock relies
-                on validation_date being present). */}
-      <section className="panel p-5 space-y-4">
+        {/* --- Production Baseline --- */}
+        <div className="rounded-lg border border-neutral-200 p-4 space-y-4 mt-4">
+        {/* Production Baseline — factory commitment + frozen completion. */}
         <div className="flex items-start justify-between gap-3 flex-wrap">
           <div>
             <div className="eyebrow">Production Baseline</div>
@@ -1019,15 +1056,47 @@ export default async function ProductionOrderDetailPage({
             </SubmitButton>
           </form>
         )}
-      </section>
+        </div>
+      </CollapsibleSection>
 
-      {/* ---------- DELAY TIMELINE (m075) ----------
-          Unified operational view that consolidates the old "Actual
-          Production Deadline" section AND the "Deadline history" sidebar
-          into one card. The data model is unchanged — additive delay
-          events remain the source of truth; this is purely a richer
-          visualization. Phase-aware copy + controls (no add form on
-          completed / closed; the "Mark complete" CTA only on in_production). */}
+      {/* ---------- DELAY & TIMELINE (m075) ---------- */}
+      <CollapsibleSection
+        title="Delay & timeline"
+        badge={<DelayBadge delayDays={delay} />}
+        summary={
+          <SummaryRow>
+            <SummaryStat
+              label="Current ETA"
+              value={fmtDate(liveStatus.currentEta)}
+            />
+            <SummaryStat
+              label="Total delay"
+              value={`${delayBreakdown.factoryDays + delayBreakdown.externalDays} d`}
+              tone={
+                delayBreakdown.factoryDays + delayBreakdown.externalDays > 0
+                  ? "warn"
+                  : "success"
+              }
+            />
+            <SummaryStat
+              label="Factory delay"
+              value={`${delayBreakdown.factoryDays} d`}
+              tone={delayBreakdown.factoryDays > 0 ? "warn" : "muted"}
+            />
+            <SummaryStat
+              label="External delay"
+              value={`${delayBreakdown.externalDays} d`}
+              tone={delayBreakdown.externalDays > 0 ? "warn" : "muted"}
+            />
+            <SummaryStat
+              label="Last delay reason"
+              value={
+                history && history[0]?.reason ? String(history[0].reason) : "—"
+              }
+            />
+          </SummaryRow>
+        }
+      >
       {lifecyclePhase === "awaiting_start" &&
         canStartWithoutDeposit &&
         status === "awaiting_deposit" &&
@@ -1076,20 +1145,56 @@ export default async function ProductionOrderDetailPage({
         canMarkComplete={canEditStatus}
         userLabel={userLabel}
       />
+      </CollapsibleSection>
 
-      {/* ---------- PAYMENTS ---------- */}
-      <section className="panel p-5">
-        <div className="flex items-start justify-between gap-3 mb-3 flex-wrap">
-          <div>
-            <div className="eyebrow">Payments</div>
-            <p className="text-xs text-neutral-500 mt-0.5">
-              Expected amounts come straight from the quotation's payment
-              terms. Record receipts here as they come in — depositing fully
-              auto-advances the order to <b>Deposit received</b>.
-            </p>
-          </div>
-          <PaymentStatusBadge state={paymentState} />
-        </div>
+      {/* ---------- PAYMENT ---------- */}
+      <CollapsibleSection
+        title="Payment"
+        badge={<PaymentStatusBadge state={paymentState} />}
+        summary={
+          <SummaryRow>
+            <SummaryStat
+              label="Deposit"
+              value={
+                expectedDeposit > 0
+                  ? depositReceived + 0.01 >= expectedDeposit
+                    ? "Received"
+                    : "Pending"
+                  : "None"
+              }
+              tone={
+                expectedDeposit > 0
+                  ? depositReceived + 0.01 >= expectedDeposit
+                    ? "success"
+                    : "warn"
+                  : "muted"
+              }
+            />
+            <SummaryStat
+              label="Deposit recv'd"
+              value={`${currency} ${fmtMoney(depositReceived)}`}
+            />
+            <SummaryStat
+              label="Balance remaining"
+              value={`${currency} ${fmtMoney(liveStatus.balanceRemaining)}`}
+              tone={liveStatus.balanceRemaining > 0 ? "warn" : "success"}
+            />
+            <SummaryStat
+              label="Reminder"
+              value={
+                (order as any).balance_reminder_days_before_eta != null
+                  ? `${(order as any).balance_reminder_days_before_eta}d before ETA`
+                  : "—"
+              }
+            />
+          </SummaryRow>
+        }
+      >
+        <p className="text-xs text-neutral-500 mb-3">
+          Expected amounts come straight from the quotation's payment terms.
+          Record receipts here as they come in — depositing fully auto-advances
+          the order to <b>Deposit received</b>.
+        </p>
 
         {/* "Production can start" gating signal + override controls.
             Three states:
@@ -1351,24 +1456,12 @@ export default async function ProductionOrderDetailPage({
             </div>
           </form>
         )}
-      </section>
+      </CollapsibleSection>
 
-      {/* SHIP-1 — consignee / notify-party for the BL, surfaced here so ops
-          doesn't leave the page to assemble the BL packet. */}
-      <ClientBlSummary
-        clientId={(order as any).client_id}
-        rawProfile={(order.clients as any)?.bl_profile ?? null}
-      />
-
-      {/* ---------- SHIPMENT ---------- */}
-      <section className="panel p-5">
-        <div className="flex items-start justify-between gap-3 mb-3">
-          <div>
-            <div className="eyebrow">Shipment</div>
-            <p className="text-xs text-neutral-500 mt-0.5">
-              Track booking, departure, arrival, and any logistics notes.
-            </p>
-          </div>
+      {/* ---------- SHIPPING & LOGISTICS (BL summary + shipment) ---------- */}
+      <CollapsibleSection
+        title="Shipping & logistics"
+        badge={
           <span
             className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[11px] font-medium ${
               order.shipment_booked
@@ -1383,7 +1476,38 @@ export default async function ProductionOrderDetailPage({
             />
             {order.shipment_booked ? "Booked" : "Not booked"}
           </span>
-        </div>
+        }
+        summary={
+          <SummaryRow>
+            <SummaryStat
+              label="Shipment"
+              value={order.shipment_booked ? "Booked" : "Not booked"}
+              tone={order.shipment_booked ? "success" : "muted"}
+            />
+            <SummaryStat label="ETD" value={fmtDate(order.etd)} />
+            <SummaryStat label="ETA" value={fmtDate(order.eta)} />
+            <SummaryStat label="BL number" value={ship.bl_number ?? "—"} />
+            <SummaryStat label="Forwarder" value={ship.forwarder ?? "—"} />
+            <SummaryStat
+              label="Vessel / voyage"
+              value={
+                [ship.vessel, ship.voyage].filter(Boolean).join(" · ") || "—"
+              }
+            />
+          </SummaryRow>
+        }
+      >
+        {/* SHIP-1 — consignee / notify-party for the BL packet. */}
+        <ClientBlSummary
+          clientId={(order as any).client_id}
+          rawProfile={(order.clients as any)?.bl_profile ?? null}
+        />
+
+        {/* --- Shipment --- */}
+        <div className="mt-4">
+        <p className="text-xs text-neutral-500 mb-3">
+          Track booking, departure, arrival, and any logistics notes.
+        </p>
 
         {technical ? (
           <form
@@ -1511,10 +1635,38 @@ export default async function ProductionOrderDetailPage({
             />
           </div>
         )}
-      </section>
+        </div>
+      </CollapsibleSection>
 
-      {/* ---------- VALUE + CONTEXT ---------- */}
-      <section className="grid grid-cols-1 md:grid-cols-3 gap-3">
+      {/* ---------- ORDER DETAILS (value + configuration) ---------- */}
+      <CollapsibleSection
+        title="Order details"
+        summary={
+          <SummaryRow>
+            <SummaryStat
+              label="Quotation value"
+              value={`${(order.documents as any)?.currency ?? "USD"} ${Number(
+                (order.documents as any)?.total_price ?? 0
+              ).toLocaleString(undefined, {
+                minimumFractionDigits: 2,
+                maximumFractionDigits: 2,
+              })}`}
+            />
+            <SummaryStat
+              label="Quotation"
+              value={String((order.documents as any)?.status ?? "—").toUpperCase()}
+            />
+            <SummaryStat
+              label="Task list"
+              value={String((order.task_lists as any)?.status ?? "—")
+                .replace(/_/g, " ")
+                .toUpperCase()}
+            />
+            <SummaryStat label="Lines" value={configLines.length || "—"} />
+          </SummaryRow>
+        }
+      >
+        <section className="grid grid-cols-1 md:grid-cols-3 gap-3">
         <KpiTile
           label="Quotation value"
           value={`${(order.documents as any)?.currency ?? "USD"} ${Number(
@@ -1553,25 +1705,41 @@ export default async function ProductionOrderDetailPage({
         taskListId={order.task_list_id}
         taskListNumber={(order.task_lists as any)?.number ?? null}
       />
+      </CollapsibleSection>
 
-      {/* ---------- OPERATIONAL TIMELINE (audit log) ---------- */}
-      <section className="panel p-5">
-        <div className="flex items-baseline justify-between gap-3 mb-4 flex-wrap">
-          <div>
-            <div className="eyebrow">Activity timeline</div>
-            <p className="text-xs text-neutral-500 mt-0.5 max-w-2xl">
-              Every status change, deadline shift, deposit receipt and
-              shipment update — newest first. The actor + timestamp on
-              each row makes operational changes auditable across the
-              sales / production / admin teams.
-            </p>
-          </div>
-          <span className="text-[11px] text-neutral-400 tabular-nums">
+      {/* ---------- ACTIVITY TIMELINE ---------- */}
+      <CollapsibleSection
+        title="Activity timeline"
+        badge={
+          <span className="inline-flex items-center rounded-full border border-neutral-200 bg-neutral-50 px-2 py-0.5 text-[11px] font-medium text-neutral-600 tabular-nums">
             {events.length} event{events.length === 1 ? "" : "s"}
           </span>
-        </div>
+        }
+        summary={
+          <SummaryRow>
+            <SummaryStat label="Events" value={events.length} />
+            <SummaryStat
+              label="Last activity"
+              value={
+                events[0]?.created_at
+                  ? new Date(events[0].created_at).toLocaleString()
+                  : "—"
+              }
+            />
+            <SummaryStat
+              label="Last update"
+              value={new Date(order.updated_at).toLocaleString()}
+            />
+          </SummaryRow>
+        }
+      >
+        <p className="text-xs text-neutral-500 mb-4 max-w-2xl">
+          Every status change, deadline shift, deposit receipt and shipment
+          update — newest first. The actor + timestamp on each row makes
+          operational changes auditable across teams.
+        </p>
         <Timeline events={events} actorLabelByUser={labelByUser} />
-      </section>
+      </CollapsibleSection>
 
         </div>
         {/* Sticky live-status sidebar — lg+ only. Mirrors the top strip
