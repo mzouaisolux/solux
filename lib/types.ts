@@ -922,6 +922,51 @@ export const PRODUCTION_TERMINAL_STATUSES: ProductionOrderStatus[] = [
   "cancelled",
 ];
 
+/* --------------------------------------------------------------------------
+ * Order Documents hub (m099) — files centralized inside a production order.
+ * ------------------------------------------------------------------------ */
+export type OrderDocumentCategory = "production" | "shipping" | "financial" | "other";
+export const ORDER_DOC_CATEGORIES: OrderDocumentCategory[] = [
+  "production",
+  "shipping",
+  "financial",
+  "other",
+];
+export const ORDER_DOC_CATEGORY_LABEL: Record<OrderDocumentCategory, string> = {
+  production: "Production",
+  shipping: "Shipping",
+  financial: "Financial",
+  other: "Other",
+};
+
+/** One stored file = one VERSION. A logical document = rows sharing group_id. */
+export type OrderDocument = {
+  id: string;
+  production_order_id: string;
+  group_id: string;
+  version: number;
+  name: string;
+  storage_path: string;
+  file_size: number | null;
+  mime_type: string | null;
+  category: OrderDocumentCategory | string;
+  uploaded_by: string | null;
+  created_at: string;
+  archived_at: string | null;
+  archived_by: string | null;
+};
+
+export type OrderDocumentAuditAction = "upload" | "replace" | "archive" | "restore";
+export type OrderDocumentAudit = {
+  id: string;
+  production_order_id: string;
+  document_group_id: string | null;
+  action: OrderDocumentAuditAction | string;
+  file_name: string | null;
+  actor: string | null;
+  created_at: string;
+};
+
 /**
  * Statuses that mean PRODUCTION IS FINISHED — the single source of truth for
  * "production complete" (status-led model, owner ruling 2026-06-02). Reaching

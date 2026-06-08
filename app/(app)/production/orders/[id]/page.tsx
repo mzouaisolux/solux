@@ -3,6 +3,12 @@ import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { getEffectiveRole } from "@/lib/auth";
 import { resolveUserLabelStrings } from "@/lib/user-display";
+import { ATTACHMENTS_BUCKET } from "@/lib/attachments";
+import OrderDocumentsTab, {
+  type LogicalDocView,
+  type DocVersionView,
+  type AuditView,
+} from "./OrderDocumentsTab";
 import {
   ProductionOrderStatusBadge,
   DelayBadge,
@@ -88,7 +94,7 @@ export default async function ProductionOrderDetailPage({
   searchParams,
 }: {
   params: { id: string };
-  searchParams?: { event?: string | string[] };
+  searchParams?: { event?: string | string[]; tab?: string };
 }) {
   const supabase = createClient();
   const { userId: currentUserId, effectiveRole } = await getEffectiveRole();
@@ -469,8 +475,111 @@ export default async function ProductionOrderDetailPage({
     }
   }
 
+  // ---- Order Documents hub (m099) — soft-fails to empty pre-migration. ----
+  const activeTab = searchParams?.tab === "documents" ? "documents" : "overview";
+  const docRows = (
+    (
+      await supabase
+        .from("order_documents")
+        .select("*")
+        .eq("production_order_id", params.id)
+        .order("version", { ascending: false })
+    ).data ?? []
+  ) as any[];
+  const docAuditRows = (
+    (
+      await supabase
+        .from("order_document_audit")
+        .select("*")
+        .eq("production_order_id", params.id)
+        .order("created_at", { ascending: false })
+    ).data ?? []
+  ) as any[];
+  const docUserIds = Array.from(
+    new Set([...docRows.map((r) => r.uploaded_by), ...docAuditRows.map((a) => a.actor)].filter(Boolean))
+  ) as string[];
+  const docUserLabels = docUserIds.length
+    ? await resolveUserLabelStrings(docUserIds)
+    : new Map<string, string>();
+  const docSigned = new Map<string, string>();
+  await Promise.all(
+    docRows.map(async (r) => {
+      const { data } = await supabase.storage.from(ATTACHMENTS_BUCKET).createSignedUrl(r.storage_path, 3600);
+      if (data?.signedUrl) docSigned.set(r.id, data.signedUrl);
+    })
+  );
+  const toDocVersion = (r: any): DocVersionView => ({
+    id: r.id,
+    version: r.version,
+    name: r.name,
+    size: r.file_size,
+    mime: r.mime_type,
+    createdAt: r.created_at,
+    byLabel: r.uploaded_by ? docUserLabels.get(r.uploaded_by) ?? null : null,
+    signedUrl: docSigned.get(r.id) ?? null,
+  });
+  const docGroups = new Map<string, any[]>();
+  for (const r of docRows) {
+    const arr = docGroups.get(r.group_id);
+    if (arr) arr.push(r);
+    else docGroups.set(r.group_id, [r]);
+  }
+  const activeDocs: LogicalDocView[] = [];
+  const archivedDocs: LogicalDocView[] = [];
+  for (const [groupId, versions] of docGroups) {
+    const sorted = versions.slice().sort((a, b) => b.version - a.version);
+    const current = sorted[0];
+    const view: LogicalDocView = {
+      groupId,
+      category: current.category ?? "other",
+      current: toDocVersion(current),
+      versions: sorted.map(toDocVersion),
+    };
+    (current.archived_at ? archivedDocs : activeDocs).push(view);
+  }
+  const docAuditView: AuditView[] = docAuditRows.map((a) => ({
+    id: a.id,
+    action: a.action,
+    fileName: a.file_name,
+    byLabel: a.actor ? docUserLabels.get(a.actor) ?? null : null,
+    createdAt: a.created_at,
+  }));
+  const docCount = activeDocs.length;
+  const ORDER_TABS: { key: string; label: string }[] = [
+    { key: "overview", label: "Overview" },
+    { key: "documents", label: "Documents" },
+  ];
+
   return (
     <div className="mx-auto max-w-screen-2xl px-6 py-8 space-y-6">
+      {/* ---------- TABS (m099) ---------- */}
+      <div className="flex gap-1 border-b border-neutral-200">
+        {ORDER_TABS.map((t) => (
+          <Link
+            key={t.key}
+            href={`/production/orders/${params.id}${t.key === "documents" ? "?tab=documents" : ""}`}
+            scroll={false}
+            className={`-mb-px border-b-2 px-3 py-2 text-sm ${
+              activeTab === t.key
+                ? "border-solux font-medium text-solux-dark"
+                : "border-transparent text-neutral-500 hover:text-neutral-800"
+            }`}
+          >
+            {t.label}
+            {t.key === "documents" && docCount > 0 ? ` (${docCount})` : ""}
+          </Link>
+        ))}
+      </div>
+
+      {activeTab === "documents" ? (
+        <OrderDocumentsTab
+          orderId={params.id}
+          active={activeDocs}
+          archived={archivedDocs}
+          audit={docAuditView}
+        />
+      ) : (
+      <>
       {/* ---------- HEADER ---------- */}
       <div className="flex items-start justify-between gap-4 flex-wrap">
         <div className="min-w-0">
@@ -1484,6 +1593,8 @@ export default async function ProductionOrderDetailPage({
         expectedEntityId={order.id}
         currentUserId={currentUserId ?? null}
       />
+      </>
+      )}
     </div>
   );
 }
