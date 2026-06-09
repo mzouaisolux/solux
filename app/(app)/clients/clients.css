@@ -1,0 +1,376 @@
+/* =====================================================================
+   SOLUX — Clients drill-down (Client → Affair → Version), premium skin.
+   Adapted from the validated clients mockup. Classes prefixed `cli-`;
+   tokens (--ink, --green, --line…) are global (globals.css :root).
+   Applied under the page's .po-premium scope.
+   ===================================================================== */
+
+:root {
+  --cli-amber-tint: rgba(232, 135, 14, 0.14);
+}
+
+/* ---- search ---- */
+.po-premium .cli-search {
+  position: relative;
+  max-width: 520px;
+}
+.po-premium .cli-search input {
+  width: 100%;
+  font-family: inherit;
+  font-size: 13.5px;
+  padding: 11px 14px 11px 38px;
+  border: 1px solid var(--line-2);
+  background: #fff;
+  color: var(--ink);
+}
+.po-premium .cli-search input::placeholder {
+  color: var(--mute-2);
+}
+.po-premium .cli-search svg {
+  position: absolute;
+  left: 13px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 16px;
+  height: 16px;
+  color: var(--mute-2);
+}
+
+/* ---- client card ---- */
+.po-premium .cli-client {
+  background: var(--card);
+  border: 1px solid var(--line);
+  margin-bottom: 16px;
+  box-shadow: var(--shadow);
+}
+.po-premium .cli-client-head {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 18px 22px;
+  border-left: 3px solid var(--green);
+  cursor: pointer;
+  width: 100%;
+  text-align: left;
+  background: none;
+  font-family: inherit;
+}
+.po-premium .cli-chev {
+  width: 18px;
+  height: 18px;
+  flex: none;
+  color: var(--mute);
+  transition: transform 0.2s;
+}
+.po-premium .cli-chev.closed {
+  transform: rotate(-90deg);
+}
+.po-premium .cli-cid {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+.po-premium .cli-cid .top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.po-premium .cli-name {
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+}
+.po-premium .cli-code {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  background: var(--ink);
+  color: #fff;
+  padding: 2px 7px;
+  white-space: nowrap;
+}
+.po-premium .cli-loc {
+  font-size: 12.5px;
+  color: var(--mute);
+}
+.po-premium .cli-stats {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 26px;
+}
+.po-premium .cstat {
+  text-align: right;
+}
+.po-premium .cstat .v {
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  font-variant-numeric: tabular-nums;
+}
+.po-premium .cstat .v.green {
+  color: var(--green-deep);
+}
+.po-premium .cstat .k {
+  font-size: 11px;
+  color: var(--mute);
+  margin-top: 2px;
+}
+.po-premium .cli-open {
+  flex: none;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 9px 14px;
+  background: var(--ink);
+  color: #fff;
+  border: 1px solid var(--ink);
+  white-space: nowrap;
+  text-decoration: none;
+}
+.po-premium .cli-open:hover {
+  background: #000;
+}
+
+/* ---- affairs table ---- */
+.po-premium .cli-affairs {
+  border-top: 1px solid var(--line);
+}
+.po-premium .cli-colhead,
+.po-premium .cli-affair-row {
+  display: grid;
+  grid-template-columns: 1.7fr 1.6fr 1.6fr 130px 64px;
+  align-items: center;
+  gap: 16px;
+  padding: 11px 22px;
+}
+.po-premium .cli-colhead {
+  padding-top: 13px;
+  padding-bottom: 13px;
+  border-bottom: 1px solid var(--line);
+}
+.po-premium .cli-colhead span {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--mute);
+}
+.po-premium .cli-colhead .right {
+  text-align: right;
+}
+.po-premium .cli-affair {
+  border-bottom: 1px solid var(--line);
+}
+.po-premium .cli-affair:last-child {
+  border-bottom: none;
+}
+.po-premium .cli-affair-row {
+  position: relative;
+  cursor: pointer;
+  width: 100%;
+  text-align: left;
+  background: none;
+  font-family: inherit;
+}
+.po-premium .cli-affair-row:hover,
+.po-premium .cli-affair.open > .cli-affair-row {
+  background: #fafafa;
+}
+.po-premium .cli-affair-row::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 0;
+  background: var(--ink);
+  transition: width 0.15s;
+}
+.po-premium .cli-affair.open > .cli-affair-row::before {
+  width: 3px;
+}
+
+/* col 1 — name */
+.po-premium .cli-aname {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  min-width: 0;
+}
+.po-premium .cli-achev {
+  width: 15px;
+  height: 15px;
+  flex: none;
+  color: var(--mute-2);
+  transition: transform 0.2s;
+}
+.po-premium .cli-affair.open .cli-achev {
+  transform: rotate(90deg);
+  color: var(--ink);
+}
+.po-premium .cli-aname .nm {
+  font-size: 14.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+  color: var(--ink);
+}
+
+/* col 2 — stage */
+.po-premium .cli-stage {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.po-premium .cli-stage-label {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--ink);
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.po-premium .cli-badge-stage {
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 1px 6px;
+  color: #0f0f0f;
+  background: var(--green);
+  white-space: nowrap;
+}
+.po-premium .cli-badge-stage.amber {
+  background: var(--cli-amber-tint);
+  color: #9a5a00;
+  border: 1px solid rgba(232, 135, 14, 0.4);
+}
+.po-premium .cli-badge-stage.ink {
+  background: var(--ink);
+  color: #fff;
+}
+.po-premium .cli-segbar {
+  display: flex;
+  gap: 3px;
+}
+.po-premium .cli-segbar i {
+  height: 5px;
+  flex: 1;
+  background: var(--line-2);
+}
+.po-premium .cli-segbar i.done {
+  background: var(--ink);
+}
+.po-premium .cli-segbar i.now {
+  background: var(--green);
+}
+
+/* col 3 — status + next */
+.po-premium .cli-astatus {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.po-premium .cli-chips {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.po-premium .cli-chip {
+  font-size: 10.5px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border: 1px solid var(--line-2);
+  color: var(--mute);
+  background: #fff;
+  white-space: nowrap;
+}
+.po-premium .cli-chip.on {
+  border-color: var(--ink);
+  color: var(--ink);
+}
+.po-premium .cli-chip.sent {
+  border-color: var(--green-deep);
+  color: var(--green-deep);
+}
+.po-premium .cli-next {
+  font-size: 12px;
+  color: var(--mute);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.po-premium .cli-next b {
+  color: var(--ink);
+  font-weight: 600;
+}
+.po-premium .cli-next .arr {
+  color: var(--green-deep);
+}
+
+/* col 4 — amount */
+.po-premium .cli-amount {
+  text-align: right;
+}
+.po-premium .cli-amount .amt {
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+.po-premium .cli-amount .cur {
+  font-size: 11px;
+  color: var(--mute);
+  margin-top: 2px;
+}
+
+/* col 5 — versions */
+.po-premium .cli-ver {
+  display: flex;
+  justify-content: flex-end;
+}
+.po-premium .cli-verbadge {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--ink);
+  background: var(--green-tint);
+  border: 1px solid rgba(85, 255, 126, 0.4);
+  padding: 3px 9px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.po-premium .cli-verbadge svg {
+  width: 11px;
+  height: 11px;
+}
+
+/* expanded detail */
+.po-premium .cli-detail {
+  padding: 6px 22px 22px 52px;
+  background: #fafafa;
+  border-top: 1px dashed var(--line-2);
+}
+
+@media (max-width: 1080px) {
+  .po-premium .cli-colhead,
+  .po-premium .cli-affair-row {
+    grid-template-columns: 1.6fr 1.6fr 1.3fr 100px;
+  }
+  .po-premium .cli-colhead .h-ver,
+  .po-premium .cli-ver {
+    display: none;
+  }
+}
+@media (max-width: 720px) {
+  .po-premium .cli-stats {
+    gap: 14px;
+  }
+}
