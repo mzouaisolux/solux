@@ -90,7 +90,7 @@
   display: grid;
 }
 .sx-mega-col {
-  padding: 24px 28px 26px;
+  padding: 24px 30px 28px;
   border-right: 1px solid var(--line);
   min-width: 0;
 }
@@ -106,7 +106,7 @@
   letter-spacing: 0.07em;
   text-transform: uppercase;
   color: var(--mute);
-  margin-bottom: 18px;
+  margin-bottom: 20px;
 }
 
 /* ---- mega item ---- */

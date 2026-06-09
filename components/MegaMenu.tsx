@@ -154,7 +154,7 @@ export default function MegaMenu({
                   <div
                     className="sx-mega-cols"
                     style={{
-                      gridTemplateColumns: `repeat(${cols}, minmax(232px, 300px))`,
+                      gridTemplateColumns: `repeat(${cols}, 290px)`,
                     }}
                   >
                     {cat.groups.map((group, gi) => (
