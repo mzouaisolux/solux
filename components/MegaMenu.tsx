@@ -217,9 +217,7 @@ export default function MegaMenu({
           </div>
         );
       })}
-      {openId && (
-        <div className="sx-scrim" onClick={() => setOpenId(null)} aria-hidden />
-      )}
+      {openId && <div className="sx-scrim" aria-hidden />}
     </nav>
   );
 }

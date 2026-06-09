@@ -63,6 +63,10 @@
   backdrop-filter: blur(1.5px);
   z-index: 30;
   animation: sx-scrim-in 0.28s ease;
+  /* Purely a visual dim — never intercept clicks. Closing is handled by the
+     existing document click-outside handler, so page/nav links stay clickable
+     even while a mega panel is open. */
+  pointer-events: none;
 }
 @keyframes sx-scrim-in {
   from { opacity: 0; }
