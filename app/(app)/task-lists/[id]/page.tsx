@@ -1,3 +1,4 @@
+import "./tasklist.css";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
@@ -354,87 +355,91 @@ export default async function TaskListDetailPage({
   // Timeline AND the validation history.
   const tlActorLabels = await resolveUserLabelStrings(tlActorIds);
 
+  const flowSteps = deriveFlowSteps(
+    status,
+    (linkedPo?.status as string | null) ?? null
+  );
+
   return (
     <DirtyWrapper>
-    <div className="mx-auto max-w-screen-2xl px-6 py-8 space-y-6">
+    <div className="tl-detail wrap">
+      {/* Breadcrumb */}
+      <div className="crumb">
+        <Link href="/task-lists">Task lists</Link>
+        <span className="sep">/</span>
+        <span>{task.number}</span>
+      </div>
+
       {/* Header */}
-      <div className="flex items-start justify-between gap-4">
-        <div className="min-w-0">
-          <div className="flex items-center gap-3 flex-wrap">
-            <div className="eyebrow">Production task list</div>
+      <div className="head">
+        <div>
+          <div className="label-row">
+            <span className="micro">Production task list</span>
             <TaskListStatusBadge status={status} />
           </div>
           {/* Lead with the affair name + client — that's how the team
               recognises a project. The PTL/quote codes are the
-              technical reference, shown as a sub-line. */}
+              technical reference, shown as id-meta below. */}
           {linkedQuote?.affair_name ? (
-            <>
-              <h1 className="doc-title mt-1 leading-tight">
-                {linkedQuote.affair_name}
-              </h1>
-              <p className="text-sm font-medium text-neutral-700 mt-0.5">
-                {client?.company_name ?? "—"}
-                {client?.client_code && (
-                  <span className="text-neutral-400 font-normal">
-                    {" "}
-                    ({client.client_code})
-                  </span>
-                )}
-              </p>
-            </>
+            <h1>{linkedQuote.affair_name}</h1>
           ) : (
-            <>
-              <h1 className="doc-title mt-1 font-mono">{task.number}</h1>
-              <p className="text-sm font-medium text-neutral-700 mt-0.5">
+            <h1 className="font-mono">{task.number}</h1>
+          )}
+          <div className="id-meta">
+            <span className="m">
+              <span className="k">Client</span>
+              <span className="v">
                 {client?.company_name ?? "—"}
                 {client?.client_code && (
-                  <span className="text-neutral-400 font-normal">
-                    {" "}
-                    ({client.client_code})
-                  </span>
+                  <span className="muted"> ({client.client_code})</span>
                 )}
-              </p>
-            </>
-          )}
-          <p className="text-xs text-neutral-500 mt-1.5 font-mono">
-            {task.number} · quote{" "}
-            <Link
-              href={`/documents/${task.quotation_id}`}
-              className="text-neutral-700 hover:underline"
-            >
-              {linkedQuote?.number ?? "—"}
-            </Link>{" "}
-            <span className="font-sans">
-              · {new Date(task.date).toLocaleDateString("en-GB")}
+              </span>
             </span>
-          </p>
+            {client?.country && (
+              <span className="m">
+                <span className="k">Country</span>
+                <span className="v">{client.country}</span>
+              </span>
+            )}
+            <span className="m">
+              <span className="k">From quote</span>
+              <span className="v tnum">
+                <Link href={`/documents/${task.quotation_id}`}>
+                  {linkedQuote?.number ?? "—"}
+                </Link>
+              </span>
+            </span>
+            <span className="m">
+              <span className="k">Created</span>
+              <span className="v">
+                {new Date(task.date).toLocaleDateString("en-GB")}
+              </span>
+            </span>
+            <span className="m">
+              <span className="k">Ref</span>
+              <span className="v tnum">{task.number}</span>
+            </span>
+          </div>
           {/* Inherited commercial terms — compact chip strip. The PTL
               focus stays technical; these are read-only reminders of
               what the customer was sold so the production team doesn't
               re-enter anything. Full breakdown lives in the section
               "Logistics from quotation" lower on the page. */}
           {inheritedChips.length > 0 && (
-            <div className="flex items-center gap-1.5 flex-wrap mt-2">
-              <span className="text-[10px] uppercase tracking-widerx text-neutral-400 font-semibold">
-                From quote:
-              </span>
+            <div className="fromquote">
+              <span className="fq-label">From quote</span>
               {inheritedChips.map((c) => (
-                <span
-                  key={c.label}
-                  className="inline-flex items-center rounded-md border border-neutral-200 bg-neutral-50 px-1.5 py-0.5 text-[11px]"
-                >
-                  <span className="text-neutral-500 mr-1">{c.label}:</span>
-                  <span className="font-medium text-neutral-800">
-                    {c.value}
-                  </span>
+                <span key={c.label} className="fq-chip">
+                  <span className="k">{c.label}</span>
+                  <span className="v">{c.value}</span>
                 </span>
               ))}
             </div>
           )}
         </div>
-        <div className="flex flex-col items-end gap-2">
-          <div className="flex items-center gap-2">
-            <Link href="/task-lists" className="btn-secondary">
+        <div className="head-actions">
+          <div className="row">
+            <Link href="/task-lists" className="btn">
               ← All task lists
             </Link>
             {/* Destructive action — placed at the top, red, with
@@ -458,7 +463,7 @@ export default async function TaskListDetailPage({
           */}
           {technical &&
             (status === "validated" || status === "production_ready") && (
-              <div className="flex items-center gap-2">
+              <div className="row">
                 <ExportPdfButton taskListId={task.id} />
                 <ExportExcelButton taskListId={task.id} />
               </div>
@@ -466,87 +471,105 @@ export default async function TaskListDetailPage({
           {technical &&
             status !== "validated" &&
             status !== "production_ready" && (
-              <p className="text-[11px] text-neutral-500 text-right max-w-[220px]">
+              <p className="hint">
                 Exports unlock once the task list is validated by the
                 production team.
               </p>
             )}
           {!technical && status === "production_ready" && (
-            <p className="text-[11px] text-neutral-500 text-right max-w-[220px]">
+            <p className="hint">
               Factory PDF/Excel will be generated by the production team.
             </p>
           )}
         </div>
       </div>
 
-      {/* Production-started banner — surfaces when the linked PO has
-          moved past awaiting_deposit. The PTL editor is no longer the
-          right surface for Sales at that stage; they need ETA /
-          payments / shipment tracking on the PO page. Banner offers
-          a one-click jump. Visible to everyone (TLM/admin still see
-          it as a navigation hint; they can ignore it if they actually
-          came here for revisions). */}
-      {showTrackingBanner && linkedPo && (
-        <section className="rounded-lg border border-sky-300 bg-sky-50/60 px-4 py-3">
-          <div className="flex items-start justify-between gap-3 flex-wrap">
-            <div className="min-w-0">
-              <div className="text-[10px] font-bold uppercase tracking-widerx text-sky-900">
-                Production has started
-              </div>
-              <p className="text-xs text-sky-900 mt-1 max-w-2xl">
-                For order tracking — ETA, payments, shipment, timeline —
-                use the production order page. This task list page is
-                still available for reference, but live operational
-                updates now live on{" "}
-                <span className="font-mono">{linkedPo.number ?? "the PO"}</span>.
-              </p>
-            </div>
-            <Link
-              href={`/production/orders/${linkedPo.id}`}
-              className="shrink-0 inline-flex items-center gap-1.5 rounded-md border border-sky-600 bg-sky-600 text-white px-3 py-1.5 text-[12px] font-semibold hover:bg-sky-700 transition-colors"
-            >
-              Open tracking page →
-            </Link>
-          </div>
-        </section>
-      )}
-
-      {/* Workflow next-action bar */}
-      <section className="panel p-4">
-        <div className="flex items-start justify-between gap-4 flex-wrap">
-          <div>
-            <div className="eyebrow mb-1">Next step</div>
-            <TaskListWorkflowActions
-              taskListId={task.id}
-              status={status}
-              isTechnical={technical}
-            />
-          </div>
-          <div className="text-[11px] text-neutral-500 text-right space-y-0.5">
-            {task.submitted_at && (
-              <div>
-                Submitted for validation{" "}
-                <b className="text-neutral-700">
-                  {new Date(task.submitted_at).toLocaleString()}
-                </b>
-              </div>
-            )}
-          </div>
+      {/* WORKFLOW STEPPER — visual lifecycle progress, derived from the
+          existing status + linked PO status. */}
+      <div className="flow">
+        <div className="flow-head">
+          <span className="micro">Validation workflow</span>
+          <span className="flow-sub">
+            Sales drafts → production validates &amp; enriches → factory
+            release.
+          </span>
         </div>
-      </section>
+        <div className="steps">
+          {flowSteps.map((s) => (
+            <div
+              key={s.name}
+              className={`step${
+                s.state === "done" ? " done" : s.state === "now" ? " now" : ""
+              }`}
+            >
+              <div className="dot">{s.state === "done" && <StepCheck />}</div>
+              <div className="sname">{s.name}</div>
+              <div className="sdate">{s.sub}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Workflow next-action bar — INK bar wrapping the existing
+          TaskListWorkflowActions buttons (Mark production ready / Request
+          revision / Reject) + the submitted-for-validation stamp. */}
+      <div className="nextstep">
+        <div className="lead">
+          <span className="micro">Next step</span>
+          <span className="big">Move this task list to its next stage</span>
+        </div>
+        <div className="acts">
+          <TaskListWorkflowActions
+            taskListId={task.id}
+            status={status}
+            isTechnical={technical}
+          />
+        </div>
+        {task.submitted_at && (
+          <div className="stamp">
+            Submitted for validation{" "}
+            <b>{new Date(task.submitted_at).toLocaleString()}</b>
+          </div>
+        )}
+      </div>
+
+      {/* Production-started banner */}
+      {showTrackingBanner && linkedPo && (
+        <div className="banner">
+          <div>
+            <span className="micro" style={{ color: "var(--ink)" }}>
+              ● Production has started
+            </span>
+            <p>
+              For order tracking — ETA, payments, shipment, timeline — use the
+              production order page. This task list page is still available for
+              reference, but live operational updates now live on{" "}
+              <b>{linkedPo.number ?? "the PO"}</b>.
+            </p>
+          </div>
+          <Link
+            href={`/production/orders/${linkedPo.id}`}
+            className="btn primary"
+          >
+            Open tracking page <span className="ar">→</span>
+          </Link>
+        </div>
+      )}
 
       {/* ---------- PRODUCT CONFIGURATION (the real purpose) ----------
           The page now LEADS with product config: a compact visual
           summary per line (for fast ops/factory scanning) on top of the
           full sales/technical/factory editor. Logistics + notes follow
           below. */}
-      <div className="space-y-4">
-        <div className="flex items-baseline justify-between gap-3">
-          <h2 className="text-lg font-semibold">Product configuration</h2>
-          <span className="text-[11px] text-neutral-400 tabular-nums">
+      <div className="prod-shell space-y-4">
+        <div className="sec-head">
+          <div className="lhs">
+            <h2>Product configuration</h2>
+          </div>
+          <div className="rhs">
             {lines?.length ?? 0} line{(lines?.length ?? 0) === 1 ? "" : "s"} ·{" "}
             <TaskListStatusBadge status={status} />
-          </span>
+          </div>
         </div>
         {(lines ?? []).map((l: any) => {
           const categoryId = l.products?.category_id ?? null;
@@ -601,8 +624,10 @@ export default async function TaskListDetailPage({
           );
         })}
         {(!lines || lines.length === 0) && (
-          <div className="panel p-8 text-center text-sm text-neutral-500">
-            No line items. The quotation may have had no products.
+          <div className="card pad" style={{ textAlign: "center" }}>
+            <span className="micro">
+              No line items. The quotation may have had no products.
+            </span>
           </div>
         )}
       </div>
@@ -611,11 +636,18 @@ export default async function TaskListDetailPage({
           Sits between the configuration and attachments. Compact +
           collapsed by default; the active risk chips stay visible so a
           risky project is still obvious without taking much space. */}
-      <RiskFlagsEditor
-        taskListId={task.id}
-        initial={riskFlags}
-        editable={salesCanEdit}
-      />
+      <div className="sec-head">
+        <div className="lhs">
+          <h2>Known risks &amp; warnings</h2>
+        </div>
+      </div>
+      <div className="risk-shell">
+        <RiskFlagsEditor
+          taskListId={task.id}
+          initial={riskFlags}
+          editable={salesCanEdit}
+        />
+      </div>
 
       {/* ---------- PROJECT ATTACHMENTS ----------
           Drawings, dimensions, tender docs, artwork — the project-
@@ -623,7 +655,9 @@ export default async function TaskListDetailPage({
           on the page so factory/ops see it during validation. Keyed to
           the affair, shared across versions + the quotation. */}
       {task.quotation_id && (
-        <AttachmentsPanel documentId={task.quotation_id} />
+        <div className="att-shell">
+          <AttachmentsPanel documentId={task.quotation_id} />
+        </div>
       )}
 
       {/* Header form — production notes (sales) + technical notes (TLM).
@@ -631,7 +665,12 @@ export default async function TaskListDetailPage({
           removed: shipping lives in "Logistics from quotation" below,
           the line count + status are already shown elsewhere, and the
           page now leads with product configuration instead. */}
-      <form action={updateTaskListHeader} className="panel p-4 space-y-4">
+      <div className="sec-head">
+        <div className="lhs">
+          <h2>Production &amp; technical notes</h2>
+        </div>
+      </div>
+      <form action={updateTaskListHeader} className="card pad">
         <input type="hidden" name="id" value={task.id} />
         {/* Preserve the shipping_method value (editable elsewhere) so
             saving the notes header doesn't wipe it. */}
@@ -640,40 +679,35 @@ export default async function TaskListDetailPage({
           name="shipping_method"
           value={task.shipping_method ?? ""}
         />
-        <label className="block">
-          <span className="eyebrow mb-1 block">
-            Production notes
-            <span className="ml-1 text-[10px] text-sky-700 normal-case tracking-normal font-medium">
-              (sales)
-            </span>
-          </span>
-          <textarea
-            name="production_notes"
-            defaultValue={task.production_notes ?? ""}
-            placeholder="Top-level production instructions from sales — context for the factory team."
-            disabled={!salesCanEdit}
-            rows={3}
-            className="w-full rounded-md border border-neutral-200 px-3 py-2 text-sm disabled:bg-neutral-50"
-          />
+        <label className="notes-label micro">
+          Production notes <span className="tagint">Sales</span>
         </label>
+        <textarea
+          name="production_notes"
+          defaultValue={task.production_notes ?? ""}
+          placeholder="Top-level production instructions from sales — context for the factory team."
+          disabled={!salesCanEdit}
+          rows={3}
+          style={{ marginTop: 10, minHeight: 74 }}
+        />
         {technical && (
-          <label className="block">
-            <span className="eyebrow mb-1 block">
-              Technical notes
-              <span className="ml-1 text-[10px] text-amber-700 normal-case tracking-normal font-medium">
-                (technical · internal)
-              </span>
-            </span>
+          <>
+            <label
+              className="notes-label micro"
+              style={{ marginTop: 18 }}
+            >
+              Technical notes <span className="tagint">Internal</span>
+            </label>
             <textarea
               name="technical_notes"
               defaultValue={task.technical_notes ?? ""}
               placeholder="Internal references, drawing codes, packaging, BOM notes. Only visible to task list manager + admin."
               rows={3}
-              className="w-full rounded-md border border-amber-200 bg-amber-50/30 px-3 py-2 text-sm"
+              style={{ marginTop: 10, minHeight: 74, background: "#FCFCF7" }}
             />
-          </label>
+          </>
         )}
-        <div className="flex items-center justify-end">
+        <div className="savebar">
           {/* Delete is now in the top-right header (DangerDeleteButton) */}
           <SubmitButton variant="primary" pendingLabel="Saving…">
             Save header
@@ -684,12 +718,14 @@ export default async function TaskListDetailPage({
       {/* ---------- STICKER REQUIREMENTS ----------
           Often-forgotten labelling spec: which stickers, where, with
           what artwork/instructions. Artwork files live in Attachments. */}
-      <StickerRequirementsEditor
-        taskListId={task.id}
-        documentId={task.quotation_id ?? null}
-        initial={stickerReq}
-        editable={salesCanEdit}
-      />
+      <div className="stk-shell">
+        <StickerRequirementsEditor
+          taskListId={task.id}
+          documentId={task.quotation_id ?? null}
+          initial={stickerReq}
+          editable={salesCanEdit}
+        />
+      </div>
 
       {/* Logistics inherited from the linked quotation. Read-only view
           of the commercial terms agreed with the customer. Placed BELOW
@@ -697,93 +733,95 @@ export default async function TaskListDetailPage({
           focus stays "technical configuration / mapping / production
           validation" at the top. */}
       {linkedQuote && (
-        <section className="panel p-5 space-y-4">
-          <div className="flex items-baseline justify-between gap-3 flex-wrap">
-            <div>
-              <div className="eyebrow">Logistics from quotation</div>
-              <h3 className="text-sm font-semibold text-neutral-900 mt-0.5">
-                Commercial terms agreed with the client
-              </h3>
+        <>
+          <div className="sec-head">
+            <div className="lhs">
+              <h2>Logistics from quotation</h2>
+              <div className="lead">
+                Commercial terms agreed with the client — single source of
+                truth.
+              </div>
             </div>
-            <Link
-              href={`/documents/${task.quotation_id}`}
-              className="text-[11px] text-neutral-500 hover:text-neutral-700 hover:underline"
-            >
-              Open quotation →
-            </Link>
+            <div className="rhs">
+              <Link
+                href={`/documents/${task.quotation_id}`}
+                className="btn sm"
+              >
+                Open quotation →
+              </Link>
+            </div>
           </div>
-          <dl className="grid grid-cols-2 md:grid-cols-4 gap-x-4 gap-y-3 text-xs">
-            <LogisticsCell label="Incoterm" value={linkedQuote.incoterm} />
-            <LogisticsCell
-              label="Port of loading"
-              value={linkedQuote.port_of_loading}
-            />
-            <LogisticsCell
-              label="Port of destination"
-              value={linkedQuote.port_of_destination}
-            />
-            <LogisticsCell
-              label="Freight type"
-              value={linkedQuote.freight_type}
-            />
-            <LogisticsCell
-              label="Freight cost"
-              value={
-                linkedQuote.freight_cost != null
-                  ? `${linkedQuote.currency ?? ""} ${Number(
-                      linkedQuote.freight_cost
-                    ).toLocaleString(undefined, {
-                      minimumFractionDigits: 0,
-                      maximumFractionDigits: 2,
-                    })}`.trim()
-                  : null
-              }
-            />
-            <LogisticsCell label="Currency" value={linkedQuote.currency} />
-            <LogisticsCell
-              label="Payment terms"
-              value={inheritedPayment}
-            />
-            <LogisticsCell
-              label="Production time"
-              value={inheritedProduction}
-            />
-          </dl>
-          <p className="text-[11px] text-neutral-400 italic">
-            Single source of truth. To change commercial terms, edit the
-            linked quotation — these values follow.
-          </p>
-        </section>
+          <div className="card pad">
+            <div className="logi-grid">
+              <LogisticsCell label="Incoterm" value={linkedQuote.incoterm} />
+              <LogisticsCell
+                label="Port of loading"
+                value={linkedQuote.port_of_loading}
+              />
+              <LogisticsCell
+                label="Port of destination"
+                value={linkedQuote.port_of_destination}
+              />
+              <LogisticsCell
+                label="Freight type"
+                value={linkedQuote.freight_type}
+              />
+              <LogisticsCell
+                label="Freight cost"
+                value={
+                  linkedQuote.freight_cost != null
+                    ? `${linkedQuote.currency ?? ""} ${Number(
+                        linkedQuote.freight_cost
+                      ).toLocaleString(undefined, {
+                        minimumFractionDigits: 0,
+                        maximumFractionDigits: 2,
+                      })}`.trim()
+                    : null
+                }
+              />
+              <LogisticsCell label="Currency" value={linkedQuote.currency} />
+              <LogisticsCell label="Payment terms" value={inheritedPayment} />
+              <LogisticsCell
+                label="Production time"
+                value={inheritedProduction}
+              />
+            </div>
+            <div className="logi-note">
+              To change commercial terms, edit the linked quotation — these
+              values follow automatically.
+            </div>
+          </div>
+        </>
       )}
 
       {/* ---------- FACTORY VALIDATION HISTORY ----------
           Focused, timeline-oriented view of just the validation flow
           (submit → review → validate → revise → approve). The full
           activity log follows below. */}
-      <ValidationHistory events={tlEvents} actorLabelByUser={tlActorLabels} />
+      <div className="vh-shell">
+        <ValidationHistory events={tlEvents} actorLabelByUser={tlActorLabels} />
+      </div>
 
       {/* Audit timeline — workflow transitions (submit / validate /
           revise / cancel / delete) + header edits land here. Critical
           for the production team to understand why a list is in its
           current state and who pushed it there. */}
-      <section className="panel p-5 space-y-3">
-        <div className="flex items-baseline justify-between gap-3">
-          <div>
-            <div className="eyebrow">Activity</div>
-            <h3 className="text-sm font-semibold text-neutral-900 mt-0.5">
-              Task list timeline
-            </h3>
-          </div>
-          <span className="text-[11px] text-neutral-400 tabular-nums">
-            {tlEvents.length} event{tlEvents.length === 1 ? "" : "s"}
-          </span>
+      <div className="sec-head">
+        <div className="lhs">
+          <h2>Activity</h2>
+          <div className="lead">Task list timeline.</div>
         </div>
+        <div className="rhs tnum">
+          {tlEvents.length} event{tlEvents.length === 1 ? "" : "s"}
+        </div>
+      </div>
+      <div className="act-shell card pad">
         <Timeline
           events={tlEvents}
           actorLabelByUser={tlActorLabels}
           emptyMessage="No activity recorded for this task list yet."
         />
-      </section>
+      </div>
 
       {/* Conversation drawer overlay — opens when ?event=<id> is in
           the URL. Task list context stays visible behind the drawer. */}
@@ -794,6 +832,100 @@ export default async function TaskListDetailPage({
       />
     </div>
     </DirtyWrapper>
+  );
+}
+
+/* ---------------------------------------------------------------------
+   Workflow stepper — purely visual. Derives the done / now / upcoming
+   state of the six lifecycle steps (Quote → Task list → Payment →
+   Production → Shipping → Delivery) from the existing task-list status +
+   the linked production order status. No logic change: the source of
+   truth is still `status` / `linkedPo.status`; this only chooses a
+   className for each rendered dot.
+   --------------------------------------------------------------------- */
+type FlowStepState = "done" | "now" | "todo";
+
+function deriveFlowSteps(
+  status: ProductionTaskListStatus,
+  poStatus: string | null
+): { name: string; sub: string; state: FlowStepState }[] {
+  // Quote is always done by the time a task list exists.
+  // Task-list step is "now" until the list is validated/ready, then done.
+  // Payment / Production / Shipping / Delivery are driven by the linked PO.
+  const taskDone =
+    status === "validated" || status === "production_ready";
+  const paymentDone = poStatus
+    ? ["deposit_received", "in_production", "production_completed", "delivered"].includes(
+        poStatus
+      )
+    : false;
+  const productionStarted = poStatus
+    ? ["in_production", "production_completed", "delivered"].includes(poStatus)
+    : false;
+  const productionDone = poStatus
+    ? ["production_completed", "delivered"].includes(poStatus)
+    : false;
+  const shippingDone = poStatus ? poStatus === "delivered" : false;
+  const deliveryDone = shippingDone;
+
+  // The "now" step is the first not-yet-done step in the chain.
+  const dones = [
+    true, // quote
+    taskDone,
+    paymentDone,
+    productionDone,
+    shippingDone,
+    deliveryDone,
+  ];
+  const names = [
+    { name: "Quote", sub: "Accepted" },
+    {
+      name: "Task list",
+      sub:
+        status === "cancelled"
+          ? "Rejected"
+          : taskDone
+          ? "Validated"
+          : "In review",
+    },
+    { name: "Payment", sub: paymentDone ? "Received" : "Awaiting" },
+    {
+      name: "Production",
+      sub: productionDone
+        ? "Complete"
+        : productionStarted
+        ? "In progress"
+        : "Not started",
+    },
+    { name: "Shipping", sub: shippingDone ? "Shipped" : "Pending" },
+    { name: "Delivery", sub: deliveryDone ? "Delivered" : "Pending" },
+  ];
+
+  const firstNotDone = dones.findIndex((d) => !d);
+  return names.map((n, i) => ({
+    name: n.name,
+    sub: n.sub,
+    state: dones[i]
+      ? "done"
+      : i === firstNotDone && status !== "cancelled"
+      ? "now"
+      : "todo",
+  }));
+}
+
+/** Tiny check-mark used in the workflow stepper's "done" dots. */
+function StepCheck() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={3.5}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <polyline points="20 6 9 17 4 12" />
+    </svg>
   );
 }
 

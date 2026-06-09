@@ -1,0 +1,958 @@
+/* =====================================================================
+   SOLUX — Task list detail, visual redesign.
+
+   PURELY PRESENTATIONAL. Ported from the validated HTML mockup
+   (solux-task-list-detail-offline.html). EVERY selector is scoped under
+   `.tl-detail` so the generic class names (.card, .pill, .flow, .risk,
+   .att-row, …) never leak globally and the shared sub-components
+   (RiskFlagsEditor, AttachmentsPanel, StickerRequirementsEditor,
+   ProductSummaryCard, ValidationHistory, Timeline, TaskLineEditor) keep
+   their original look on every OTHER page — they are only restyled here,
+   via descendant overrides, on this page.
+
+   Design tokens (--ink/--green/--mute/--line/--canvas/…) already exist
+   globally in app/globals.css :root and are reused. A few tokens the
+   mockup needs but globals.css does not expose (--amber*, --card,
+   --shadow, --font, --line-2, --on-dark) are defined locally on
+   `.tl-detail` so nothing else in the app is affected.
+   ===================================================================== */
+
+.tl-detail {
+  /* Local tokens — additive, scoped to this page only. */
+  --amber: #e8870e;
+  --amber-tint: rgba(232, 135, 14, 0.1);
+  --amber-line: rgba(232, 135, 14, 0.42);
+  --amber-deep: #9a5a00;
+  --card: #ffffff;
+  --shadow: 0 1px 2px rgba(15, 15, 15, 0.05), 0 1px 0 rgba(15, 15, 15, 0.02);
+  /* Defensive font set so the page reads as the mockup even if a parent
+     wrapper hasn't applied the Jakarta variable. */
+  font-family: var(--font-jakarta), system-ui, sans-serif;
+  color: var(--ink);
+}
+
+/* The page uses the mockup's `wrap` rhythm. */
+.tl-detail.wrap {
+  max-width: 1320px;
+  margin: 0 auto;
+  padding: 24px 28px 90px;
+}
+
+.tl-detail .micro {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--mute);
+}
+.tl-detail .tnum {
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------------------------------------------------------------------
+   Buttons — the mockup .btn family. Scoped so they don't fight the app's
+   global .btn-primary / .btn-secondary used elsewhere.
+   --------------------------------------------------------------------- */
+.tl-detail .btn {
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 9px 15px;
+  border: 1px solid var(--line-2, #dcdde1);
+  background: #fff;
+  color: var(--ink);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  text-decoration: none;
+  white-space: nowrap;
+  border-radius: 0;
+}
+.tl-detail .btn:hover {
+  border-color: var(--ink);
+}
+.tl-detail .btn.primary {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: #fff;
+}
+.tl-detail .btn.primary:hover {
+  background: #000;
+}
+.tl-detail .btn.primary .ar {
+  color: var(--green);
+}
+.tl-detail .btn.go {
+  background: var(--green);
+  border-color: var(--green);
+  color: #0f0f0f;
+}
+.tl-detail .btn.go:hover {
+  background: #46e96d;
+}
+.tl-detail .btn.danger {
+  color: var(--amber-deep);
+  border-color: var(--amber-line);
+}
+.tl-detail .btn.danger:hover {
+  border-color: var(--amber);
+}
+.tl-detail .btn.sm {
+  padding: 7px 12px;
+  font-size: 12px;
+}
+.tl-detail .btn.disabled {
+  background: #e9e9ec;
+  color: #9a9a9a;
+  border-color: #e9e9ec;
+  cursor: default;
+}
+.tl-detail .btn svg {
+  width: 14px;
+  height: 14px;
+}
+.tl-detail .btn.ondark {
+  background: transparent;
+  border-color: #3a3a3c;
+  color: #fff;
+}
+.tl-detail .btn.ondark:hover {
+  border-color: #666;
+}
+
+/* ---------------------------------------------------------------------
+   Breadcrumb
+   --------------------------------------------------------------------- */
+.tl-detail .crumb {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--mute);
+  margin-bottom: 18px;
+}
+.tl-detail .crumb a {
+  color: var(--mute);
+  text-decoration: none;
+}
+.tl-detail .crumb a:hover {
+  color: var(--ink);
+}
+.tl-detail .crumb .sep {
+  color: var(--mute-2);
+}
+
+/* ---------------------------------------------------------------------
+   Header
+   --------------------------------------------------------------------- */
+.tl-detail .head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+}
+.tl-detail .head > div:first-child {
+  flex: 1;
+  min-width: 0;
+}
+.tl-detail .label-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.tl-detail .pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 11px;
+  font-size: 11.5px;
+  font-weight: 600;
+  border: 1px solid var(--line-2, #dcdde1);
+  background: #fff;
+  border-radius: 0;
+}
+.tl-detail .pill .d {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--ink);
+}
+.tl-detail .pill.ok {
+  background: var(--green-tint);
+  border-color: rgba(85, 255, 126, 0.5);
+  color: var(--ink);
+}
+.tl-detail .pill.ok .d {
+  background: var(--green);
+}
+.tl-detail h1 {
+  font-size: 32px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  margin: 0 0 12px;
+}
+.tl-detail .id-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 22px;
+}
+.tl-detail .id-meta .m {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.tl-detail .id-meta .k {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--mute);
+}
+.tl-detail .id-meta .v {
+  font-size: 13.5px;
+  font-weight: 600;
+}
+.tl-detail .id-meta .v .muted {
+  color: var(--mute);
+  font-weight: 500;
+}
+.tl-detail .id-meta .v a {
+  color: inherit;
+  text-decoration: none;
+}
+.tl-detail .id-meta .v a:hover {
+  text-decoration: underline;
+}
+.tl-detail .head-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 10px;
+  flex: none;
+}
+.tl-detail .head-actions .row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+.tl-detail .head-actions .hint {
+  font-size: 11px;
+  color: var(--mute);
+  text-align: right;
+  max-width: 220px;
+}
+/* DangerDeleteButton + the Export buttons are shared components rendered
+   with their own Tailwind classes. Re-skin only the ones in this header
+   to the mockup's flat .btn look — purely cosmetic, handlers untouched. */
+.tl-detail .head-actions .row > button,
+.tl-detail .head-actions .row > div > button {
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 9px 15px;
+  border-radius: 0;
+  box-shadow: none;
+}
+.tl-detail .head-actions .row > button[class*="rose"] {
+  color: var(--amber-deep);
+  border: 1px solid var(--amber-line);
+  background: #fff;
+}
+.tl-detail .head-actions .row > button[class*="rose"]:hover {
+  border-color: var(--amber);
+  background: #fff;
+}
+.tl-detail .head-actions .row > div > button[class*="bg-solux"] {
+  background: var(--ink);
+  border-color: var(--ink);
+}
+.tl-detail .head-actions .row > div > button[class*="bg-solux"]:hover {
+  background: #000;
+}
+
+/* ---------------------------------------------------------------------
+   From-quote strip
+   --------------------------------------------------------------------- */
+.tl-detail .fromquote {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 18px;
+}
+.tl-detail .fq-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--mute);
+}
+.tl-detail .fq-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid var(--line);
+  background: #fff;
+  padding: 6px 11px;
+  font-size: 12px;
+  box-shadow: var(--shadow);
+}
+.tl-detail .fq-chip .k {
+  color: var(--mute);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.tl-detail .fq-chip .v {
+  font-weight: 600;
+}
+
+/* ---------------------------------------------------------------------
+   Workflow stepper
+   --------------------------------------------------------------------- */
+.tl-detail .flow {
+  margin-top: 24px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow);
+  padding: 22px 26px 24px;
+}
+.tl-detail .flow-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 22px;
+}
+.tl-detail .flow-sub {
+  font-size: 12px;
+  color: var(--mute);
+}
+.tl-detail .steps {
+  display: flex;
+}
+.tl-detail .step {
+  flex: 1;
+  position: relative;
+  padding-right: 8px;
+}
+.tl-detail .step .dot {
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  background: #fff;
+  border: 2px solid var(--mute-2);
+  position: relative;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.tl-detail .step.done .dot {
+  background: var(--ink);
+  border-color: var(--ink);
+}
+.tl-detail .step.done .dot svg {
+  width: 9px;
+  height: 9px;
+  color: #fff;
+}
+.tl-detail .step.now .dot {
+  background: var(--green);
+  border-color: var(--green);
+  box-shadow: 0 0 0 4px var(--green-tint);
+}
+.tl-detail .step:not(:last-child)::after {
+  content: "";
+  position: absolute;
+  top: 6.5px;
+  left: 19px;
+  right: 8px;
+  height: 2px;
+  background: var(--line-2, #dcdde1);
+  z-index: 1;
+}
+.tl-detail .step.done:not(:last-child)::after {
+  background: var(--ink);
+}
+.tl-detail .step .sname {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--mute);
+  margin-top: 13px;
+}
+.tl-detail .step.done .sname,
+.tl-detail .step.now .sname {
+  color: var(--ink);
+}
+.tl-detail .step .sdate {
+  font-size: 11px;
+  color: var(--mute);
+  margin-top: 3px;
+}
+.tl-detail .step.now .sdate {
+  color: var(--green-deep);
+  font-weight: 600;
+}
+
+/* ---------------------------------------------------------------------
+   INK "Next step" bar — wraps the existing TaskListWorkflowActions.
+   --------------------------------------------------------------------- */
+.tl-detail .nextstep {
+  margin-top: 18px;
+  background: var(--ink);
+  color: #fff;
+  padding: 20px 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  flex-wrap: wrap;
+}
+.tl-detail .nextstep .lead {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.tl-detail .nextstep .micro {
+  color: var(--mute-2);
+}
+.tl-detail .nextstep .lead .big {
+  font-size: 16px;
+  font-weight: 600;
+}
+.tl-detail .nextstep .acts {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+.tl-detail .nextstep .stamp {
+  font-size: 11.5px;
+  color: var(--mute-2);
+  width: 100%;
+  text-align: right;
+}
+.tl-detail .nextstep .stamp b {
+  color: #fff;
+  font-weight: 600;
+}
+
+/* The workflow component (TaskListWorkflowActions) renders Tailwind-styled
+   buttons + helper <p> text inside the INK bar. Re-skin its buttons to the
+   mockup's on-dark / go / danger look and lighten its helper copy so it
+   reads on the dark background — purely cosmetic, the click handlers and
+   server actions are untouched. */
+.tl-detail .nextstep .acts > div,
+.tl-detail .nextstep .acts > div > div {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.tl-detail .nextstep .acts button {
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 9px 15px;
+  border-radius: 0;
+  border: 1px solid #3a3a3c;
+  background: transparent;
+  color: #fff;
+  box-shadow: none;
+  transition: border-color 0.15s, background 0.15s;
+}
+.tl-detail .nextstep .acts button:hover {
+  border-color: #666;
+  background: transparent;
+  box-shadow: none;
+}
+/* Primary / "Mark production ready" → flash green CTA. */
+.tl-detail .nextstep .acts button.bg-solux,
+.tl-detail .nextstep .acts button[class*="bg-solux"] {
+  background: var(--green);
+  border-color: var(--green);
+  color: #0f0f0f;
+}
+.tl-detail .nextstep .acts button.bg-solux:hover,
+.tl-detail .nextstep .acts button[class*="bg-solux"]:hover {
+  background: #46e96d;
+  border-color: #46e96d;
+}
+/* Reject / danger buttons stay legible on dark. */
+.tl-detail .nextstep .acts button[class*="text-red-700"] {
+  color: #ffb4ad;
+  border-color: #5c2b2e;
+  background: transparent;
+}
+.tl-detail .nextstep .acts button[class*="text-red-700"]:hover {
+  border-color: #8a3f43;
+}
+/* Helper paragraphs the workflow shows in some states. */
+.tl-detail .nextstep .acts p {
+  color: var(--mute-2);
+  font-size: 12.5px;
+  max-width: 520px;
+}
+.tl-detail .nextstep .acts p b {
+  color: #fff;
+}
+.tl-detail .nextstep .acts p[class*="text-red-700"] {
+  color: #ffb4ad;
+}
+.tl-detail .nextstep .acts p[class*="text-emerald-700"] {
+  color: var(--green);
+}
+
+/* ---------------------------------------------------------------------
+   Production-started banner
+   --------------------------------------------------------------------- */
+.tl-detail .banner {
+  margin-top: 18px;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--ink);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 16px 20px;
+  box-shadow: var(--shadow);
+}
+.tl-detail .banner p {
+  font-size: 12.5px;
+  color: var(--ink-soft);
+  line-height: 1.5;
+  max-width: 720px;
+  margin-top: 5px;
+}
+.tl-detail .banner p b {
+  color: var(--ink);
+}
+
+/* ---------------------------------------------------------------------
+   Section headers + cards
+   --------------------------------------------------------------------- */
+.tl-detail .sec-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 24px 0 12px;
+}
+.tl-detail .sec-head .lhs h2 {
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+.tl-detail .sec-head .lhs .lead {
+  font-size: 12.5px;
+  color: var(--mute);
+  line-height: 1.5;
+  max-width: 780px;
+  margin-top: 6px;
+}
+.tl-detail .sec-head .lhs .lead .lk,
+.tl-detail .sec-head .lhs .lead a {
+  color: var(--green-deep);
+  font-weight: 600;
+  text-decoration: none;
+}
+.tl-detail .sec-head .lhs .lead b {
+  color: var(--ink);
+}
+.tl-detail .sec-head .rhs {
+  font-size: 12px;
+  color: var(--mute);
+  white-space: nowrap;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+.tl-detail .card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow);
+  border-radius: 0;
+}
+.tl-detail .pad {
+  padding: 17px 20px;
+}
+.tl-detail .grid2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0 24px;
+  align-items: start;
+}
+
+/* ---------------------------------------------------------------------
+   Logistics grid
+   --------------------------------------------------------------------- */
+.tl-detail .logi-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 22px 30px;
+}
+.tl-detail .logi .lk {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--mute);
+}
+.tl-detail .logi .lv {
+  font-size: 14px;
+  font-weight: 600;
+  margin-top: 5px;
+}
+.tl-detail .logi .lv.muted {
+  color: var(--mute);
+}
+.tl-detail .logi-note {
+  font-size: 12px;
+  color: var(--mute);
+  font-style: italic;
+  margin-top: 20px;
+}
+/* LogisticsCell renders <div><dt>label</dt><dd>value</dd></div>; map its
+   <dt>/<dd> onto the mockup's .lk / .lv look without touching the helper. */
+.tl-detail .logi-grid > div > dt {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--mute);
+}
+.tl-detail .logi-grid > div > dd {
+  font-size: 14px;
+  font-weight: 600;
+  margin-top: 5px;
+  color: var(--ink);
+}
+
+/* ---------------------------------------------------------------------
+   Form bits — textarea / select / .tinput, save bar, notes labels.
+   --------------------------------------------------------------------- */
+.tl-detail textarea,
+.tl-detail select,
+.tl-detail .tinput {
+  width: 100%;
+  font-family: inherit;
+  font-size: 13px;
+  padding: 10px 12px;
+  border: 1px solid var(--line-2, #dcdde1);
+  background: #fff;
+  color: var(--ink);
+  border-radius: 0;
+}
+.tl-detail textarea {
+  resize: vertical;
+  min-height: 48px;
+  line-height: 1.5;
+}
+.tl-detail textarea::placeholder,
+.tl-detail .tinput::placeholder {
+  color: var(--mute-2);
+}
+.tl-detail .savebar {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 14px;
+}
+.tl-detail .notes-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.tl-detail .notes-label .tagint {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--mute-2);
+  border: 1px solid var(--line-2, #dcdde1);
+  padding: 1px 5px;
+}
+
+/* =====================================================================
+   ANIMATIONS — flag wave, hazard stripe, urgent pulse, critical glow.
+   prefers-reduced-motion guards applied at the bottom of this block.
+   ===================================================================== */
+@keyframes tld-warnRing {
+  0% { transform: scale(1); opacity: 0.55; }
+  70% { transform: scale(3); opacity: 0; }
+  100% { transform: scale(3); opacity: 0; }
+}
+@keyframes tld-solxStripe {
+  to { background-position: 19.8px 0; }
+}
+@keyframes tld-flagWave {
+  0%, 100% { transform: rotate(-4deg); }
+  45% { transform: rotate(7deg); }
+}
+@keyframes tld-flagFlap {
+  0% { transform: rotate(-5deg) scaleX(1); }
+  25% { transform: rotate(5deg) scaleX(0.9); }
+  50% { transform: rotate(-3deg) scaleX(1); }
+  75% { transform: rotate(7deg) scaleX(0.92); }
+  100% { transform: rotate(-5deg) scaleX(1); }
+}
+@keyframes tld-urgentPulse {
+  0%, 100% {
+    background: var(--amber-tint);
+    box-shadow: 0 0 0 0 rgba(232, 135, 14, 0);
+  }
+  50% {
+    background: rgba(232, 135, 14, 0.3);
+    box-shadow: 0 0 0 4px rgba(232, 135, 14, 0.16);
+  }
+}
+@keyframes tld-critGlow {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(232, 135, 14, 0); }
+  50% { box-shadow: 0 0 0 5px rgba(232, 135, 14, 0.2); }
+}
+
+/* ---------------------------------------------------------------------
+   Factory instructions — restyle TaskLineEditor's "Factory instructions"
+   section (rendered inside the .panel). The mockup uses a 2-col grid of
+   fi-cards with a hazard "Missing mapping" warn tag. We map onto the real
+   DOM: the orange-bordered <section> → fi-grid card-wall; each factory row
+   (rounded-md border bg-white) → fi-card. Hazard look comes from the
+   "Missing factory mapping" pill.
+   --------------------------------------------------------------------- */
+.tl-detail .tag-warn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  background: var(--amber-tint);
+  color: var(--amber-deep);
+  border: 1px solid var(--amber-line);
+  padding: 2px 8px;
+  white-space: nowrap;
+  flex: none;
+}
+.tl-detail .tag-warn .haz {
+  width: 8px;
+  height: 8px;
+  background: repeating-linear-gradient(
+    -45deg,
+    #0f0f0f 0 2px,
+    var(--amber) 2px 4px
+  );
+  flex: none;
+}
+
+/* ---------------------------------------------------------------------
+   KNOWN RISKS / WARNINGS — RiskFlagsEditor.
+   The component's own DOM is rose; we re-skin it to the mockup's AMBER
+   look with a striped, animated hazard icon. The whole component lives in
+   a .risk-shell wrapper added in the page so we target it precisely
+   without touching the component .tsx.
+   --------------------------------------------------------------------- */
+.tl-detail .risk-shell > section {
+  border-radius: 0;
+  border-left: 3px solid var(--amber) !important;
+  border-top: 1px solid var(--line) !important;
+  border-right: 1px solid var(--line) !important;
+  border-bottom: 1px solid var(--line) !important;
+  background: var(--card) !important;
+  box-shadow: var(--shadow);
+  padding: 17px 20px !important;
+}
+/* Header row icon → striped hazard square. */
+.tl-detail .risk-shell > section > div:first-child > span:first-child {
+  width: 32px;
+  height: 32px;
+  border-radius: 0 !important;
+  background: repeating-linear-gradient(
+    -45deg,
+    #0f0f0f 0 7px,
+    var(--amber) 7px 14px
+  ) !important;
+  background-size: 19.8px 19.8px !important;
+  color: #fff !important;
+  position: relative;
+  overflow: hidden;
+  flex: none;
+  font-size: 0; /* hide the bare "⚠" glyph; stripes carry the meaning */
+}
+.tl-detail .risk-shell > section > div:first-child > span:first-child::after {
+  content: "⚠";
+  font-size: 15px;
+  filter: drop-shadow(0 0 2px rgba(0, 0, 0, 0.7));
+}
+@media (prefers-reduced-motion: no-preference) {
+  .tl-detail .risk-shell > section > div:first-child > span:first-child {
+    animation: tld-solxStripe 0.6s linear infinite,
+      tld-critGlow 1.8s ease-in-out infinite;
+  }
+}
+/* Header title + "N active" count → amber tones. */
+.tl-detail .risk-shell > section > div:first-child > span:nth-child(2) {
+  color: var(--ink) !important;
+  font-size: 16px;
+  font-weight: 700;
+}
+.tl-detail .risk-shell [class*="bg-rose-600"] {
+  background: var(--amber-tint) !important;
+  color: var(--amber-deep) !important;
+  border: 1px solid var(--amber-line);
+  border-radius: 0 !important;
+}
+/* Active risk chips → amber chips. */
+.tl-detail .risk-shell [class*="border-rose-300"][class*="bg-rose-100"] {
+  border-color: var(--amber-line) !important;
+  background: var(--amber-tint) !important;
+  color: var(--amber-deep) !important;
+  border-radius: 0 !important;
+}
+/* Risk option grid cells: turn "on" cells amber instead of rose. */
+.tl-detail .risk-shell [class*="border-rose-300"][class*="bg-rose-100\\/70"],
+.tl-detail .risk-shell div[class*="bg-rose-100/70"] {
+  border-color: var(--amber-line) !important;
+  background: var(--amber-tint) !important;
+  border-radius: 0 !important;
+}
+.tl-detail .risk-shell [class*="text-rose-900"] {
+  color: var(--amber-deep) !important;
+}
+.tl-detail .risk-shell input[type="checkbox"] {
+  accent-color: var(--amber) !important;
+}
+.tl-detail .risk-shell [class*="border-rose-200"] {
+  border-color: var(--amber-line) !important;
+}
+/* Save button → ink primary, square. */
+.tl-detail .risk-shell button[class*="bg-solux"] {
+  background: var(--ink) !important;
+  border-radius: 0 !important;
+  color: #fff;
+}
+.tl-detail .risk-shell button[class*="bg-solux"]:hover {
+  background: #000 !important;
+}
+
+/* ---------------------------------------------------------------------
+   ATTACHMENTS — AttachmentsPanel. Re-skin its .panel shell + the file
+   list rows to the mockup's att-row / dropzone look. The component's
+   internal Tailwind classes are targeted via the .att-shell wrapper.
+   --------------------------------------------------------------------- */
+.tl-detail .att-shell > section {
+  border-radius: 0 !important;
+  border: 1px solid var(--line) !important;
+  background: var(--card) !important;
+  box-shadow: var(--shadow);
+  padding: 17px 20px !important;
+}
+.tl-detail .att-shell ul {
+  border-radius: 0 !important;
+  border: none !important;
+}
+.tl-detail .att-shell ul > li {
+  border: 1px solid var(--line);
+  background: #fff;
+  padding: 14px 16px;
+  margin-bottom: 10px;
+}
+.tl-detail .att-shell ul > li:hover {
+  background: #fff;
+}
+/* Square preview thumbnails. */
+.tl-detail .att-shell ul > li a[class*="h-12"][class*="w-12"],
+.tl-detail .att-shell ul > li a[class*="rounded"] {
+  border-radius: 0 !important;
+  border-color: var(--line-2, #dcdde1) !important;
+}
+
+/* ---------------------------------------------------------------------
+   STICKERS — StickerRequirementsEditor. Re-skin shell + rows.
+   --------------------------------------------------------------------- */
+.tl-detail .stk-shell > section {
+  border-radius: 0 !important;
+  border: 1px solid var(--line) !important;
+  background: var(--card) !important;
+  box-shadow: var(--shadow);
+  padding: 17px 20px !important;
+}
+.tl-detail .stk-shell ul {
+  border-radius: 0 !important;
+  border: none !important;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.tl-detail .stk-shell ul > li {
+  border: 1px solid var(--line);
+  background: #fff;
+  padding: 12px 16px;
+}
+.tl-detail .stk-shell button[class*="bg-solux"] {
+  background: var(--ink) !important;
+  border-radius: 0 !important;
+  color: #fff;
+}
+.tl-detail .stk-shell button[class*="bg-solux"]:hover {
+  background: #000 !important;
+}
+
+/* ---------------------------------------------------------------------
+   PRODUCT CONFIGURATION — ProductSummaryCard + TaskLineEditor.
+   Square the corners + neutralise the rainbow tints to the mockup palette
+   so the leading config card reads as one calm surface.
+   --------------------------------------------------------------------- */
+.tl-detail .prod-shell .panel,
+.tl-detail .prod-shell [class*="rounded-t-xl"],
+.tl-detail .prod-shell [class*="rounded-xl"],
+.tl-detail .prod-shell [class*="rounded-lg"],
+.tl-detail .prod-shell [class*="rounded-md"] {
+  border-radius: 0 !important;
+}
+.tl-detail .prod-shell .panel {
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow);
+}
+
+/* ---------------------------------------------------------------------
+   VALIDATION HISTORY + ACTIVITY timelines — re-skin to vh-row / act-row.
+   Components keep their own DOM; we square corners + recolour shells.
+   --------------------------------------------------------------------- */
+.tl-detail .vh-shell > section,
+.tl-detail .act-shell {
+  border-radius: 0 !important;
+}
+.tl-detail .vh-shell > section {
+  border: 1px solid var(--line) !important;
+  background: var(--card) !important;
+  box-shadow: var(--shadow);
+  padding: 17px 20px !important;
+}
+
+/* ---------------------------------------------------------------------
+   Reduced-motion: kill every decorative animation on this page.
+   --------------------------------------------------------------------- */
+@media (prefers-reduced-motion: reduce) {
+  .tl-detail .flag,
+  .tl-detail .risk-shell > section > div:first-child > span:first-child {
+    animation: none !important;
+  }
+}
+
+/* ---------------------------------------------------------------------
+   Responsive
+   --------------------------------------------------------------------- */
+@media (max-width: 900px) {
+  .tl-detail .grid2,
+  .tl-detail .fi-grid {
+    grid-template-columns: 1fr;
+  }
+  .tl-detail .logi-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
