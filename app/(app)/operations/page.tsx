@@ -566,8 +566,8 @@ export default async function OperationsPage({
         />
       )}
 
-      {/* ============ KPI STRIP — compact ============ */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+      {/* ============ KPI STRIP — premium (matches order detail) ============ */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3.5">
         <KpiTile
           label="Revenue in pipeline"
           value={formatMoney(revenueInPipeline)}
@@ -857,23 +857,16 @@ function KpiTile({
   hint?: string;
   tone?: "muted" | "info" | "warn" | "danger";
 }) {
-  const valueClass = {
-    muted: "text-neutral-900",
-    info: "text-sky-700",
-    warn: "text-amber-700",
-    danger: "text-rose-700",
-  }[tone];
+  // `tone` is kept in the signature for call-site compatibility but the
+  // premium palette is monochrome (ink) — colour is reserved for the green
+  // positive signal + the Hazard alert treatment, never KPI deltas. This
+  // makes the Operations KPI cards pixel-identical to the order-detail row.
+  void tone;
   return (
-    <div className="rounded-lg border border-neutral-200 bg-white px-3 py-2">
-      <div className="text-[10px] font-semibold uppercase tracking-widerx text-neutral-500">
-        {label}
-      </div>
-      <div
-        className={`text-base font-bold tabular-nums tracking-tight mt-0.5 leading-tight ${valueClass}`}
-      >
-        {value}
-      </div>
-      {hint && <div className="text-[10px] text-neutral-400 mt-0.5">{hint}</div>}
+    <div className="po-kpi">
+      <div className="k">{label}</div>
+      <div className="val">{value}</div>
+      {hint && <div className="sub">{hint}</div>}
     </div>
   );
 }

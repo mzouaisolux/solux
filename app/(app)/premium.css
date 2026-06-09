@@ -582,3 +582,51 @@
 .po-premium .bg-red-500 {
   background-color: var(--ink);
 }
+
+/* Cool accents (sky / indigo / violet / purple) → ink / neutral, so the
+   list view and the detail view share one disciplined palette. */
+.po-premium .text-sky-600,
+.po-premium .text-sky-700,
+.po-premium .text-sky-800,
+.po-premium .text-sky-900,
+.po-premium .text-indigo-600,
+.po-premium .text-indigo-700,
+.po-premium .text-indigo-800,
+.po-premium .text-violet-600,
+.po-premium .text-violet-700,
+.po-premium .text-violet-800,
+.po-premium .text-purple-600,
+.po-premium .text-purple-700,
+.po-premium .text-purple-800 {
+  color: var(--ink-soft);
+}
+.po-premium .border-sky-200,
+.po-premium .border-sky-300,
+.po-premium .border-indigo-200,
+.po-premium .border-violet-200,
+.po-premium .border-purple-200 {
+  border-color: var(--line-2);
+}
+.po-premium .bg-sky-50,
+.po-premium .bg-sky-50\/40,
+.po-premium .bg-sky-50\/50,
+.po-premium .bg-indigo-50,
+.po-premium .bg-violet-50,
+.po-premium .bg-purple-50 {
+  background-color: #fafafa;
+}
+.po-premium .bg-sky-500,
+.po-premium .bg-sky-600,
+.po-premium .bg-indigo-500,
+.po-premium .bg-violet-500,
+.po-premium .bg-violet-700,
+.po-premium .bg-purple-500 {
+  background-color: var(--ink);
+}
+
+/* Unify micro-label tracking on premium pages: pull the wide .14em utility
+   in to the premium .07em so every eyebrow / column header / KPI label
+   spaces identically across the list and detail views. */
+.po-premium .tracking-widerx {
+  letter-spacing: 0.07em;
+}
