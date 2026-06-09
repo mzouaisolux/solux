@@ -1,4 +1,3 @@
-import "./premium.css";
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { notFound } from "next/navigation";

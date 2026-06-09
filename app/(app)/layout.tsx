@@ -1,3 +1,4 @@
+import "./premium.css";
 import { Suspense } from "react";
 import { createClient } from "@/lib/supabase/server";
 import { getEffectiveRole } from "@/lib/auth";
