@@ -23,8 +23,13 @@ export function NotificationBell({
   items: NotificationItem[];
 }) {
   const [open, setOpen] = useState(false);
+  const [tab, setTab] = useState<"all" | "alerts">("all");
   const rootRef = useRef<HTMLDivElement>(null);
   const hasUnread = count > 0;
+  const alertItems = items.filter(
+    (it) => it.severity === "critical" || it.severity === "high"
+  );
+  const shown = tab === "alerts" ? alertItems : items;
 
   useEffect(() => {
     if (!open) return;
@@ -79,7 +84,7 @@ export function NotificationBell({
           <div className="sx-noti-head">
             <div className="sx-noti-top">
               <span className="htxt">
-                <span className="lbl">Notifications</span>
+                <span className="lbl">Operational updates</span>
                 <span className="sub">
                   {hasUnread ? (
                     <>
@@ -99,33 +104,48 @@ export function NotificationBell({
                 onClick={() => setOpen(false)}
                 className="sx-noti-open"
               >
-                <NavArrow /> Open inbox
+                <NavArrow /> Open /operations
               </Link>
+            </div>
+            <div className="sx-noti-tabs">
+              <button
+                type="button"
+                className={`sx-noti-tab ${tab === "all" ? "on" : ""}`}
+                onClick={() => setTab("all")}
+              >
+                All <span className="tcnt">{items.length}</span>
+              </button>
+              <button
+                type="button"
+                className={`sx-noti-tab ${tab === "alerts" ? "on" : ""}`}
+                onClick={() => setTab("alerts")}
+              >
+                Alerts <span className="tcnt">{alertItems.length}</span>
+              </button>
             </div>
           </div>
 
           {/* LIST */}
-          {items.length === 0 ? (
+          {shown.length === 0 ? (
             <div className="sx-noti-empty">
-              No unread updates. You&apos;re caught up.
+              {tab === "alerts"
+                ? "No alerts right now."
+                : "No unread updates. You're caught up."}
             </div>
           ) : (
             <div className="sx-noti-list">
-              {items.map((it) => {
-                const hot = it.severity === "critical" || it.severity === "high";
-                const variant = hot
-                  ? "hazard"
-                  : it.severity === "medium"
-                  ? "green"
-                  : "";
+              {shown.map((it) => {
+                const tag = tagFor(it);
                 return (
                   <Link
                     key={it.id}
                     href={it.href}
                     onClick={() => setOpen(false)}
-                    className={`sx-noti-item unread ${hot ? "haz" : ""}`}
+                    className={`sx-noti-item unread ${
+                      tag.icon === "hazard" ? "haz" : ""
+                    }`}
                   >
-                    <span className={`sx-niic ${variant}`}>
+                    <span className={`sx-niic ${tag.icon}`}>
                       <NavGlyph name={notifGlyph(it.entityType)} />
                     </span>
                     <span className="sx-nibody">
@@ -134,9 +154,7 @@ export function NotificationBell({
                           <b>{it.entityLabel}</b>
                           {it.clientName ? ` · ${it.clientName}` : ""}
                         </span>
-                        <span className={`sx-nitag ${hot ? "haz" : ""}`}>
-                          {sevTag(it)}
-                        </span>
+                        <span className={`sx-nitag ${tag.cls}`}>{tag.text}</span>
                       </span>
                       <span className="sx-nititle">
                         <b>{it.eventTypeLabel}</b>{" "}
@@ -156,12 +174,23 @@ export function NotificationBell({
           {/* FOOT */}
           <div className="sx-noti-foot">
             <Link
-              href="/operations"
+              href="/dashboard"
               onClick={() => setOpen(false)}
               className="vall"
             >
-              <NavArrow /> View all activity
+              <NavArrow /> Open Action Center
             </Link>
+            <span
+              style={{
+                marginLeft: "auto",
+                fontSize: "12px",
+                fontWeight: 600,
+                color: "var(--mute)",
+              }}
+              title="Open an item to mark it read"
+            >
+              Mark all read
+            </span>
           </div>
         </div>
       )}
@@ -187,20 +216,24 @@ function notifGlyph(entityType: string): string {
   }
 }
 
-/** Short tag label for a notification row. */
-function sevTag(it: NotificationItem): string {
-  if (it.source === "message") return "Note";
-  if (it.source === "comment" || it.source === "review") return "Reply";
-  switch (it.severity) {
-    case "critical":
-      return "Critical";
-    case "high":
-      return "Important";
-    case "medium":
-      return "Update";
-    default:
-      return "Info";
-  }
+/** Contextual tag (text + colour class + icon variant) for a notification.
+ *  Update = green (positive), Action = amber (needs input), Alert = hazard. */
+function tagFor(it: NotificationItem): {
+  text: string;
+  cls: string;
+  icon: string;
+} {
+  const hot = it.severity === "critical" || it.severity === "high";
+  const s = `${it.eventTypeLabel ?? ""} ${it.message ?? ""}`.toLowerCase();
+  if (hot || /delay|late|overdue|behind|blocked|cancel/.test(s))
+    return { text: "Alert", cls: "haz", icon: "hazard" };
+  if (it.source === "comment" || it.source === "review" || it.source === "message")
+    return { text: "Reply", cls: "amb", icon: "amber" };
+  if (/request|to enter|awaiting|approval|needs|action/.test(s))
+    return { text: "Action", cls: "amb", icon: "amber" };
+  if (/received|confirmed|approved|validated|completed|paid|won|deposit/.test(s))
+    return { text: "Update", cls: "", icon: "green" };
+  return { text: "Update", cls: "amb", icon: "amber" };
 }
 
 /** Compact relative time matching the OperationsFeed row formatting. */

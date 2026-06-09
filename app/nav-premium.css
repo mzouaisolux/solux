@@ -444,6 +444,49 @@
   height: 13px;
   color: var(--green-deep);
 }
+.sx-noti-tabs {
+  display: flex;
+  gap: 20px;
+}
+.sx-noti-tab {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--mute);
+  padding-bottom: 12px;
+  cursor: pointer;
+  position: relative;
+  background: none;
+  border: none;
+  font-family: inherit;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.sx-noti-tab.on {
+  color: var(--ink);
+  font-weight: 600;
+}
+.sx-noti-tab.on::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 2px;
+  background: var(--ink);
+}
+.sx-noti-tab .tcnt {
+  font-size: 10px;
+  font-weight: 700;
+  background: var(--line);
+  color: var(--mute);
+  padding: 0 6px;
+  line-height: 1.7;
+}
+.sx-noti-tab.on .tcnt {
+  background: var(--ink);
+  color: #fff;
+}
 .sx-noti-list {
   border-top: 1px solid var(--line);
   overflow-y: auto;
@@ -508,6 +551,11 @@
   border-color: rgba(85, 255, 126, 0.45);
   color: var(--green-deep);
 }
+.sx-niic.amber {
+  background: rgba(232, 135, 14, 0.12);
+  border-color: rgba(232, 135, 14, 0.45);
+  color: #9a5a00;
+}
 .sx-nibody { flex: 1; min-width: 0; }
 .sx-niref {
   display: flex;
@@ -536,6 +584,11 @@
   background: var(--green);
 }
 .sx-nitag.haz { background: var(--ink); color: #fff; }
+.sx-nitag.amb {
+  background: rgba(232, 135, 14, 0.16);
+  color: #9a5a00;
+  border: 1px solid rgba(232, 135, 14, 0.45);
+}
 .sx-nititle {
   font-size: 13.5px;
   font-weight: 600;
