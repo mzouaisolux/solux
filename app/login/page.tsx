@@ -6,7 +6,7 @@ export default function LoginPage({
   searchParams: { error?: string };
 }) {
   return (
-    <div className="min-h-screen grid place-items-center p-6">
+    <div className="po-premium min-h-screen grid place-items-center p-6">
       <form
         action={login}
         className="w-full max-w-sm space-y-4 bg-white p-6 rounded-lg border shadow-sm"

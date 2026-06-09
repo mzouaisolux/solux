@@ -34,7 +34,12 @@ export default async function AppLayout({
         isSuperAdmin={isSuperAdmin}
         isSimulating={isSimulating}
       />
-      <main className="flex-1">{children}</main>
+      {/* `po-premium` applies the validated design language (Plus Jakarta Sans,
+          sharp 0px corners, ink + Flash-Green palette, disciplined de-rainbow,
+          tightened micro-labels) to EVERY page in the app from one place, so
+          the whole product reads as one design system. Page-level po-premium
+          wrappers (added earlier) are harmless no-ops under this. */}
+      <main className="flex-1 po-premium">{children}</main>
       {/* Persistent conversation layer — floating button bottom-right
           appears on every workspace route that maps to an entity
           (document / task list / production order / client). Stays
