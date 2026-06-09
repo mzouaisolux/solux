@@ -4,16 +4,17 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import type { NavCategory } from "@/lib/navigation";
+import { NavGlyph, NavArrow, pickGlyph } from "@/components/NavIcons";
 
 /**
- * Top mega menu. PURE PRESENTATION — it receives an already permission-
- * filtered tree (`categories`) computed on the server in components/Nav.tsx
- * via buildVisibleNavigation(). It performs NO permission checks itself, so
- * the access logic stays in one place and can't drift.
+ * Premium top mega menu. PURE PRESENTATION — receives an already permission-
+ * filtered tree (`categories`) computed on the server (components/Nav.tsx via
+ * buildVisibleNavigation). No permission checks here.
  *
- * Behavior (desktop): a category with groups opens a dropdown panel on hover
- * or click; a category with only an `href` is a plain link. Panels close on
- * mouse-leave, click-outside, or Escape. Subtle fade/slide transition.
+ * Visual: validated mega-menu mockup — dark trigger with green caret/underline,
+ * white dropdown panel (big shadow), columns from groups, each item an icon
+ * box (inverts to ink on hover) + title + sub + arrow + green hover rail.
+ * The Orders category renders as a single-column status list.
  */
 export default function MegaMenu({
   categories,
@@ -23,25 +24,12 @@ export default function MegaMenu({
   categories: NavCategory[];
   /** categoryId → count of items requiring the current user's action. */
   badges?: Record<string, number>;
-  /** item href (base, no query) → action count, shown right-aligned on the row. */
+  /** item href (base, no query) → action count, shown on the row. */
   itemBadges?: Record<string, number>;
 }) {
   const pathname = usePathname() ?? "";
   const [openId, setOpenId] = useState<string | null>(null);
   const rootRef = useRef<HTMLElement | null>(null);
-
-  const ActionBadge = ({ id }: { id: string }) => {
-    const n = badges?.[id] ?? 0;
-    if (n <= 0) return null;
-    return (
-      <span
-        className="ml-1.5 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-[var(--green)] px-1.5 text-[10px] font-semibold leading-none text-[var(--ink)]"
-        aria-label={`${n} item${n === 1 ? "" : "s"} need action`}
-      >
-        {n > 99 ? "99+" : n}
-      </span>
-    );
-  };
 
   // Close on click-outside + Escape.
   useEffect(() => {
@@ -73,144 +61,173 @@ export default function MegaMenu({
   };
 
   return (
-    <nav ref={rootRef} className="flex items-center gap-5">
-      {categories.map((cat) => {
+    <nav ref={rootRef} className="flex items-stretch h-[62px]">
+      {categories.map((cat, i) => {
         const hasPanel = cat.groups.length > 0;
         const active = isActiveCategory(cat);
+        const catBadge = badges?.[cat.id] ?? 0;
 
-        // Direct-link category (Dashboard, Operations): plain link, no panel.
+        // Direct-link category (e.g. Dashboard): plain link, no panel.
         if (!hasPanel && cat.href) {
           return (
             <Link
               key={cat.id}
               href={cat.href}
-              className={`relative inline-flex items-center px-0.5 py-1.5 text-[13.5px] font-medium transition-colors ${
-                active
-                  ? "text-white after:absolute after:left-0 after:right-0 after:-bottom-px after:h-0.5 after:bg-[var(--green)]"
-                  : "text-[#DFDEE4] hover:text-white"
+              className={`sx-navlink flex items-center gap-2 px-4 text-[13.5px] font-medium transition-colors ${
+                active ? "text-white is-open" : "text-[#DFDEE4] hover:text-white"
               }`}
             >
               {cat.label}
-              <ActionBadge id={cat.id} />
+              {catBadge > 0 && (
+                <span className="sx-navcount">{catBadge > 99 ? "99+" : catBadge}</span>
+              )}
             </Link>
           );
         }
 
         const open = openId === cat.id;
-        // Width scales with the number of columns; capped so it never feels heavy.
-        const cols = Math.min(cat.groups.length, 3);
-        const panelWidth =
-          cols >= 3 ? "w-[640px]" : cols === 2 ? "w-[460px]" : "w-[260px]";
+        const alignRight = i >= categories.length - 2;
+        const isOrders = cat.id === "orders";
+        const cols = cat.groups.length;
 
         return (
           <div
             key={cat.id}
-            className="relative"
+            className="relative flex"
             onMouseEnter={() => setOpenId(cat.id)}
-            onMouseLeave={() => setOpenId((cur) => (cur === cat.id ? null : cur))}
+            onMouseLeave={() =>
+              setOpenId((cur) => (cur === cat.id ? null : cur))
+            }
           >
             <button
               type="button"
               aria-expanded={open}
               aria-haspopup="true"
               onClick={() => setOpenId((cur) => (cur === cat.id ? null : cat.id))}
-              className={`relative flex items-center gap-1.5 px-0.5 py-1.5 text-[13.5px] font-medium transition-colors ${
-                active || open
-                  ? "text-white after:absolute after:left-0 after:right-0 after:-bottom-px after:h-0.5 after:bg-[var(--green)]"
-                  : "text-[#DFDEE4] hover:text-white"
-              }`}
+              className={`sx-navlink flex items-center gap-2 px-4 text-[13.5px] font-medium transition-colors ${
+                active || open ? "text-white" : "text-[#DFDEE4] hover:text-white"
+              } ${open ? "is-open" : ""}`}
             >
               {cat.label}
-              <ActionBadge id={cat.id} />
-              <svg
-                viewBox="0 0 20 20"
-                fill="currentColor"
-                aria-hidden
-                className={`h-3 w-3 text-[#B9B6C4] transition-transform duration-200 ${
-                  open ? "rotate-180" : ""
-                }`}
-              >
-                <path
-                  fillRule="evenodd"
-                  d="M5.23 7.21a.75.75 0 0 1 1.06.02L10 11.06l3.71-3.83a.75.75 0 1 1 1.08 1.04l-4.25 4.39a.75.75 0 0 1-1.08 0L5.21 8.27a.75.75 0 0 1 .02-1.06Z"
-                  clipRule="evenodd"
-                />
-              </svg>
+              {catBadge > 0 && (
+                <span className="sx-navcount">{catBadge > 99 ? "99+" : catBadge}</span>
+              )}
+              <span className="sx-caret" aria-hidden>
+                ▾
+              </span>
             </button>
 
-            {/* Panel — kept mounted for a smooth transition; pointer-events
-                disabled while closed so it never blocks the page. */}
-            <div
-              className={`absolute left-0 top-full z-50 pt-2 transition duration-150 ease-out ${
-                open
-                  ? "opacity-100 translate-y-0 visible"
-                  : "pointer-events-none invisible -translate-y-1 opacity-0"
-              }`}
-            >
-              <div
-                className={`${panelWidth} rounded-xl border border-neutral-200 bg-white p-4 shadow-lg shadow-neutral-200/60`}
-              >
+            {open &&
+              (isOrders ? (
                 <div
-                  className="grid gap-x-6 gap-y-1"
-                  style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}
+                  className="sx-mega sx-list"
+                  style={alignRight ? { right: 0, left: "auto" } : undefined}
                 >
-                  {cat.groups.map((group) => (
-                    <div key={group.title} className="min-w-0">
-                      <div className="px-2 pb-1.5 text-[10px] font-semibold uppercase tracking-widerx text-neutral-400">
-                        {group.title}
-                      </div>
-                      <ul className="space-y-0.5">
+                  <div className="sx-colhead">{cat.label}</div>
+                  {cat.groups
+                    .flatMap((g) => g.items)
+                    .map((item) => (
+                      <Link
+                        key={item.href}
+                        href={item.href}
+                        onClick={() => setOpenId(null)}
+                        className={`sx-li ${isActiveHref(item.href) ? "is-active" : ""}`}
+                      >
+                        <span className={`sx-lidot ${orderDot(item.label)}`} />
+                        <span className="sx-body">
+                          <span className="sx-title">{item.label}</span>
+                          {item.description && (
+                            <span className="sx-sub">{item.description}</span>
+                          )}
+                        </span>
+                        <span className="sx-arrow">
+                          <NavArrow />
+                        </span>
+                      </Link>
+                    ))}
+                </div>
+              ) : (
+                <div
+                  className="sx-mega"
+                  style={alignRight ? { right: 0, left: "auto" } : undefined}
+                >
+                  <div
+                    className="sx-mega-cols"
+                    style={{
+                      gridTemplateColumns: `repeat(${cols}, minmax(232px, 300px))`,
+                    }}
+                  >
+                    {cat.groups.map((group, gi) => (
+                      <div
+                        key={group.title}
+                        className={`sx-mega-col ${
+                          cols > 1 && gi === cols - 1 ? "accent" : ""
+                        }`}
+                      >
+                        <div className="sx-colhead">{group.title}</div>
                         {group.items.map((item) => {
                           const itemActive = isActiveHref(item.href);
-                          const itemCount = itemBadges?.[base(item.href)] ?? 0;
+                          const cnt = itemBadges?.[base(item.href)] ?? 0;
                           return (
-                            <li key={item.href}>
-                              <Link
-                                href={item.href}
-                                onClick={() => setOpenId(null)}
-                                className={`flex items-center gap-2 rounded-md px-2 py-1.5 transition-colors ${
-                                  itemActive
-                                    ? "bg-neutral-100"
-                                    : "hover:bg-neutral-50"
-                                }`}
-                              >
-                                <span className="min-w-0 flex-1">
-                                  <span
-                                    className={`block text-[13px] font-medium ${
-                                      itemActive
-                                        ? "text-neutral-900"
-                                        : "text-neutral-700"
-                                    }`}
-                                  >
-                                    {item.label}
-                                  </span>
-                                  {item.description && (
-                                    <span className="block text-[11px] text-neutral-400">
-                                      {item.description}
+                            <Link
+                              key={item.href}
+                              href={item.href}
+                              onClick={() => setOpenId(null)}
+                              className={`sx-item ${itemActive ? "is-active" : ""}`}
+                            >
+                              <span className="sx-ic">
+                                <NavGlyph name={pickGlyph(item.label)} />
+                              </span>
+                              <span className="sx-body">
+                                <span className="sx-title">
+                                  {item.label}
+                                  {cnt > 0 && (
+                                    <span className="sx-badge">
+                                      <span className="sx-ring" />
+                                      {cnt > 99 ? "99+" : cnt}
                                     </span>
                                   )}
                                 </span>
-                                {itemCount > 0 && (
-                                  <span
-                                    className="inline-flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-rose-500 px-1.5 text-[11px] font-semibold leading-none text-white"
-                                    aria-label={`${itemCount} need action`}
-                                  >
-                                    {itemCount > 99 ? "99+" : itemCount}
-                                  </span>
+                                {item.description && (
+                                  <span className="sx-sub">{item.description}</span>
                                 )}
-                              </Link>
-                            </li>
+                              </span>
+                              <span className="sx-arrow">
+                                <NavArrow />
+                              </span>
+                            </Link>
                           );
                         })}
-                      </ul>
-                    </div>
-                  ))}
+                        {gi === 0 && cat.href && (
+                          <div className="sx-colfoot">
+                            <Link
+                              href={cat.href}
+                              onClick={() => setOpenId(null)}
+                              className="sx-footlink"
+                            >
+                              <NavArrow /> All {cat.label.toLowerCase()}
+                            </Link>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
                 </div>
-              </div>
-            </div>
+              ))}
           </div>
         );
       })}
+      {openId && (
+        <div className="sx-scrim" onClick={() => setOpenId(null)} aria-hidden />
+      )}
     </nav>
   );
+}
+
+/** Status dot tone for the Orders list variant. */
+function orderDot(label: string): string {
+  const s = label.toLowerCase();
+  if (/production/.test(s)) return "live";
+  if (/archiv/.test(s)) return "hollow";
+  return "ink";
 }
