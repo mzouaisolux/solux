@@ -531,13 +531,14 @@ export default function TaskLineEditor({
 
   return (
     <div className="panel p-4 space-y-5">
-      {/* Header: product + quantity */}
-      <div className="flex items-start justify-between gap-3">
+      {/* Header: line + quantity (mockup .cfg-line) */}
+      <div className="cfg-line">
         <div>
-          <div className="eyebrow">Line</div>
-          <div className="font-semibold text-base mt-0.5">{productName}</div>
+          <div className="lk">Line</div>
+          <div className="lv">{productName}</div>
         </div>
-        <div className="flex flex-col items-end gap-2">
+        <div className="qwrap">
+          <div className="lk">Quantity</div>
           {/* Dirty / Saved status for this line */}
           {salesEditable && (isDirty || isTechDirty) && (
             <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-semibold text-amber-800">
@@ -550,8 +551,7 @@ export default function TaskLineEditor({
               ✓ Saved · {new Date(savedAt).toLocaleTimeString()}
             </span>
           )}
-          <label className="block w-32">
-            <span className="eyebrow mb-1 block">Quantity</span>
+          <label className="qbox block">
             <input
               type="number"
               min={0}
@@ -561,7 +561,7 @@ export default function TaskLineEditor({
                 setIsDirty(true);
               }}
               disabled={!salesEditable}
-              className="w-full rounded-md border border-neutral-200 px-3 py-1.5 text-sm text-right tabular-nums disabled:bg-neutral-50"
+              aria-label="Quantity"
             />
           </label>
         </div>
@@ -569,42 +569,24 @@ export default function TaskLineEditor({
 
       {/* ---------- SALES SECTION ---------- */}
       {salesFields.length > 0 && (
-        <section className="rounded-lg border border-sky-200 bg-sky-50/30 p-4 space-y-3">
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <div className="eyebrow text-sky-800">Sales configuration</div>
-              <p className="text-[11px] text-neutral-500 mt-0.5">
-                What the sales team specified.
-              </p>
-            </div>
-            {!salesEditable && (
+        <section>
+          {!salesEditable && (
+            <div className="flex items-center justify-end mb-2">
               <span
-                className="inline-flex items-center gap-1 rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-800"
+                className="tag-warn"
                 title="This task list has been submitted for production validation. Sales fields are locked until the production team bounces it back to needs_revision."
               >
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  viewBox="0 0 20 20"
-                  fill="currentColor"
-                  className="h-3 w-3"
-                  aria-hidden
-                >
-                  <path
-                    fillRule="evenodd"
-                    d="M10 1a4.5 4.5 0 0 0-4.5 4.5V9H5a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6a2 2 0 0 0-2-2h-.5V5.5A4.5 4.5 0 0 0 10 1Zm3 8V5.5a3 3 0 1 0-6 0V9h6Z"
-                    clipRule="evenodd"
-                  />
-                </svg>
-                Locked — submitted for validation
+                <span className="haz" aria-hidden />
+                <span className="tw-txt">Locked — submitted for validation</span>
               </span>
-            )}
-          </div>
+            </div>
+          )}
 
           {/* Explicit locked banner. Replaces the previous subtle "Locked"
               pill — sales users repeatedly mistook the pointer-events-none
               dropdowns for a bug rather than an intentional lock. */}
           {!salesEditable && (
-            <div className="rounded-md border border-amber-200 bg-amber-50/70 px-3 py-2 text-[11px] text-amber-900 leading-relaxed">
+            <div className="rounded-md border border-amber-200 bg-amber-50/70 px-3 py-2 text-[11px] text-amber-900 leading-relaxed mb-3">
               <b>Read-only.</b> Sales fields are locked while the task list
               is in production validation. To make changes, ask the
               production team to send it back for revision (the
@@ -612,11 +594,13 @@ export default function TaskLineEditor({
             </div>
           )}
 
-          <div className="grid gap-6 lg:grid-cols-[1fr_280px]">
+          <div className="cfg-wrap">
             <fieldset
               disabled={!salesEditable}
-              className="space-y-3 min-w-0 disabled:opacity-60"
+              className="cfg-form min-w-0 disabled:opacity-60"
             >
+              <div className="micro">Sales configuration</div>
+              <div className="hint">What the sales team specified.</div>
               {salesFields.map((f) => (
                 <ConfigFieldInput
                   key={f.id}
@@ -641,26 +625,38 @@ export default function TaskLineEditor({
           (global mapping → client preset → this order), and (2) additional
           factory-only attributes that don't exist in the sales config. */}
       {technicalEditable && (
-        <section className="rounded-lg border border-orange-300 bg-orange-50/40 p-4 space-y-3">
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <div className="eyebrow text-orange-900">
-                Factory instructions
-              </div>
-              <p className="text-[11px] text-neutral-500 mt-0.5 max-w-xl">
+        <section className="space-y-3">
+          <div className="sec-head">
+            <div className="lhs">
+              <h2>Factory instructions</h2>
+              <div className="lead">
                 Resolved in layers:{" "}
-                <Link
-                  href="/factory-mapping"
-                  className="underline hover:text-neutral-900"
-                >
+                <Link href="/factory-mapping" className="lk">
                   global mapping
                 </Link>{" "}
                 → client override → this order. Edit any row, then save it{" "}
                 <b>Order only</b> (one-off) or <b>for client</b> (pin just that
                 field — every future order for this client inherits it, while
                 all other fields keep following the global default).
-              </p>
+              </div>
             </div>
+            {factoryRows.some((r) => r.source === "missing") && (
+              <div className="rhs">
+                <span className="tag-warn">
+                  <span className="flag" aria-hidden>
+                    <HazardFlag />
+                  </span>
+                  <span className="tw-txt">
+                    {factoryRows.filter((r) => r.source === "missing").length}{" "}
+                    missing mapping
+                    {factoryRows.filter((r) => r.source === "missing").length ===
+                    1
+                      ? ""
+                      : "s"}
+                  </span>
+                </span>
+              </div>
+            )}
           </div>
           {factoryRows.length === 0 && (
             <p className="text-[11px] text-neutral-400">
@@ -668,30 +664,21 @@ export default function TaskLineEditor({
               references below.
             </p>
           )}
-          <div className="space-y-3">
+          <div className="fi-grid">
             {factoryRows.map((row) => (
-              <div
-                key={row.field_name}
-                className="rounded-md border border-neutral-200 bg-white p-3 space-y-2"
-              >
-                <div className="flex items-center justify-between gap-3">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="inline-flex items-center gap-1.5 rounded-full bg-sky-50 px-2 py-0.5 text-[11px] font-medium text-sky-900">
-                      {row.field_name}: {row.sales_value}
-                    </span>
+              <div key={row.field_name} className="fi-card">
+                <div className="fi-top">
+                  <span className="fi-name">
+                    {row.field_name} <span className="kk">= {row.sales_value}</span>
                     {row.factory_code && (
-                      <span className="text-[10px] font-mono text-neutral-500">
-                        {row.factory_code}
-                      </span>
+                      <span className="fi-code">{row.factory_code}</span>
                     )}
                     {row.source === "override" && (
-                      <span className="rounded-full bg-orange-100 text-orange-900 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-widerx">
-                        This order
-                      </span>
+                      <span className="fi-src order">This order</span>
                     )}
                     {row.source === "client_preset" && (
                       <span
-                        className="rounded-full bg-violet-100 text-violet-900 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-widerx"
+                        className="fi-src client"
                         title="Coming from this client's saved technical preset."
                       >
                         Client preset
@@ -699,43 +686,43 @@ export default function TaskLineEditor({
                     )}
                     {row.source === "mapping" && (
                       <span
-                        className="rounded-full bg-neutral-100 text-neutral-600 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-widerx"
+                        className="fi-src"
                         title="Global factory default for this option."
                       >
                         Default
                       </span>
                     )}
-                    {row.source === "missing" && (
-                      <span className="rounded-full bg-amber-100 text-amber-900 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-widerx">
-                        ⚠ Missing factory mapping
+                    {savedRows[row.field_name] && (
+                      <span className="fi-saved">
+                        ✓ Saved{" "}
+                        {savedRows[row.field_name] === "client"
+                          ? "for client"
+                          : "to this order"}
                       </span>
                     )}
-                  </div>
-                  {savedRows[row.field_name] && (
-                    <span className="shrink-0 text-[10px] font-semibold text-emerald-700">
-                      ✓ Saved{" "}
-                      {savedRows[row.field_name] === "client"
-                        ? "for client"
-                        : "to this order"}
+                  </span>
+                  {row.source === "missing" && (
+                    <span className="tag-warn">
+                      <span className="flag" aria-hidden>
+                        <HazardFlag />
+                      </span>
+                      <span className="tw-txt">Missing factory mapping</span>
                     </span>
                   )}
                 </div>
 
                 {row.source === "missing" ? (
-                  <p className="text-xs text-amber-800">
+                  <div className="fi-help">
                     No mapping configured for{" "}
                     <b>
                       {row.field_name} = {row.sales_value}
                     </b>
                     .{" "}
-                    <Link
-                      href="/factory-mapping"
-                      className="underline hover:text-neutral-900"
-                    >
+                    <Link href="/factory-mapping" className="lk">
                       Configure it →
                     </Link>{" "}
                     or type a one-off instruction below:
-                  </p>
+                  </div>
                 ) : null}
 
                 <textarea
@@ -752,7 +739,6 @@ export default function TaskLineEditor({
                       ? "Type the factory instruction, then choose where to save it."
                       : "Edit, then save for this order or for the client."
                   }
-                  className="w-full rounded-md border border-neutral-200 bg-white px-3 py-2 text-sm leading-relaxed"
                 />
 
                 {/* Field-local save modes. Shown whenever the row carries a
@@ -765,17 +751,17 @@ export default function TaskLineEditor({
                     (row.source === "missing" ? "" : row.text);
                   if (!effective.trim()) return null;
                   return (
-                    <div className="flex flex-wrap items-center gap-2">
+                    <div className="fi-save">
                       <button
                         type="button"
                         onClick={() =>
                           saveFieldForOrder(row.field_name, effective)
                         }
                         disabled={pendingFactory}
-                        className="rounded-md bg-neutral-900 text-white px-2.5 py-1 text-[11px] font-medium hover:bg-neutral-800 disabled:opacity-50"
+                        className="btn sm primary"
                         title="Save this value for THIS order only — does not change the client preset or global mapping."
                       >
-                        Order only
+                        Save · Order only
                       </button>
                       {clientId && (
                         <button
@@ -784,10 +770,10 @@ export default function TaskLineEditor({
                             saveFieldForClient(row.field_name, effective)
                           }
                           disabled={pendingPreset}
-                          className="rounded-md border border-violet-300 bg-violet-50 text-violet-800 px-2.5 py-1 text-[11px] font-medium hover:bg-violet-100 disabled:opacity-50"
+                          className="btn sm"
                           title="Save just this field as a client override — auto-loads on every future order for this client. All other fields keep following the global default."
                         >
-                          Save for client
+                          Save · For client
                         </button>
                       )}
                       {row.source === "override" && (
@@ -820,12 +806,10 @@ export default function TaskLineEditor({
           </div>
 
           {/* ---- Additional factory attributes (factory-only, not in sales config) ---- */}
-          <div className="border-t border-orange-200 pt-3 space-y-2">
-            <div>
-              <div className="text-[11px] font-semibold uppercase tracking-widerx text-orange-900">
-                Additional factory fields
-              </div>
-              <p className="text-[11px] text-neutral-500 mt-0.5 max-w-xl">
+          <div className="space-y-2">
+            <div className="fi-foot" style={{ borderTop: "none", paddingTop: 0 }}>
+              <div className="micro">Additional factory fields</div>
+              <p className="mt-1">
                 Factory-only references that aren&apos;t part of the sales
                 configuration — controller, connectors, cables, drivers,
                 mounting, packaging, inspection, internal refs…
@@ -833,38 +817,31 @@ export default function TaskLineEditor({
             </div>
 
             {extras.length > 0 ? (
-              <ul className="space-y-2">
+              <ul className="fi-grid">
                 {extras.map((ex) => (
-                  <li
-                    key={ex.key}
-                    className="rounded-md border border-neutral-200 bg-white p-2.5 space-y-1.5"
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="text-[12px] font-medium text-neutral-700">
-                          {ex.label}
-                        </span>
+                  <li key={ex.key} className="fi-card span2">
+                    <div className="fi-top">
+                      <span className="fi-name">
+                        {ex.label}
                         {ex.source === "client" ? (
                           <span
-                            className="rounded-full bg-violet-100 text-violet-900 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-widerx"
+                            className="fi-src client"
                             title="Coming from this client's saved preset."
                           >
                             Client preset
                           </span>
                         ) : (
-                          <span className="rounded-full bg-orange-100 text-orange-900 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-widerx">
-                            This order
-                          </span>
+                          <span className="fi-src order">This order</span>
                         )}
                         {savedRows[`extra:${ex.key}`] && (
-                          <span className="text-[10px] font-semibold text-emerald-700">
+                          <span className="fi-saved">
                             ✓ Saved{" "}
                             {savedRows[`extra:${ex.key}`] === "client"
                               ? "for client"
                               : "to this order"}
                           </span>
                         )}
-                      </div>
+                      </span>
                       <button
                         type="button"
                         onClick={() => removeExtraFromOrder(ex)}
@@ -883,28 +860,27 @@ export default function TaskLineEditor({
                       }
                       rows={2}
                       placeholder="Value / instruction — e.g. SR-CTRL-D4I-A12"
-                      className="w-full rounded-md border border-neutral-200 bg-white px-3 py-2 text-sm leading-relaxed"
                     />
                     {/* Field-local save modes, same as the sales rows. */}
-                    <div className="flex flex-wrap items-center gap-2">
+                    <div className="fi-save">
                       <button
                         type="button"
                         onClick={() => saveExtraForOrder(ex)}
                         disabled={pendingFactory || !ex.value.trim()}
-                        className="rounded-md bg-neutral-900 text-white px-2.5 py-1 text-[11px] font-medium hover:bg-neutral-800 disabled:opacity-40"
+                        className="btn sm primary"
                         title="Save this field for THIS order only."
                       >
-                        Order only
+                        Save · Order only
                       </button>
                       {clientId && (
                         <button
                           type="button"
                           onClick={() => saveExtraForClient(ex)}
                           disabled={pendingPreset || !ex.value.trim()}
-                          className="rounded-md border border-violet-300 bg-violet-50 text-violet-800 px-2.5 py-1 text-[11px] font-medium hover:bg-violet-100 disabled:opacity-40"
+                          className="btn sm"
                           title="Save just this field as a client override — auto-loads on every future order for this client."
                         >
-                          Save for client
+                          Save · For client
                         </button>
                       )}
                       {clientId && ex.source === "client" && (
@@ -930,12 +906,13 @@ export default function TaskLineEditor({
 
             {/* Add-flow: choose a suggested field (or custom) → value → chip. */}
             {addingExtra ? (
-              <div className="rounded-md border border-neutral-200 bg-neutral-50/70 p-2.5 space-y-2">
+              <div className="fi-extra-row space-y-2">
                 <div className="flex flex-wrap items-center gap-2">
                   <select
                     value={extraType}
                     onChange={(e) => setExtraType(e.target.value)}
                     className="rounded-md border border-neutral-200 px-2 py-1 text-sm bg-white"
+                    style={{ width: "auto", maxWidth: 280 }}
                   >
                     <option value="">Choose a factory field…</option>
                     {FACTORY_EXTRA_CATEGORIES.map((cat) =>
@@ -956,7 +933,8 @@ export default function TaskLineEditor({
                       value={extraCustomLabel}
                       onChange={(e) => setExtraCustomLabel(e.target.value)}
                       placeholder="Field name"
-                      className="rounded-md border border-neutral-200 px-2 py-1 text-sm w-44"
+                      className="rounded-md border border-neutral-200 px-2 py-1 text-sm"
+                      style={{ width: 176 }}
                     />
                   )}
                 </div>
@@ -981,7 +959,7 @@ export default function TaskLineEditor({
                       !extraType ||
                       (extraType === "__custom__" && !extraCustomLabel.trim())
                     }
-                    className="rounded-md bg-neutral-900 text-white px-3 py-1.5 text-xs font-medium hover:bg-neutral-800 disabled:opacity-40"
+                    className="btn sm primary"
                   >
                     Add
                   </button>
@@ -1003,14 +981,14 @@ export default function TaskLineEditor({
               <button
                 type="button"
                 onClick={() => setAddingExtra(true)}
-                className="text-[12px] font-medium text-orange-800 hover:text-orange-900"
+                className="fi-add"
               >
                 + Add factory field
               </button>
             )}
           </div>
 
-          <p className="text-[10px] text-neutral-400 border-t border-orange-200 pt-2.5">
+          <p className="fi-foot">
             Each field saves on its own — <b>Order only</b> (this order) or{" "}
             <b>Save for client</b> (reusable). Client overrides stay small,
             field-level deltas; everything you don&apos;t override keeps
@@ -1144,41 +1122,45 @@ function SummaryPanel({
   }>;
   tone: "sales" | "technical";
 }) {
-  const border = tone === "sales" ? "border-sky-200" : "border-amber-200";
   return (
-    <div
-      className={`rounded-lg border ${border} bg-white p-4 space-y-3 lg:sticky lg:top-24`}
-    >
-      <div>
-        <div className="eyebrow">
-          {tone === "sales" ? "Sales summary" : "Technical summary"}
-        </div>
+    <div className="summary">
+      <div className="micro">
+        {tone === "sales" ? "Sales summary" : "Technical summary"}
       </div>
       {rows.length === 0 ? (
         <p className="text-xs text-neutral-500">No values yet.</p>
       ) : (
-        <dl className="space-y-1.5 text-xs">
-          {rows.map((row, i) => (
-            <div key={i} className="flex items-start justify-between gap-3">
-              <dt className="text-neutral-500 leading-snug">
-                {row.label}
-                {row.internal && (
-                  <span className="ml-1 text-[10px] uppercase tracking-widerx text-amber-700">
-                    int
-                  </span>
-                )}
-              </dt>
-              <dd
-                className={`text-right font-medium leading-snug ${
-                  row.missing ? "text-amber-700" : "text-neutral-900"
-                }`}
-              >
-                {row.value}
-              </dd>
-            </div>
-          ))}
-        </dl>
+        rows.map((row, i) => (
+          <div key={i} className="srow">
+            <span className="sk">
+              {row.label}
+              {row.internal && <span className="int">INT</span>}
+            </span>
+            <span className={`sv${row.missing ? " missing" : ""}`}>
+              {row.value}
+            </span>
+          </div>
+        ))
       )}
     </div>
+  );
+}
+
+/** Hazard flag glyph used inside the amber "Missing factory mapping" pill —
+ *  matches the mockup's animated `.flag` waving square. Purely decorative. */
+function HazardFlag() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z" />
+      <line x1="4" y1="22" x2="4" y2="15" />
+    </svg>
   );
 }

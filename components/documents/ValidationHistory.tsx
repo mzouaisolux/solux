@@ -27,11 +27,11 @@ const VALIDATION_TYPES: Record<
 };
 
 const DOT: Record<string, string> = {
-  info: "bg-sky-500",
-  success: "bg-emerald-500",
-  warn: "bg-amber-500",
-  danger: "bg-rose-500",
-  neutral: "bg-neutral-300",
+  info: "ok",
+  success: "ok",
+  warn: "warn",
+  danger: "danger",
+  neutral: "",
 };
 
 function formatWhen(iso: string): string {
@@ -58,16 +58,16 @@ export function ValidationHistory({
 
   return (
     <section className="panel p-4">
-      <div className="flex items-baseline justify-between gap-3 mb-3">
-        <div>
-          <div className="eyebrow">Validation history</div>
-          <p className="text-[11px] text-neutral-500 mt-0.5">
+      <div className="sec-head">
+        <div className="lhs">
+          <h2>Validation history</h2>
+          <div className="lead">
             Who moved this task list through the production-validation flow.
-          </p>
+          </div>
         </div>
-        <span className="text-[11px] text-neutral-400 tabular-nums">
+        <div className="rhs tnum">
           {steps.length} step{steps.length === 1 ? "" : "s"}
-        </span>
+        </div>
       </div>
 
       {steps.length === 0 ? (
@@ -76,7 +76,7 @@ export function ValidationHistory({
           list moves through review → validation → production approval.
         </p>
       ) : (
-        <ol className="relative border-l border-neutral-200 ml-1.5 space-y-3">
+        <div>
           {steps.map((e) => {
             const meta = VALIDATION_TYPES[e.event_type];
             const actor = e.actor_id
@@ -84,30 +84,28 @@ export function ValidationHistory({
                 `user·${e.actor_id.slice(0, 6)}`
               : "system";
             return (
-              <li key={e.id} className="pl-4 relative">
-                <span
-                  className={`absolute -left-[5px] top-1.5 h-2 w-2 rounded-full ring-2 ring-white ${
-                    DOT[meta.tone] ?? DOT.neutral
-                  }`}
-                  aria-hidden
-                />
-                <div className="flex items-baseline justify-between gap-3 flex-wrap">
-                  <span className="text-xs font-semibold text-neutral-900">
-                    {meta.label}
-                  </span>
-                  <span className="text-[11px] text-neutral-400 tabular-nums whitespace-nowrap">
-                    {actor} · {formatWhen(e.created_at)}
-                  </span>
+              <div key={e.id} className="vh-row">
+                <div className="vh-left">
+                  <span
+                    className={`vh-dot ${DOT[meta.tone] ?? ""}`}
+                    aria-hidden
+                  />
+                  <div>
+                    <div className="vh-label">{meta.label}</div>
+                    {e.payload?.reason && (
+                      <div className="vh-reason">
+                        “{String(e.payload.reason)}”
+                      </div>
+                    )}
+                  </div>
                 </div>
-                {e.payload?.reason && (
-                  <p className="text-[11px] text-neutral-500 italic mt-0.5">
-                    “{String(e.payload.reason)}”
-                  </p>
-                )}
-              </li>
+                <span className="vh-meta tnum">
+                  {actor} · {formatWhen(e.created_at)}
+                </span>
+              </div>
             );
           })}
-        </ol>
+        </div>
       )}
     </section>
   );

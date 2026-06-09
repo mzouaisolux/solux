@@ -941,16 +941,13 @@ function LogisticsCell({
   label: string;
   value: string | null | undefined;
 }) {
+  const hasValue = value && String(value).trim() !== "";
   return (
-    <div className="min-w-0">
-      <dt className="text-[10px] uppercase tracking-widerx text-neutral-400 font-semibold">
-        {label}
-      </dt>
-      <dd className="mt-0.5 text-neutral-800 font-medium truncate">
-        {value && String(value).trim() !== "" ? value : (
-          <span className="text-neutral-300 font-normal">—</span>
-        )}
-      </dd>
+    <div className="logi min-w-0">
+      <div className="lk">{label}</div>
+      <div className={`lv truncate${hasValue ? "" : " muted"}`}>
+        {hasValue ? value : "—"}
+      </div>
     </div>
   );
 }

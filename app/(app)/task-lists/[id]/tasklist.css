@@ -748,6 +748,379 @@
   );
   flex: none;
 }
+.tl-detail .tag-warn .tw-txt {
+  display: inline-flex;
+  align-items: center;
+}
+
+/* Animated warning flag (hazard) inside the tag-warn pill. */
+.tl-detail .flag {
+  display: inline-flex;
+  width: 13px;
+  height: 13px;
+  transform-origin: 0% 90%;
+  animation: tld-flagFlap 1s ease-in-out infinite;
+}
+.tl-detail .flag svg {
+  width: 13px;
+  height: 13px;
+}
+
+/* fi-grid: 2-col card wall of factory-instruction cards. */
+.tl-detail .fi-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+.tl-detail .fi-card {
+  border: 1px solid var(--line);
+  background: #fff;
+  padding: 13px 15px;
+  margin-bottom: 0;
+}
+.tl-detail .fi-card.span2 {
+  grid-column: span 2;
+}
+.tl-detail .fi-card textarea {
+  min-height: 40px;
+}
+.tl-detail .fi-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+.tl-detail .fi-name {
+  font-size: 13px;
+  font-weight: 700;
+  flex: 1;
+  min-width: 0;
+  line-height: 1.35;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-wrap: wrap;
+}
+.tl-detail .fi-name .kk {
+  color: var(--mute);
+  font-weight: 600;
+}
+.tl-detail .fi-code {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--mute);
+  font-family: ui-monospace, monospace;
+}
+/* Source pills on a factory row (This order / Client preset / Default). */
+.tl-detail .fi-src {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 1px 7px;
+  border: 1px solid var(--line-2, #dcdde1);
+  background: #fff;
+  color: var(--mute);
+  white-space: nowrap;
+}
+.tl-detail .fi-src.order {
+  background: var(--amber-tint);
+  border-color: var(--amber-line);
+  color: var(--amber-deep);
+}
+.tl-detail .fi-src.client {
+  background: rgba(124, 58, 237, 0.08);
+  border-color: rgba(124, 58, 237, 0.3);
+  color: #6d28d9;
+}
+.tl-detail .fi-saved {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--green-deep);
+  white-space: nowrap;
+}
+.tl-detail .fi-help {
+  font-size: 11.5px;
+  color: var(--mute);
+  margin: 8px 0;
+  line-height: 1.45;
+}
+.tl-detail .fi-help b {
+  color: var(--ink);
+}
+.tl-detail .fi-help .lk,
+.tl-detail .fi-help a {
+  color: var(--green-deep);
+  font-weight: 600;
+  text-decoration: none;
+}
+.tl-detail .fi-save {
+  display: flex;
+  gap: 9px;
+  margin-top: 9px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+/* Re-skin TaskLineEditor's Tailwind buttons inside an fi-save row to the
+   mockup's flat .btn look, square corners, no shadow. */
+.tl-detail .fi-save > button {
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 7px 12px;
+  border-radius: 0;
+  box-shadow: none;
+}
+/* "Add factory field" + the add-flow row reuse the mockup chrome. */
+.tl-detail .fi-extra-row {
+  border: 1px solid var(--line);
+  background: #fff;
+  padding: 13px 15px;
+}
+.tl-detail .fi-add {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--amber-deep);
+  cursor: pointer;
+}
+.tl-detail .fi-add:hover {
+  color: var(--amber);
+}
+.tl-detail .fi-foot {
+  font-size: 10.5px;
+  color: var(--mute);
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+  margin-top: 4px;
+  line-height: 1.5;
+}
+.tl-detail .fi-foot b {
+  color: var(--ink);
+}
+
+/* ---------------------------------------------------------------------
+   PRODUCT / SALES CONFIGURATION — TaskLineEditor sales block.
+   Line row (.cfg-line) + 2-col config/summary grid (.cfg-wrap).
+   --------------------------------------------------------------------- */
+.tl-detail .cfg-line {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border: 1px solid var(--line);
+  background: #fafafa;
+  padding: 12px 16px;
+  margin-bottom: 16px;
+}
+.tl-detail .cfg-line .lk {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--mute);
+}
+.tl-detail .cfg-line .lv {
+  font-size: 14px;
+  font-weight: 600;
+  margin-top: 3px;
+}
+.tl-detail .cfg-line .qwrap {
+  text-align: right;
+}
+.tl-detail .cfg-line .qbox {
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+/* The quantity is an editable <input> here (not a static number) — keep it
+   reading like the mockup's big number while staying interactive. */
+.tl-detail .cfg-line .qbox input {
+  width: 90px;
+  text-align: right;
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  padding: 4px 8px;
+  border: 1px solid var(--line-2, #dcdde1);
+  background: #fff;
+  font-variant-numeric: tabular-nums;
+}
+.tl-detail .cfg-wrap {
+  display: grid;
+  grid-template-columns: 1fr 300px;
+  border: 1px solid var(--line);
+}
+.tl-detail .cfg-form {
+  padding: 20px 22px;
+  border-right: 1px solid var(--line);
+  min-width: 0;
+}
+.tl-detail .cfg-form .hint {
+  font-size: 12px;
+  color: var(--mute);
+  margin: 4px 0 18px;
+}
+.tl-detail .field {
+  margin-bottom: 14px;
+}
+.tl-detail .field > label {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--mute);
+  display: block;
+  margin-bottom: 6px;
+}
+.tl-detail .field > label .req {
+  color: var(--amber-deep);
+}
+.tl-detail .field > label .int {
+  color: var(--mute-2);
+  font-weight: 600;
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 10px;
+}
+.tl-detail .optlist {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.tl-detail .optitem {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 7px 0;
+  font-size: 13.5px;
+  cursor: pointer;
+}
+.tl-detail .optitem.on {
+  font-weight: 600;
+}
+.tl-detail .opthint {
+  font-size: 11.5px;
+  color: var(--mute-2);
+  margin-top: 5px;
+}
+/* Checkbox glyph — green when selected, ink for plain. */
+.tl-detail .cbox {
+  width: 18px;
+  height: 18px;
+  border: 2px solid var(--line-2, #dcdde1);
+  background: #fff;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+.tl-detail .cbox.on {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: #fff;
+}
+.tl-detail .cbox.on svg {
+  width: 11px;
+  height: 11px;
+}
+.tl-detail .cbox.sel.on {
+  background: var(--green-deep);
+  border-color: var(--green-deep);
+}
+.tl-detail .summary {
+  padding: 20px 22px;
+  background: #fafbfc;
+}
+.tl-detail .summary .micro {
+  margin-bottom: 14px;
+}
+.tl-detail .srow {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--line);
+  font-size: 12.5px;
+}
+.tl-detail .srow:last-child {
+  border-bottom: none;
+}
+.tl-detail .srow .sk {
+  color: var(--mute);
+}
+.tl-detail .srow .sk .int {
+  font-size: 8.5px;
+  font-weight: 700;
+  color: var(--mute-2);
+  border: 1px solid var(--line-2, #dcdde1);
+  padding: 0 3px;
+  margin-left: 4px;
+}
+.tl-detail .srow .sv {
+  font-weight: 600;
+  text-align: right;
+  max-width: 165px;
+}
+.tl-detail .srow .sv.missing {
+  color: var(--amber-deep);
+}
+
+/* ConfigFieldInput is a SHARED component (also used by the quote builder),
+   so its markup is untouched. Inside .cfg-form we re-skin its real DOM —
+   the `.eyebrow` field labels, selects, and the checkbox_group options —
+   to read as the mockup's .field / .optlist / .cbox look. */
+.tl-detail .cfg-form > label,
+.tl-detail .cfg-form > .block {
+  display: block;
+  margin-bottom: 14px;
+}
+.tl-detail .cfg-form .eyebrow {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--mute);
+  display: block;
+  margin-bottom: 6px;
+}
+.tl-detail .cfg-form .eyebrow .text-red-600 {
+  color: var(--amber-deep);
+}
+.tl-detail .cfg-form .eyebrow .text-amber-700 {
+  color: var(--mute-2);
+}
+/* checkbox_group rows → .optitem look. */
+.tl-detail .cfg-form .block > .flex.flex-col {
+  gap: 1px;
+}
+.tl-detail .cfg-form label.inline-flex {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 7px 0;
+  font-size: 13.5px;
+}
+/* The green check box span: square, green when selected. */
+.tl-detail .cfg-form span[role="checkbox"] {
+  width: 18px;
+  height: 18px;
+  border-radius: 0 !important;
+  border: 2px solid var(--line-2, #dcdde1) !important;
+  background: #fff !important;
+  flex: none;
+}
+.tl-detail .cfg-form span[role="checkbox"][aria-checked="true"] {
+  background: var(--green-deep) !important;
+  border-color: var(--green-deep) !important;
+  color: #fff !important;
+}
+/* The Yes/No segmented control + custom-value input keep working; just
+   square their corners to fit the flat mockup chrome. */
+.tl-detail .cfg-form [class*="rounded-md"],
+.tl-detail .cfg-form [class*="rounded"] {
+  border-radius: 0 !important;
+}
 
 /* ---------------------------------------------------------------------
    KNOWN RISKS / WARNINGS — RiskFlagsEditor.
@@ -932,6 +1305,209 @@
   background: var(--card) !important;
   box-shadow: var(--shadow);
   padding: 17px 20px !important;
+}
+
+/* Validation history rows — emitted directly by ValidationHistory.tsx. */
+.tl-detail .vh-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 11px 0;
+  border-top: 1px solid var(--line);
+}
+.tl-detail .vh-row:first-of-type {
+  border-top: none;
+}
+.tl-detail .vh-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.tl-detail .vh-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--mute-2);
+  flex: none;
+}
+.tl-detail .vh-dot.ok {
+  background: var(--green);
+}
+.tl-detail .vh-dot.warn {
+  background: var(--amber);
+}
+.tl-detail .vh-dot.danger {
+  background: #d92d20;
+}
+.tl-detail .vh-label {
+  font-size: 13px;
+  font-weight: 600;
+}
+.tl-detail .vh-reason {
+  font-size: 11.5px;
+  color: var(--mute);
+  font-style: italic;
+  margin-top: 3px;
+}
+.tl-detail .vh-meta {
+  font-size: 12px;
+  color: var(--mute);
+  white-space: nowrap;
+}
+
+/* Activity timeline classes (mockup reference look). */
+.tl-detail .act-row {
+  display: flex;
+  gap: 13px;
+  padding: 13px 0;
+  border-top: 1px solid var(--line);
+}
+.tl-detail .act-row:first-of-type {
+  border-top: none;
+}
+.tl-detail .act-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--ink);
+  margin-top: 5px;
+  flex: none;
+}
+.tl-detail .act-dot.dim {
+  background: var(--mute-2);
+}
+.tl-detail .act-body {
+  flex: 1;
+  min-width: 0;
+}
+.tl-detail .act-title {
+  font-size: 13px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.tl-detail .act-tag {
+  font-size: 9.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  background: var(--green-tint);
+  border: 1px solid rgba(85, 255, 126, 0.4);
+  color: var(--ink);
+  padding: 1px 6px;
+}
+.tl-detail .act-desc {
+  font-size: 12px;
+  color: var(--mute);
+  margin-top: 3px;
+}
+.tl-detail .act-trans {
+  font-size: 11.5px;
+  color: var(--mute);
+  margin-top: 4px;
+}
+.tl-detail .act-trans s {
+  color: var(--mute-2);
+}
+.tl-detail .act-meta {
+  font-size: 12px;
+  color: var(--mute);
+  white-space: nowrap;
+}
+
+/* ---------------------------------------------------------------------
+   ACTIVITY — shared Timeline.tsx component (NOT edited). Override its real
+   DOM in place so it reads as the mockup's .act-row list:
+     <ol> ── drop the left border + indent (we use top-borders per row).
+     <li> ── becomes a flex .act-row with a top divider.
+     dot   (absolute span)        → static .act-dot.
+     title span                   → .act-title weight.
+     severity pill                → .act-tag green chip.
+     message <p>                  → .act-desc.
+     before/after div             → .act-trans with struck old value.
+     meta div                     → .act-meta.
+   --------------------------------------------------------------------- */
+.tl-detail .act-shell ol {
+  border-left: none !important;
+  margin-left: 0 !important;
+}
+.tl-detail .act-shell ol > li {
+  padding-left: 0 !important;
+  padding-top: 13px;
+  padding-bottom: 13px;
+  border-top: 1px solid var(--line);
+  display: flex;
+  gap: 13px;
+  align-items: flex-start;
+}
+.tl-detail .act-shell ol > li:first-child {
+  border-top: none;
+  padding-top: 0;
+}
+.tl-detail .act-shell ol > li > span:first-child {
+  position: static !important;
+  left: auto !important;
+  top: auto !important;
+  margin-top: 5px;
+  height: 9px !important;
+  width: 9px !important;
+  flex: none;
+  box-shadow: none !important;
+  --tw-ring-shadow: 0 0 #0000 !important;
+}
+/* Body block (the title + message wrapper) — let it fill, meta stays right. */
+.tl-detail .act-shell ol > li > div {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 13px;
+}
+.tl-detail .act-shell ol > li > div > div:first-child {
+  flex: 1;
+  min-width: 0;
+}
+/* Event title → ink, 13px. */
+.tl-detail .act-shell ol > li span[class*="font-semibold"] {
+  font-size: 13px !important;
+  color: var(--ink) !important;
+}
+/* Severity pill → green act-tag. */
+.tl-detail .act-shell ol > li span[class*="rounded-full"][class*="border"] {
+  border-radius: 0 !important;
+  background: var(--green-tint) !important;
+  border-color: rgba(85, 255, 126, 0.4) !important;
+  color: var(--ink) !important;
+  font-size: 9.5px !important;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+/* Message → .act-desc. */
+.tl-detail .act-shell ol > li p[class*="text-neutral-700"] {
+  font-size: 12px !important;
+  color: var(--mute) !important;
+}
+/* before → after → .act-trans. */
+.tl-detail .act-shell ol > li div[class*="line-through"],
+.tl-detail .act-shell ol > li div:has(> span[class*="line-through"]) {
+  font-size: 11.5px !important;
+  color: var(--mute) !important;
+}
+.tl-detail .act-shell ol > li span[class*="line-through"] {
+  color: var(--mute-2) !important;
+}
+/* Meta (actor · when) → .act-meta. */
+.tl-detail .act-shell ol > li > div > div:last-child {
+  font-size: 12px !important;
+  color: var(--mute) !important;
+  white-space: nowrap;
+  flex: none;
+}
+.tl-detail .act-shell ol > li > div > div:last-child span[class*="font-mono"] {
+  font-family: inherit !important;
 }
 
 /* ---------------------------------------------------------------------
