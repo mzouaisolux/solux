@@ -630,3 +630,34 @@
 .po-premium .tracking-widerx {
   letter-spacing: 0.07em;
 }
+
+/* ---------------------------------------------------------------------
+   REUSABLE HAZARD ACCENT
+   A left striped (animated) rail for genuinely CRITICAL cards / rows —
+   delayed / overdue / blocked / cancelled. Use sparingly: this is the
+   strongest signal in the system and loses its force if overused.
+   `.po-hazard-pad` adds left padding when the element has none of its own.
+   --------------------------------------------------------------------- */
+.po-premium .po-hazard {
+  position: relative;
+  overflow: hidden;
+}
+.po-premium .po-hazard::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  background: var(--hazard-stripe-sm);
+  background-position: 0 0;
+  animation: po-stripe-v 0.7s linear infinite;
+}
+.po-premium .po-hazard-pad {
+  padding-left: 12px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .po-premium .po-hazard::before {
+    animation: none;
+  }
+}

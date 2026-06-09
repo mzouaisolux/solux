@@ -188,14 +188,20 @@ function CockpitCard({
 }) {
   const tone = CARD_TONES[toneKey];
   const [collapsed, setCollapsed] = useState(false);
-  const shouldPulse = toneKey === "critical" && card.primaryCount > 0;
+  // Critical card with live items → Hazard treatment (ink frame + striped
+  // rail) under the premium scope, so "critical" reads the same here as on
+  // the Order detail. Pure presentation (only effective inside .po-premium).
+  const critical = toneKey === "critical" && card.primaryCount > 0;
+  const shouldPulse = critical;
   const visibleItems = card.items.slice(0, 4);
   const totalItems = card.totalCount ?? card.items.length;
   const overflow = Math.max(0, totalItems - visibleItems.length);
 
   return (
     <div
-      className={`rounded-xl border-2 ${tone.ring} ${tone.bg} shadow-soft flex flex-col overflow-hidden min-h-[420px]`}
+      className={`rounded-xl border-2 ${tone.bg} shadow-soft flex flex-col overflow-hidden min-h-[420px] ${
+        critical ? "po-hazard border-[color:var(--ink)]" : tone.ring
+      }`}
     >
       {/* HEADER */}
       <button
@@ -207,9 +213,9 @@ function CockpitCard({
       >
         <div className="flex items-center gap-1.5 min-w-0">
           <span
-            className={`text-base leading-none ${tone.dot} ${
-              shouldPulse ? "animate-pulse" : ""
-            }`}
+            className={`text-base leading-none ${
+              critical ? "text-[color:var(--ink)]" : tone.dot
+            } ${shouldPulse ? "animate-pulse" : ""}`}
             aria-hidden
           >
             {icon}
@@ -329,9 +335,13 @@ function CockpitTwoLineRow({ item }: { item: CockpitItem }) {
   const badge = item.statusBadge;
   const unread = item.unreadCount ?? 0;
   const hasUnread = unread > 0;
+  // Critical (delayed / overdue) rows → Hazard striped rail under premium.
+  const danger = item.tone === "danger";
   const inner = (
     <div
       className={`px-2 py-1.5 rounded-md transition-colors ${
+        danger ? "po-hazard pl-3" : ""
+      } ${
         hasUnread
           ? "bg-rose-50/60 hover:bg-rose-50 border-l-2 border-rose-400 -ml-0.5 pl-1.5"
           : "hover:bg-white/80"

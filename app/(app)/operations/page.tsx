@@ -640,7 +640,10 @@ export default async function OperationsPage({
             {topAlerts.map((e) => {
               const colors = poStatusColors(e.order.status, e.archived);
               return (
-                <li key={e.order.id} className="px-3 py-1.5">
+                <li
+                  key={e.order.id}
+                  className={`px-3 py-1.5 ${e.alert.highPriority ? "po-hazard" : ""}`}
+                >
                   <div className="flex items-center justify-between gap-3">
                     <div className="flex items-center gap-2 min-w-0">
                       <span
@@ -909,6 +912,9 @@ function CompactRow({
 }) {
   const o = e.order;
   const colors = poStatusColors(o.status, e.archived);
+  // Genuinely critical rows (delayed / overdue / balance overdue / stale
+  // deposit) get the Hazard rail — same gate as the Action Queue.
+  const critical = e.alert.highPriority;
   const depositCovered =
     e.expectedDeposit > 0
       ? o.deposit_received_amount + 0.01 >= e.expectedDeposit
@@ -923,7 +929,13 @@ function CompactRow({
         e.archived ? "opacity-60" : ""
       } ${colors.rowBg}`}
     >
-      <td className={`px-3 py-2 border-l-[3px] ${colors.leftBorder}`}>
+      <td
+        className={`px-3 py-2 ${
+          critical
+            ? "po-hazard"
+            : `border-l-[3px] ${colors.leftBorder}`
+        }`}
+      >
         {/* Lead with the project/affair name — that's how ops/factory/sales
             recognize an order. PO + quotation numbers are the technical
             reference underneath. */}
