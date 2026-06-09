@@ -119,16 +119,16 @@ export async function Nav({
           className="flex items-center shrink-0 mr-1"
           aria-label="SOLUX — solar lighting"
         >
-          {/* Official SOLUX wordmark. The asset is black-on-transparent, so on
-              the ink command bar we render it white via a filter. */}
+          {/* Official SOLUX wordmark, pre-cut to white-on-transparent
+              (public/solux-logo-white.png) so it reads cleanly on the ink bar.
+              Generated from solux-logo.png — no CSS filter needed. */}
           <Image
-            src="/solux-logo.png"
+            src="/solux-logo-white.png"
             alt="SOLUX — solar lighting"
             width={150}
-            height={34}
+            height={36}
             priority
             className="h-8 w-auto"
-            style={{ filter: "brightness(0) invert(1)" }}
           />
         </Link>
         {/* Top mega menu — permission-filtered server-side, rendered by the
