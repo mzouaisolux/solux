@@ -524,7 +524,7 @@ export default async function OperationsPage({
   opsUnreadCountMap.forEach((v, k) => (opsUnreadCountObj[k] = v));
 
   return (
-    <div className="mx-auto max-w-screen-2xl px-6 py-5 space-y-4">
+    <div className="po-premium mx-auto max-w-[1320px] px-8 py-8 space-y-4">
       {/* ============ HEADER ============ */}
       <div className="flex items-baseline justify-between gap-4 flex-wrap">
         <div>
@@ -553,7 +553,7 @@ export default async function OperationsPage({
            here), amber Reset-View-As banner when super-admin is
            simulating, or neutral read-only notice for sales. Prevents
            the "edit UI disappeared" confusion. */}
-      <RoleContextBanner />
+      <RoleContextBanner premium />
 
       {/* ============ SALES FILTER BAR ============
            Technical roles only — narrow every operational surface on
