@@ -112,7 +112,7 @@ export default function NewClientPanel() {
         typeof document !== "undefined" &&
         createPortal(
           <div
-            className="fixed inset-0 z-50 flex items-start justify-center bg-neutral-900/40 p-4 sm:items-center sm:p-6"
+            className="po-premium fixed inset-0 z-50 flex items-start justify-center bg-neutral-900/40 p-4 sm:items-center sm:p-6"
             onMouseDown={(e) => {
               if (e.target === e.currentTarget) close();
             }}

@@ -106,7 +106,7 @@ export default function ContextMenu({
             ref={panelRef}
             role="menu"
             style={{ position: "fixed", top: coords.top, right: coords.right }}
-            className="min-w-[200px] rounded-md border border-neutral-200 bg-white shadow-xl z-[100] overflow-hidden"
+            className="po-premium min-w-[200px] rounded-md border border-neutral-200 bg-white shadow-xl z-[100] overflow-hidden"
             // Auto-close after a click inside — children are usually forms
             // or Links that navigate away anyway.
             onClick={() => setOpen(false)}

@@ -150,7 +150,7 @@ export function ProjectActionsMenu({
             ref={panelRef}
             role="menu"
             style={{ position: "fixed", top: coords.top, right: coords.right }}
-            className="z-[100] w-[240px] overflow-hidden rounded-lg border border-neutral-200 bg-white shadow-xl"
+            className="po-premium z-[100] w-[240px] overflow-hidden rounded-lg border border-neutral-200 bg-white shadow-xl"
           >
             {mode === "menu" && (
               <div className="py-1">
