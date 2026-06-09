@@ -115,7 +115,7 @@ export default async function ProjectsDashboardPage({
   const all = (sts: string[]) => countBuckets(summary.byStatus, sts);
 
   return (
-    <div className="mx-auto max-w-screen-2xl px-6 py-8 space-y-8">
+    <div className="po-premium mx-auto max-w-screen-2xl px-6 py-8 space-y-8">
       {/* Header */}
       <div className="flex items-start justify-between gap-4">
         <div>

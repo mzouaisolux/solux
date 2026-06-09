@@ -528,13 +528,9 @@ export default async function OperationsPage({
       {/* ============ HEADER ============ */}
       <div className="flex items-baseline justify-between gap-4 flex-wrap">
         <div>
-          <div className="text-[10px] font-semibold uppercase tracking-widerx text-neutral-500">
-            Operations
-          </div>
-          <h1 className="text-xl font-bold tracking-tight text-neutral-900 mt-0.5">
-            Production workspace
-          </h1>
-          <p className="text-xs text-neutral-500 mt-0.5">
+          <div className="eyebrow">Operations</div>
+          <h1 className="po-order-id mt-1">Production workspace</h1>
+          <p className="text-xs text-neutral-500 mt-2">
             {activeRows.length} active · {closedRows.length} closed
             {archivedCount > 0 ? ` · ${archivedCount} archived` : ""}
             {alertingCount > 0 ? ` · ${alertingCount} need attention` : " · all on track"}

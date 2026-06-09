@@ -1,4 +1,5 @@
 import Link from "next/link";
+import Image from "next/image";
 import { logout } from "@/app/login/actions";
 import {
   ROLE_LABEL,
@@ -115,15 +116,20 @@ export async function Nav({
       <div className="mx-auto max-w-screen-2xl px-6 h-[62px] flex items-center gap-[22px]">
         <Link
           href="/dashboard"
-          className="flex flex-col leading-none gap-1 mr-1.5 shrink-0"
-          aria-label="SOLUX"
+          className="flex items-center shrink-0 mr-1"
+          aria-label="SOLUX — solar lighting"
         >
-          <span className="text-[19px] font-semibold tracking-[0.34em] pl-[0.34em] text-white">
-            SOLUX
-          </span>
-          <span className="text-[8px] tracking-[0.34em] pl-[0.34em] uppercase text-[#B9B6C4]">
-            solar lighting
-          </span>
+          {/* Official SOLUX wordmark. The asset is black-on-transparent, so on
+              the ink command bar we render it white via a filter. */}
+          <Image
+            src="/solux-logo.png"
+            alt="SOLUX — solar lighting"
+            width={150}
+            height={34}
+            priority
+            className="h-8 w-auto"
+            style={{ filter: "brightness(0) invert(1)" }}
+          />
         </Link>
         {/* Top mega menu — permission-filtered server-side, rendered by the
             client component for hover/click panels. Defined centrally in

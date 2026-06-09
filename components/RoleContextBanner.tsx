@@ -50,11 +50,12 @@ export async function RoleContextBanner({
     if (mode === "only-when-hidden") return null;
     if (premium) {
       return (
-        <div className="flex items-center gap-2 rounded border border-[color:var(--line)] bg-[color:var(--green-tint)] px-3 py-1.5 text-[11px] text-[color:var(--ink)]">
+        <div className="flex items-center gap-2 rounded border border-[color:var(--line)] bg-white px-3 py-1.5 text-[11px] text-[color:var(--ink-soft)] shadow-[var(--shadow)]">
           <span className="po-dot po-dot--green" aria-hidden />
           <span>
-            <b>Technical view</b> — you can edit production status, timelines,
-            payments and shipment on this page and on each order&apos;s detail.
+            <b className="text-[color:var(--ink)]">Technical view</b> — you can
+            edit production status, timelines, payments and shipment on this page
+            and on each order&apos;s detail.
           </span>
         </div>
       );
