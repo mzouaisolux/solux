@@ -1682,7 +1682,7 @@ export default async function HomeDashboardPage({
     subtitleParts.length > 0 ? subtitleParts.join(" · ") + "." : "Nothing pressing today — quiet day on the line.";
 
   return (
-    <div className="po-premium mx-auto max-w-[1320px] px-8 py-8 space-y-6">
+    <div className="po-premium mx-auto max-w-screen-2xl px-6 py-8 space-y-6">
       <DashboardModeProvider>
       {/* ---------- HEADER GREETING + MODE TOGGLE ----------
           Three-column header: greeting on the left, mode toggle in the

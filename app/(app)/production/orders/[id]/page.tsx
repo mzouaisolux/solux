@@ -559,7 +559,7 @@ export default async function ProductionOrderDetailPage({
   ];
 
   return (
-    <div className="po-premium mx-auto max-w-[1320px] px-8 py-8 space-y-5">
+    <div className="po-premium mx-auto max-w-screen-2xl px-6 py-8 space-y-5">
       {/* ---------- TABS (m099) ---------- */}
       <div className="po-tabbar">
         {ORDER_TABS.map((t) => (

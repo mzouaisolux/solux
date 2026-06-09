@@ -112,7 +112,7 @@ export async function Nav({
         </div>
       )}
 
-      <div className="mx-auto max-w-[1320px] px-7 h-[62px] flex items-center gap-[22px]">
+      <div className="mx-auto max-w-screen-2xl px-6 h-[62px] flex items-center gap-[22px]">
         <Link
           href="/dashboard"
           className="flex flex-col leading-none gap-1 mr-1.5 shrink-0"
