@@ -4,7 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import type { DocStatus } from "@/lib/types";
-import { DOC_STATUSES, isTechnicalRole, isAdminLike } from "@/lib/types";
+import { DOC_STATUSES, isTechnicalRole, isAdminLike, canSupervise } from "@/lib/types";
 import { getCurrentUserRole } from "@/lib/auth";
 import { emitEvent } from "@/lib/events";
 import { requireCapability } from "@/lib/permissions";
@@ -33,7 +33,7 @@ export async function assignDocumentOwner(formData: FormData) {
   const owner_id = raw && raw !== "__unassign__" ? raw : null;
 
   const { role } = await getCurrentUserRole();
-  if (!isTechnicalRole(role)) {
+  if (!canSupervise(role)) {
     throw new Error("Only management roles can reassign the sales owner.");
   }
 
@@ -218,10 +218,23 @@ export async function generateProductionTaskList(formData: FormData) {
   //   Quote   SLX-SUK-26-034  →  PTL  PTL-SLX-SUK-26-034
   const { data: doc, error: docErr } = await supabase
     .from("documents")
-    .select("id, number, client_id, freight_type")
+    .select("id, number, type, client_id, affair_id, freight_type")
     .eq("id", quotation_id)
     .single();
   if (docErr || !doc) throw new Error(docErr?.message ?? "Quotation not found");
+
+  // Solux export workflow (owner decision 2026-06-12): a Sales Order is
+  // created from a PROFORMA INVOICE, never directly from a quotation.
+  //   Quotation (optional) → Proforma → Sales Order → Production → Shipment
+  // The quotation is the negotiation document; the proforma is the
+  // confirmed commercial document the client commits (and pays deposit)
+  // against. Existing historical task lists are untouched — this gate
+  // only applies to NEW creations.
+  if ((doc as any).type !== "proforma") {
+    throw new Error(
+      "Sales orders are created from PROFORMA invoices, not quotations (Solux export workflow). Revise this quotation into a proforma first (Duplicate / Revise → type Proforma), mark it won, then create the task list from the proforma."
+    );
+  }
 
   const { data: srcLines, error: linesErr } = await supabase
     .from("document_lines")
@@ -259,6 +272,9 @@ export async function generateProductionTaskList(formData: FormData) {
       number: ptlNumber,
       quotation_id,
       client_id: doc.client_id,
+      // F4: inherit the affair link from the source doc so the task list stays
+      // grouped under its affaire (docs-by-affaire views + affair-scoped RLS).
+      affair_id: (doc as any).affair_id ?? null,
       shipping_method: doc.freight_type,
       created_by: user.id,
       // New workflow starts in draft — sales still has work to do before
@@ -296,6 +312,193 @@ export async function generateProductionTaskList(formData: FormData) {
 }
 
 /**
+ * "Launch Production" — the one-click WON → production handoff for sales.
+ *
+ * The commercial never touches proforma mechanics (owner decision). From a
+ * WON quotation this creates, in the background:
+ *   1) the PROFORMA = the production command (a faithful copy of the won
+ *      quotation, type='proforma'), and
+ *   2) the production TASK LIST from that proforma (the gated path below
+ *      requires type='proforma'),
+ * then routes the user straight to the task list.
+ *
+ * Proforma STATUS is 'draft' ON PURPOSE: revenue / win-rate analytics count
+ * the WON QUOTATION (status='won'); a 'won' proforma would double-count the
+ * same deal. The proforma carries the production cycle through its task list,
+ * not through its document status.
+ *
+ * One command per affair: if a proforma already exists for the affair we
+ * reuse it (and route to / create its task list) instead of minting a second.
+ */
+export async function launchProduction(formData: FormData) {
+  // Creating the proforma is a second "create" path — gate like saveDocument.
+  await requireCapability("quotation.create");
+  const quotationId = String(
+    formData.get("quotation_id") ?? formData.get("id") ?? ""
+  );
+  if (!quotationId) throw new Error("Missing quotation id");
+
+  const supabase = createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) throw new Error("Not authenticated");
+
+  const { data: src, error } = await supabase
+    .from("documents")
+    .select("*, document_lines(*), document_containers(*)")
+    .eq("id", quotationId)
+    .single();
+  if (error || !src) throw new Error(error?.message ?? "Quotation not found");
+  if (src.type !== "quotation") {
+    throw new Error("Launch Production starts from a quotation.");
+  }
+  if (src.status !== "won") {
+    throw new Error("Mark the quotation as Won before launching production.");
+  }
+
+  // One command per affair — reuse an existing proforma if there is one.
+  let proformaId: string | null = null;
+  if (src.affair_id) {
+    const { data: existingPro } = await supabase
+      .from("documents")
+      .select("id")
+      .eq("affair_id", src.affair_id)
+      .eq("type", "proforma")
+      // NB: order by `date` — the live `documents` table has no `created_at`.
+      .order("date", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (existingPro) proformaId = existingPro.id as string;
+  }
+
+  if (!proformaId) {
+    // Per-client numbering (SLX-CODE-YY-NNN), generic fallback.
+    let numberRow: string | null = null;
+    if (src.client_id) {
+      const { data, error: nErr } = await supabase.rpc(
+        "next_client_document_number",
+        { client_id_in: src.client_id }
+      );
+      if (nErr) throw new Error(nErr.message);
+      numberRow = data as any;
+    } else {
+      const { data } = await supabase.rpc("next_document_number", {
+        doc_type: "proforma",
+      });
+      numberRow = data as any;
+    }
+
+    const { data: pro, error: insErr } = await supabase
+      .from("documents")
+      .insert({
+        number: numberRow,
+        client_id: src.client_id,
+        affair_id: src.affair_id,
+        type: "proforma",
+        status: "draft",
+        incoterm: src.incoterm,
+        freight_type: src.freight_type,
+        freight_cost: src.freight_cost,
+        manual_pricing: src.manual_pricing,
+        total_price: src.total_price,
+        created_by: user.id,
+        payment_mode: src.payment_mode,
+        payment_terms: src.payment_terms,
+        port_of_loading: src.port_of_loading,
+        port_of_destination: src.port_of_destination,
+        production_mode: src.production_mode,
+        production_days: src.production_days,
+        production_date: src.production_date,
+        currency: src.currency,
+        include_sales_conditions: src.include_sales_conditions,
+        sales_conditions_id: src.sales_conditions_id,
+        bank_account_id: src.bank_account_id,
+        purchase_order_number: src.purchase_order_number,
+        commission_enabled: src.commission_enabled,
+        commission_percentage: src.commission_percentage,
+        commission_amount: src.commission_amount,
+        commission_description: src.commission_description,
+        show_commission_in_pdf: src.show_commission_in_pdf,
+      })
+      .select("id")
+      .single();
+    if (insErr) throw new Error(insErr.message);
+    proformaId = pro!.id as string;
+
+    const lines = (src.document_lines ?? []).map((l: any) => ({
+      document_id: proformaId,
+      product_id: l.product_id,
+      quantity: l.quantity,
+      selected_options: l.selected_options,
+      unit_price: l.unit_price,
+      total_price: l.total_price,
+      pricing_mode: l.pricing_mode,
+      pricing_tier: l.pricing_tier,
+      original_unit_price: l.original_unit_price,
+      discount_type: l.discount_type,
+      discount_value: l.discount_value,
+      client_product_name: l.client_product_name,
+      config_values: l.config_values ?? {},
+    }));
+    if (lines.length) {
+      const { error: lErr } = await supabase
+        .from("document_lines")
+        .insert(lines);
+      if (lErr) throw new Error(lErr.message);
+    }
+
+    const containers = (src.document_containers ?? []).map(
+      (c: any, i: number) => ({
+        document_id: proformaId,
+        container_type: c.container_type,
+        quantity: c.quantity,
+        unit_price: c.unit_price,
+        wooden_box_cost: c.wooden_box_cost ?? 0,
+        position: c.position ?? i,
+      })
+    );
+    if (containers.length) {
+      const { error: cErr } = await supabase
+        .from("document_containers")
+        .insert(containers);
+      if (cErr) throw new Error(cErr.message);
+    }
+
+    await emitEvent({
+      entity_type: "document",
+      entity_id: proformaId,
+      event_type: "doc.created",
+      message: `Proforma ${numberRow ?? ""} created — production command from won quotation ${
+        src.number ?? quotationId.slice(0, 8) + "…"
+      }`,
+      payload: {
+        type: "proforma",
+        from_quotation: quotationId,
+        from_quotation_number: src.number ?? null,
+        number: numberRow,
+      },
+      bestEffort: true,
+    });
+  }
+
+  if (!proformaId) {
+    throw new Error("Could not create the production command (proforma).");
+  }
+
+  revalidatePath(`/documents/${quotationId}`);
+  revalidatePath(`/documents/${proformaId}`);
+  revalidatePath("/clients");
+
+  // Create the task list from the proforma (gate satisfied) and route to it.
+  // generateProductionTaskList redirect()s — the desired landing for the user
+  // kicking off production.
+  const tlFd = new FormData();
+  tlFd.set("quotation_id", proformaId);
+  await generateProductionTaskList(tlFd);
+}
+
+/**
  * Update quotation status — generic action used by the status switcher.
  *
  * Side effects on cancellation/loss are now handled by the DB trigger
@@ -326,10 +529,21 @@ export async function updateDocumentStatus(formData: FormData) {
   // Capture previous status for the audit event.
   const { data: prev } = await supabase
     .from("documents")
-    .select("status, number")
+    .select("status, number, type")
     .eq("id", id)
     .maybeSingle();
   const previousStatus = (prev?.status as DocStatus) ?? null;
+
+  // Data-integrity guard: a PROFORMA is the production command (created by
+  // Launch Production), never a revenue-bearing "won" deal. Revenue/win-rate
+  // analytics count status='won'; a won proforma would double-count the affair
+  // (won quotation + won proforma). The proforma carries production through its
+  // task list, not its document status.
+  if (raw === "won" && (prev as any)?.type === "proforma") {
+    throw new Error(
+      "A proforma is the production command, not a won deal — it can't be marked Won. The originating quotation carries the win."
+    );
+  }
 
   // ---- Lifecycle guards (LIFECYCLE_AUDIT H1 + H2) -----------------------
   // Document status is otherwise a freeform setter. These two guards block
@@ -723,8 +937,8 @@ export async function reviewValidation(formData: FormData) {
   const note = String(formData.get("review_note") ?? "").trim() || null;
 
   const { userId, role } = await getCurrentUserRole();
-  if (!isAdminLike(role)) {
-    throw new Error("Only Admin / Super Admin can review a quotation validation request.");
+  if (!canSupervise(role)) {
+    throw new Error("Only Admin / Super Admin / Sales Director can review a quotation validation request.");
   }
 
   const supabase = createClient();

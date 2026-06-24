@@ -78,6 +78,7 @@ export type EventEntityType =
   | "document"
   | "client"
   | "project_request"
+  | "affair"
   // System-wide events (permissions matrix changes, user role changes,
   // dev resets) have no natural single entity — use "system" and set
   // entity_id to a UUID so the row is still uniquely keyed.
@@ -104,6 +105,8 @@ export type EventType =
   | "po.deposit_override" // admin started production before deposit landed
   | "po.shipment_updated"
   | "po.production_completed" // factory delivered — stamped via markProductionComplete
+  | "po.bl_info_requested" // operations asked sales to complete the BL profile
+  | "po.bl_info_resolved" // sales completed the BL profile — booking blocker lifted
   | "po.cancelled"
   // task_list events
   | "tl.submitted_for_validation"
@@ -131,6 +134,16 @@ export type EventType =
   | "client.created"
   | "client.updated"
   | "client.deleted"
+  // client contact events (m101)
+  | "client.contact_added"
+  | "client.contact_updated"
+  | "client.contact_deleted"
+  // affair CRM events (m103) — planned actions log into the timeline
+  | "affair.action_planned"
+  | "affair.action_done"
+  | "affair.action_deleted"
+  // BL workflow: affair-history mirror of po.bl_info_requested
+  | "affair.bl_info_requested"
   // project request events (m090)
   | "pr.created"
   | "pr.submitted"
@@ -330,6 +343,8 @@ export function eventEntityHref(e: {
       return `/clients/${e.entity_id}`;
     case "project_request":
       return `/projects/${e.entity_id}`;
+    case "affair":
+      return `/affairs/${e.entity_id}`;
     default:
       return null;
   }
@@ -372,6 +387,15 @@ export function eventTypeLabel(t: EventType): string {
     "client.created": "Client created",
     "client.updated": "Client details updated",
     "client.deleted": "Client deleted",
+    "client.contact_added": "Contact added",
+    "client.contact_updated": "Contact updated",
+    "client.contact_deleted": "Contact removed",
+    "affair.action_planned": "Action planned",
+    "affair.action_done": "Action completed",
+    "affair.action_deleted": "Planned action removed",
+    "po.bl_info_requested": "Shipping info requested",
+    "po.bl_info_resolved": "Shipping info completed",
+    "affair.bl_info_requested": "Shipping info requested",
     "pr.created": "Project request created",
     "pr.submitted": "Submitted for approval",
     "pr.approved": "Sent to operations",

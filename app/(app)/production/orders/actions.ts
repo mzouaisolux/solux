@@ -14,6 +14,11 @@ import { addWorkingDays } from "@/lib/working-days";
 import { emitEvent } from "@/lib/events";
 import { isBaselineLocked } from "@/lib/production-lifecycle";
 import { DELAY_TYPES, addDaysIso, type DelayType } from "@/lib/delays";
+import {
+  normalizeBlProfile,
+  blProfileStatus,
+  blProfileMissingFields,
+} from "@/lib/bl";
 
 function str(fd: FormData, key: string): string | null {
   const v = fd.get(key);
@@ -92,7 +97,6 @@ async function touch(orderId: string) {
   revalidatePath("/operations");
   revalidatePath("/order-follow-up");
   revalidatePath("/dashboard");
-  revalidatePath("/dashboard-v2");
   revalidatePath("/business");
 }
 
@@ -138,15 +142,17 @@ export async function updateProductionOrderStatus(formData: FormData) {
     .eq("id", id);
   if (error) throw new Error(error.message);
 
-  // Audit log — cancellation gets CRITICAL severity, everything else is
-  // a status_changed event. Both surface in the timeline; only
-  // cancellations propagate to the dashboard critical-events feed.
+  // Audit log — cancellation gets CRITICAL severity; flipping to
+  // production_delayed gets HIGH (an explicit delay declaration must ring
+  // the bell AND alert the dashboards — alert-routing audit); everything
+  // else stays a medium status_changed event.
   const isCancel = status === "cancelled";
+  const isDelayDeclaration = status === "production_delayed";
   await emitEvent({
     entity_type: "production_order",
     entity_id: id,
     event_type: isCancel ? "po.cancelled" : "po.status_changed",
-    severity: isCancel ? "critical" : "medium",
+    severity: isCancel ? "critical" : isDelayDeclaration ? "high" : "medium",
     message: isCancel
       ? `Production order cancelled${previousStatus ? ` (was: ${PRODUCTION_ORDER_STATUS_LABEL[previousStatus]})` : ""}`
       : `Status: ${previousStatus ? PRODUCTION_ORDER_STATUS_LABEL[previousStatus] + " → " : ""}${PRODUCTION_ORDER_STATUS_LABEL[status as ProductionOrderStatus]}`,
@@ -551,6 +557,11 @@ export async function updateProductionOrderPayments(formData: FormData) {
     balance_received_amount: numericOrZero("balance_received_amount"),
     balance_received_at: dateOrNull(formData, "balance_received_at"),
     payment_notes: str(formData, "payment_notes"),
+    // m114 (audit Phase 1 — cash). balance_due_date is the MANUAL
+    // override: blank clears it and the app falls back to the derived
+    // due date (deadline / ETA — computeEffectiveBalanceDueDate).
+    balance_due_date: dateOrNull(formData, "balance_due_date"),
+    lc_expiry_date: dateOrNull(formData, "lc_expiry_date"),
   };
 
   const supabase = createClient();
@@ -575,11 +586,26 @@ export async function updateProductionOrderPayments(formData: FormData) {
   const prevDeposit = Number(existing.deposit_received_amount ?? 0);
   const prevBalance = Number(existing.balance_received_amount ?? 0);
 
-  const { error } = await supabase
+  // Defensive write (same pattern as baseline_locked_at below): if m114
+  // isn't applied yet, drop its two columns from the patch and retry so
+  // recording receipts keeps working on a pre-m114 database.
+  let updateAttempt = await supabase
     .from("production_orders")
     .update(patch)
     .eq("id", id);
-  if (error) throw new Error(error.message);
+  if (
+    updateAttempt.error &&
+    /balance_due_date|lc_expiry_date/.test(updateAttempt.error.message ?? "")
+  ) {
+    const { balance_due_date: _d1, lc_expiry_date: _d2, ...fallback } = patch;
+    void _d1;
+    void _d2;
+    updateAttempt = await supabase
+      .from("production_orders")
+      .update(fallback)
+      .eq("id", id);
+  }
+  if (updateAttempt.error) throw new Error(updateAttempt.error.message);
 
   // Auto-advance: if the deposit is now fully covered and the order was
   // sitting in awaiting_deposit, move it to deposit_received. Skip if
@@ -965,9 +991,28 @@ export async function updateProductionOrderShipment(formData: FormData) {
   // Capture previous shipment state for audit log.
   const { data: prev } = await supabase
     .from("production_orders")
-    .select("shipment_booked, etd, eta, shipping_details")
+    .select("shipment_booked, etd, eta, shipping_details, client_id")
     .eq("id", id)
     .maybeSingle();
+
+  // BL workflow gate: CONFIRMING the booking (unchecked → checked) requires a
+  // COMPLETE Shipping / BL profile on the client. Every other field on this
+  // form can be filled in ahead of time — only the final confirmation is
+  // blocked, so Operations never books a shipment that can't be documented.
+  if (patch.shipment_booked && !prev?.shipment_booked && prev?.client_id) {
+    const { data: cl } = await supabase
+      .from("clients")
+      .select("bl_profile")
+      .eq("id", prev.client_id)
+      .maybeSingle();
+    const status = blProfileStatus(normalizeBlProfile(cl?.bl_profile ?? null));
+    if (status !== "complete") {
+      throw new Error(
+        "Shipping profile must be completed before logistics booking can be confirmed. " +
+          "Use “Request information from Sales” on the Shipping / BL profile block."
+      );
+    }
+  }
 
   const { error } = await supabase
     .from("production_orders")
@@ -1146,9 +1191,11 @@ export async function manuallyCreateProductionOrder(formData: FormData) {
 /**
  * Activate the deposit override for a production order.
  *
- * Reads `id` from formData, optional `reason` text. Admin / super-admin
- * only — TLM is intentionally excluded because TLM normally tracks
- * production state but doesn't authorize financial exceptions.
+ * Reads `id` from formData and a REQUIRED `reason` text (audit 2026-06-11
+ * P0: a financial exception with no recorded justification is unauditable
+ * — who approved it and why must be answerable months later). Admin /
+ * super-admin only — TLM is intentionally excluded because TLM normally
+ * tracks production state but doesn't authorize financial exceptions.
  */
 export async function startWithoutDeposit(formData: FormData) {
   await requireCapability("production_order.start_without_deposit");
@@ -1156,6 +1203,11 @@ export async function startWithoutDeposit(formData: FormData) {
   const id = String(formData.get("id"));
   if (!id) throw new Error("Missing production order id");
   const reason = str(formData, "reason");
+  if (!reason) {
+    throw new Error(
+      "A reason is required to start production without deposit — record why the deposit gate is being bypassed (e.g. trusted long-term client, written CFO approval)."
+    );
+  }
 
   const supabase = createClient();
   const { userId } = await getCurrentUserRole();
@@ -1523,4 +1575,148 @@ export async function deleteProductionOrder(formData: FormData) {
   revalidatePath("/order-follow-up");
   revalidatePath("/dashboard");
   revalidatePath("/business");
+}
+
+/* ===========================================================================
+   requestBlInfoFromSales — BL workflow step (Operations → Sales).
+   ===========================================================================
+   Operations discovers the Shipping / BL profile is incomplete BEFORE
+   booking, not at the last minute. One click produces, from existing
+   mechanics (no new tables):
+     1. NOTIFICATION — `po.bl_info_requested` event, severity HIGH → rings
+        the bell of the deal's sales owner (events RLS routes visibility).
+     2. TASK — a high-stakes planned_action on the affair (m103), due today:
+        "Complete Shipping / BL Profile". Shows up red on the affair card
+        and in the sales to-do until done.
+     3. AFFAIR HISTORY — `affair.bl_info_requested` timeline entry
+        ("Operations requested completion of Shipping / BL Profile") with
+        actor + timestamp, as every event carries.
+   The payload carries client/affair identifiers so the Sales dashboard
+   widget ("Missing Shipping Profiles") can render without extra joins.
+*/
+export async function requestBlInfoFromSales(formData: FormData) {
+  await requireCapability("production_order.edit_shipment");
+
+  const id = String(formData.get("id"));
+  if (!id) throw new Error("Missing production order id");
+
+  const supabase = createClient();
+  const { userId } = await getCurrentUserRole();
+
+  const { data: order } = await supabase
+    .from("production_orders")
+    .select(
+      "id, number, client_id, quotation_id, documents:quotation_id(id, number, affair_id, affair_name, sales_owner_id, created_by), clients:client_id(company_name, bl_profile)"
+    )
+    .eq("id", id)
+    .maybeSingle();
+  if (!order) throw new Error("Production order not found");
+
+  const o = order as any;
+  const clientName = o.clients?.company_name ?? "—";
+  const affairId = (o.documents?.affair_id as string | null) ?? null;
+  const affairName = (o.documents?.affair_name as string | null) ?? null;
+  const missing = blProfileMissingFields(
+    normalizeBlProfile(o.clients?.bl_profile ?? null)
+  );
+
+  // Server truth first: if the profile is already complete there is
+  // nothing to request — tell Operations instead of spamming Sales.
+  if (missing.length === 0) {
+    throw new Error(
+      "The Shipping / BL profile is already complete — nothing to request. Refresh the page if the panel still shows it as missing."
+    );
+  }
+
+  // Anti-duplicate: ONE pending request per order. A request is pending
+  // while no po.bl_info_resolved event is newer than it (the resolution
+  // is emitted automatically when Sales completes the profile). If the
+  // profile became incomplete AGAIN after a resolution, a new request is
+  // allowed — that's a new issue, not a duplicate.
+  const { data: lastReq } = await supabase
+    .from("events")
+    .select("created_at")
+    .eq("entity_type", "production_order")
+    .eq("entity_id", id)
+    .eq("event_type", "po.bl_info_requested")
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (lastReq) {
+    const { data: lastRes } = await supabase
+      .from("events")
+      .select("created_at")
+      .eq("entity_type", "production_order")
+      .eq("entity_id", id)
+      .eq("event_type", "po.bl_info_resolved")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    const stillPending =
+      !lastRes ||
+      Date.parse(lastRes.created_at) < Date.parse(lastReq.created_at);
+    if (stillPending) {
+      throw new Error(
+        `Request already sent to Sales on ${new Date(
+          lastReq.created_at
+        ).toLocaleString()} — still pending until the BL profile is completed. No duplicate was sent.`
+      );
+    }
+  }
+
+  // 1. Notification — HIGH severity on the order (bell for the sales owner).
+  await emitEvent({
+    entity_type: "production_order",
+    entity_id: id,
+    event_type: "po.bl_info_requested",
+    message:
+      `Operations cannot proceed with shipment booking — the Shipping / BL ` +
+      `profile for ${clientName} is incomplete (missing: ${missing.join(", ") || "—"}).`,
+    payload: {
+      client_id: o.client_id,
+      client_name: clientName,
+      affair_id: affairId,
+      affair_name: affairName,
+      missing_fields: missing,
+      requested_by: userId,
+      // Surfaced on the Sales dashboard card (order ref + deep links).
+      order_number: o.number ?? null,
+      doc_number: o.documents?.number ?? null,
+    },
+    bestEffort: true,
+  });
+
+  // 2 + 3. Task + affair history — only when the order is filed under an
+  // affair (the CRM hierarchy). Legacy unlinked orders still get the
+  // notification above.
+  if (affairId) {
+    await supabase.from("planned_actions").insert({
+      affair_id: affairId,
+      action_type: "other",
+      title: "Complete Shipping / BL Profile",
+      due_date: new Date().toISOString().slice(0, 10),
+      notes:
+        "Operations cannot proceed with shipment booking because the " +
+        "Shipping / BL Profile is incomplete. Priority: High.",
+      created_by: userId ?? null,
+    });
+
+    await emitEvent({
+      entity_type: "affair",
+      entity_id: affairId,
+      event_type: "affair.bl_info_requested",
+      message: "Operations requested completion of Shipping / BL Profile.",
+      payload: {
+        client_id: o.client_id,
+        client_name: clientName,
+        production_order_id: id,
+        missing_fields: missing,
+      },
+      bestEffort: true,
+    });
+  }
+
+  revalidatePath(`/production/orders/${id}`);
+  revalidatePath("/dashboard");
+  if (affairId) revalidatePath(`/affairs/${affairId}`);
 }

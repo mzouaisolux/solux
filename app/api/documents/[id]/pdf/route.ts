@@ -10,6 +10,7 @@
 
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { buildPdfFilename } from "@/lib/pdf-filename";
 
 export const dynamic = "force-dynamic";
 
@@ -47,7 +48,7 @@ export async function GET(
 
   const { data: doc, error } = await supabase
     .from("documents")
-    .select("pdf_url")
+    .select("pdf_url, number, type, affair_name, version, clients(company_name)")
     .eq("id", id)
     .maybeSingle();
 
@@ -59,9 +60,16 @@ export async function GET(
     );
   }
 
+  const downloadName = buildPdfFilename({
+    kind: ((doc as any).type as "quotation" | "proforma") ?? "quotation",
+    number: (doc as any).number ?? null,
+    client: (doc as any).clients?.company_name ?? null,
+    affair: (doc as any).affair_name ?? null,
+    version: (doc as any).version ?? null,
+  });
   const { data: signed, error: signErr } = await supabase.storage
     .from("documents")
-    .createSignedUrl(doc.pdf_url as string, 60 * 5);
+    .createSignedUrl(doc.pdf_url as string, 60 * 5, { download: downloadName });
 
   if (signErr || !signed?.signedUrl) {
     return info("The stored PDF couldn't be opened. Please try again.", 502);

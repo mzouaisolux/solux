@@ -4,6 +4,8 @@ import { useState } from "react";
 import { pdf } from "@react-pdf/renderer";
 import FactoryPDF from "@/components/FactoryPDF";
 import { fetchExportData } from "./exportData";
+import { saveBlobAs } from "@/lib/saveBlob";
+import { buildPdfFilename } from "@/lib/pdf-filename";
 
 /**
  * Production-ready PDF export. Always uses the final factory-ready view:
@@ -13,8 +15,13 @@ import { fetchExportData } from "./exportData";
  */
 export default function ExportPdfButton({
   taskListId,
+  client = null,
+  affair = null,
 }: {
   taskListId: string;
+  /** Client + affair names — for the canonical FACTORY download filename. */
+  client?: string | null;
+  affair?: string | null;
 }) {
   const [working, setWorking] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -25,15 +32,10 @@ export default function ExportPdfButton({
     try {
       const data = await fetchExportData(taskListId);
       const blob = await pdf(<FactoryPDF data={data} />).toBlob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `${data.number}-FACTORY.pdf`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      window.open(url, "_blank", "noopener,noreferrer");
-      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+      await saveBlobAs(
+        blob,
+        buildPdfFilename({ kind: "factory", number: data.number, client, affair })
+      );
     } catch (e: any) {
       setError(e?.message ?? "Failed to generate PDF");
     } finally {

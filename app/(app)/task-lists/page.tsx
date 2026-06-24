@@ -156,7 +156,20 @@ export default async function TaskListsPage({
   // to see), then the manual Sales filter on top.
   const lists = (listsRaw ?? []).filter((t: any) => {
     const owner = ownerOf(t.quotation_id, t.documents?.created_by);
+    // SAFETY (validation-queue guarantee): a technical role must NEVER lose
+    // sight of its actionable queue — task lists awaiting validation
+    // (under_validation) — even under a restrictive visibility grant. A
+    // "production" lens, by design, exposes only validated/production_ready,
+    // which would otherwise hide every just-submitted task list from the very
+    // person who must validate it (root cause of the "submitted TL never
+    // appears for the Task List Manager" bug). RLS already permits technical
+    // roles to read these rows; we just stop the app-layer scope from hiding
+    // the actionable queue. Non-technical lens users (e.g. factory) are
+    // unaffected — they still only see what their lens exposes.
+    const isActionableForTechnical =
+      technical && TASK_LIST_TLM_QUEUE.includes(t.status);
     if (
+      !isActionableForTechnical &&
       !canSeeRecord(scope, {
         ownerId: owner,
         kind: "task_list",

@@ -17,6 +17,12 @@ import { emitEvent, type EventType } from "@/lib/events";
 import { requireCapability } from "@/lib/permissions";
 import { normalizeStickerRequirements } from "@/lib/stickers";
 import { normalizeRiskFlags } from "@/lib/risks";
+import { isRevisionCategory, revisionCategoryLabel } from "@/lib/revision-shared";
+import { evaluateRelease } from "@/lib/task-list-mapping-status";
+import {
+  countMissingTaskListMappings,
+  taskListHasOpenRevision,
+} from "@/lib/task-list-mapping-server";
 import {
   parseFactoryExtras,
   normalizeFactoryExtras,
@@ -438,7 +444,7 @@ async function ensureProductionOrderForTaskList(
   //    callers should have moved it there, but we re-check as a defense.
   const { data: tl, error: tlErr } = await supabase
     .from("production_task_lists")
-    .select("quotation_id, client_id, status")
+    .select("quotation_id, client_id, affair_id, status")
     .eq("id", taskListId)
     .maybeSingle();
   if (tlErr) {
@@ -509,6 +515,10 @@ async function ensureProductionOrderForTaskList(
     task_list_id: taskListId,
     quotation_id: tl.quotation_id,
     client_id: tl.client_id,
+    // F4 (sibling): carry the affair link from the task list onto the order so
+    // the whole production chain (quote → task list → order) stays grouped under
+    // its affaire. legacyPayload spreads this, so it inherits affair_id too.
+    affair_id: (tl as any).affair_id ?? null,
     status: "awaiting_deposit",
     production_validation_date: today,
     created_by: userId,
@@ -600,6 +610,9 @@ async function transition(
     stampSubmittedAt?: boolean;
     /** Stamps validated_at + validated_by — used by the validate action. */
     stampValidator?: boolean;
+    /** Optional human note appended to the transition event — surfaces in
+     *  the validation history (e.g. the revision reason / sales response). */
+    note?: string;
   }
 ) {
   // Note: per architectural decision Q3, role/capability gating no
@@ -653,8 +666,10 @@ async function transition(
       entity_type: "task_list",
       entity_id: id,
       event_type: eventType,
-      message: `Task list moved ${from} → ${to}`,
-      payload: { from, to },
+      message: opts.note
+        ? `Task list moved ${from} → ${to} — ${opts.note}`
+        : `Task list moved ${from} → ${to}`,
+      payload: { from, to, note: opts.note ?? null },
       bestEffort: true,
     });
   }
@@ -665,7 +680,6 @@ async function transition(
   // Validation creates the awaiting-deposit PO → the Sales deposit follow-up
   // appears in the Action Center; refresh both dashboards + operations.
   revalidatePath("/dashboard");
-  revalidatePath("/dashboard-v2");
   revalidatePath("/operations");
 }
 
@@ -691,13 +705,53 @@ export async function submitForValidation(formData: FormData) {
 export async function validateTaskList(formData: FormData) {
   await requireCapability("task_list.validate");
   const id = String(formData.get("id"));
+  const supabase = createClient();
+
+  // D1.1 — SERVER-SIDE release gate (mirrors the Release-to-Production modal,
+  // but authoritative: it holds even if the UI is bypassed). Reads the
+  // autonomous factory mappings via the shared resolver — no per-task logic.
+  const { data: row } = await supabase
+    .from("production_task_lists")
+    .select("status")
+    .eq("id", id)
+    .maybeSingle();
+  if (!row) throw new Error("Task list not found");
+  const [missingCount, hasOpenRevision, lineCount] = await Promise.all([
+    countMissingTaskListMappings(id),
+    taskListHasOpenRevision(id),
+    supabase
+      .from("production_task_list_lines")
+      .select("id", { count: "exact", head: true })
+      .eq("task_list_id", id)
+      .then((r) => r.count ?? 0),
+  ]);
+  const verdict = evaluateRelease({
+    statusAllowed: row.status === "under_validation",
+    missingCount,
+    hasOpenRevision,
+    lineCount,
+  });
+  if (!verdict.ok) {
+    throw new Error(verdict.reason ?? "Cannot release to production.");
+  }
+
+  // Loop is answered → close any (now-resolved) revision requests so the
+  // conversation stays clean.
+  const { userId } = await getCurrentUserRole();
+  await supabase
+    .from("entity_messages")
+    .update({ resolved_at: new Date().toISOString(), resolved_by: userId })
+    .eq("entity_type", "task_list")
+    .eq("entity_id", id)
+    .eq("message_kind", "request")
+    .is("resolved_at", null);
+
   // Auto-create is handled centrally by transition() (ensureProductionOrder).
   await transition(id, "validated", {
     allowedFrom: ["under_validation"],
     stampValidator: true,
   });
-  // Immediate operational handoff: validation's next step is production setup
-  // (timing / baseline / shipment), so jump straight to the production order.
+  // Immediate operational handoff: jump straight to the production order.
   await handoffToProductionOrder(id);
 }
 
@@ -709,6 +763,36 @@ export async function validateTaskList(formData: FormData) {
 export async function markProductionReady(formData: FormData) {
   await requireCapability("task_list.validate");
   const id = String(formData.get("id"));
+  const supabase = createClient();
+
+  // D1.1 — same server-side release gate as validate (this path ALSO creates
+  // the production order, so it must not bypass the mapping/revision checks).
+  const { data: row } = await supabase
+    .from("production_task_lists")
+    .select("status")
+    .eq("id", id)
+    .maybeSingle();
+  if (!row) throw new Error("Task list not found");
+  const [missingCount, hasOpenRevision, lineCount] = await Promise.all([
+    countMissingTaskListMappings(id),
+    taskListHasOpenRevision(id),
+    supabase
+      .from("production_task_list_lines")
+      .select("id", { count: "exact", head: true })
+      .eq("task_list_id", id)
+      .then((r) => r.count ?? 0),
+  ]);
+  const verdict = evaluateRelease({
+    statusAllowed:
+      row.status === "under_validation" || row.status === "validated",
+    missingCount,
+    hasOpenRevision,
+    lineCount,
+  });
+  if (!verdict.ok) {
+    throw new Error(verdict.reason ?? "Cannot release to production.");
+  }
+
   await transition(id, "production_ready", {
     allowedFrom: ["validated", "under_validation"],
   });
@@ -738,6 +822,149 @@ export async function requestRevision(formData: FormData) {
   await requireCapability("task_list.validate");
   await transition(String(formData.get("id")), "needs_revision", {
     allowedFrom: ["under_validation", "validated", "production_ready"],
+  });
+}
+
+/**
+ * D1 — Production team sends the task list back to sales WITH a structured
+ * reason. NEVER a blind revision: the category + message are recorded in the
+ * conversation (entity_messages 'request') first; only then does the status
+ * flip to needs_revision, stamping the reason into the validation history.
+ */
+export async function requestRevisionWithReason(formData: FormData) {
+  await requireCapability("task_list.validate");
+  const id = String(formData.get("id"));
+  const category = String(formData.get("category") ?? "");
+  const message = String(formData.get("message") ?? "").trim();
+  const fieldRaw = String(formData.get("field") ?? "").trim();
+  const field =
+    fieldRaw && fieldRaw !== "General task list" ? fieldRaw : null;
+
+  if (!id) throw new Error("Missing task list id");
+  if (!isRevisionCategory(category)) {
+    throw new Error("Please choose a revision category.");
+  }
+  if (!message) {
+    throw new Error("Please explain clearly what Sales must clarify or correct.");
+  }
+
+  const supabase = createClient();
+  const { userId } = await getCurrentUserRole();
+
+  // Pre-check status so we never post a request that can't transition
+  // (avoids an orphan request message with no status change).
+  const allowed: ProductionTaskListStatus[] = [
+    "under_validation",
+    "validated",
+    "production_ready",
+  ];
+  const { data: row } = await supabase
+    .from("production_task_lists")
+    .select("status")
+    .eq("id", id)
+    .maybeSingle();
+  if (!row) throw new Error("Task list not found");
+  if (!allowed.includes(row.status as ProductionTaskListStatus)) {
+    throw new Error(`Cannot request a revision from "${row.status}".`);
+  }
+
+  // Record the request in the conversation FIRST. If it fails we throw, so a
+  // revision is NEVER created without a visible reason.
+  const label = revisionCategoryLabel(category);
+  const body = `🔧 Revision requested — ${label}${
+    field ? ` · ${field}` : ""
+  }\n\n${message}`;
+  const { error: msgErr } = await supabase.from("entity_messages").insert({
+    entity_type: "task_list",
+    entity_id: id,
+    user_id: userId,
+    message: body,
+    message_kind: "request",
+    structured_payload: { kind: "revision_request", category, field },
+  });
+  if (msgErr) {
+    throw new Error(
+      `Could not record the revision request (${msgErr.message}). The task list was NOT sent back — please retry.`
+    );
+  }
+
+  await transition(id, "needs_revision", {
+    allowedFrom: allowed,
+    note: `${label}${field ? ` (${field})` : ""}: ${message.slice(0, 160)}`,
+  });
+}
+
+/**
+ * D1 — Sales answers the revision and re-submits. Requires a response summary
+ * (no blind re-submit). Posts the reply into the conversation, resolves the
+ * open request, and flips needs_revision → under_validation with the response
+ * recorded in the validation history.
+ */
+export async function resubmitWithResponse(formData: FormData) {
+  const id = String(formData.get("id"));
+  const response = String(formData.get("response") ?? "").trim();
+  if (!id) throw new Error("Missing task list id");
+  if (!response) {
+    throw new Error(
+      "Please summarize what you corrected or confirmed before re-submitting."
+    );
+  }
+
+  const supabase = createClient();
+  const { userId } = await getCurrentUserRole();
+
+  const { data: row } = await supabase
+    .from("production_task_lists")
+    .select("status")
+    .eq("id", id)
+    .maybeSingle();
+  if (!row) throw new Error("Task list not found");
+  if (row.status !== "needs_revision") {
+    throw new Error(
+      `Re-submit is only available while the task list needs revision (current: "${row.status}").`
+    );
+  }
+
+  // Link the reply to the latest open request, if any.
+  const { data: openReq } = await supabase
+    .from("entity_messages")
+    .select("id")
+    .eq("entity_type", "task_list")
+    .eq("entity_id", id)
+    .eq("message_kind", "request")
+    .is("resolved_at", null)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  const { error: msgErr } = await supabase.from("entity_messages").insert({
+    entity_type: "task_list",
+    entity_id: id,
+    user_id: userId,
+    message: `✅ Sales response\n\n${response}`,
+    message_kind: "reply",
+    parent_message_id: openReq?.id ?? null,
+    structured_payload: { kind: "revision_response" },
+  });
+  if (msgErr) {
+    throw new Error(
+      `Could not record your response (${msgErr.message}). The task list was NOT re-submitted — please retry.`
+    );
+  }
+
+  // Best-effort resolve of the request (RLS may limit this to technical
+  // roles; the reply above is the authoritative answer either way).
+  if (openReq?.id) {
+    await supabase
+      .from("entity_messages")
+      .update({ resolved_at: new Date().toISOString(), resolved_by: userId })
+      .eq("id", openReq.id);
+  }
+
+  await transition(id, "under_validation", {
+    allowedFrom: ["needs_revision"],
+    stampSubmittedAt: true,
+    note: `Sales response: ${response.slice(0, 160)}`,
   });
 }
 

@@ -24,6 +24,10 @@
  */
 
 import { createClient } from "@/lib/supabase/server";
+import {
+  NOTIFICATION_CATALOG,
+  shouldEmitOnce,
+} from "@/lib/notification-catalog";
 import { getCurrentUserRole } from "@/lib/auth";
 
 // Pure types + palettes live in `lib/events-shared.ts` so client
@@ -89,6 +93,22 @@ const DEFAULT_SEVERITY: Record<EventType, EventSeverity> = {
   "client.created": "low",
   "client.updated": "low",
   "client.deleted": "critical",
+  // Contacts (m101) + planned actions (m103): routine CRM bookkeeping —
+  // timeline only, never the bell (PLAN_CRM_SOLUX §10's 3-tier rule).
+  "client.contact_added": "low",
+  "client.contact_updated": "low",
+  "client.contact_deleted": "low",
+  "affair.action_planned": "low",
+  "affair.action_done": "low",
+  "affair.action_deleted": "low",
+  // BL workflow (Sales → Operations): the PO event is HIGH — it must ring
+  // the sales owner's bell (booking is blocked until they act). The affair
+  // mirror is the history entry only.
+  "po.bl_info_requested": "high",
+  // Resolution is MEDIUM: it lands in the timeline + feed ("blocker
+  // lifted") without ringing anyone's bell — good news needs no alarm.
+  "po.bl_info_resolved": "medium",
+  "affair.bl_info_requested": "low",
   "pr.created": "low",
   "pr.submitted": "medium",
   "pr.approved": "medium",
@@ -175,6 +195,62 @@ export async function emitEvent(args: EmitEventArgs): Promise<void> {
     console.error("[emitEvent] uncaught error:", e?.message);
     if (!args.bestEffort) throw e;
   }
+}
+
+/**
+ * Typed notification emit (Phase 3C): derive entity_type + default
+ * message from the catalog so call sites only pass the event key + the
+ * entity id. Severity stays governed by DEFAULT_SEVERITY (not passed),
+ * so the read-time channel resolution is unchanged.
+ */
+export async function emitNotificationEvent(
+  eventKey: EventType,
+  args: { entityId: string; message?: string; payload?: Record<string, any>; bestEffort?: boolean }
+): Promise<void> {
+  const entry = NOTIFICATION_CATALOG[eventKey];
+  await emitEvent({
+    entity_type: (entry?.entity ?? "system") as EventEntityType,
+    entity_id: args.entityId,
+    event_type: eventKey,
+    message: args.message ?? entry?.label ?? eventKey,
+    payload: args.payload,
+    bestEffort: args.bestEffort,
+  });
+}
+
+/**
+ * Emit at most once per (event_type, entity, dedupKey) within a time
+ * window — generic anti-spam, generalizing the BL request/resolve guard.
+ * Returns true if emitted, false if skipped as a recent duplicate. The
+ * dedup key is stored in payload.dedup_key. If the lookup errors we emit
+ * anyway (never silently drop a real event).
+ */
+export async function emitEventOnce(
+  args: EmitEventArgs & { dedupKey: string; windowMinutes: number }
+): Promise<boolean> {
+  const { dedupKey, windowMinutes, ...emitArgs } = args;
+  try {
+    const supabase = createClient();
+    const { data } = await supabase
+      .from("events")
+      .select("created_at")
+      .eq("event_type", emitArgs.event_type)
+      .eq("entity_id", emitArgs.entity_id)
+      .contains("payload", { dedup_key: dedupKey })
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (!shouldEmitOnce(data?.created_at ?? null, new Date().toISOString(), windowMinutes)) {
+      return false;
+    }
+  } catch (e: any) {
+    console.warn("[emitEventOnce] dedup lookup failed, emitting anyway:", e?.message);
+  }
+  await emitEvent({
+    ...emitArgs,
+    payload: { ...(emitArgs.payload ?? {}), dedup_key: dedupKey },
+  });
+  return true;
 }
 
 /**

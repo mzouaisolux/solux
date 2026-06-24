@@ -5,6 +5,7 @@ import {
   CUSTOM_OPTION_SENTINEL,
   customValueKey,
   isCustomValueKey,
+  optionLookupKey,
   resolveFactoryInstruction,
   type FactoryInstructionSource,
   type FactoryMapping,
@@ -193,7 +194,7 @@ export async function fetchExportData(taskListId: string): Promise<ExportData> {
     const f = (fields ?? []).find((x: any) => x.id === o.field_id);
     if (!f || f.field_type !== "dropdown") continue;
     optionIdByFieldValue.set(
-      `${f.field_name}|${String(o.option_value).toLowerCase()}`,
+      optionLookupKey(f.category_id, f.field_name, o.option_value),
       o.id
     );
   }
@@ -261,6 +262,7 @@ export async function fetchExportData(taskListId: string): Promise<ExportData> {
         continue;
       }
       const resolved = resolveFactoryInstruction({
+        categoryId: cid,
         fieldName: f.field_name,
         salesValue: display,
         overrides: factoryOverrides,
@@ -268,7 +270,7 @@ export async function fetchExportData(taskListId: string): Promise<ExportData> {
         optionIdByFieldValue,
       });
       const optionId = optionIdByFieldValue.get(
-        `${f.field_name}|${display.toLowerCase()}`
+        optionLookupKey(cid, f.field_name, display)
       );
       const mappingText = optionId
         ? mappingByOption.get(optionId)?.factory_instruction ?? ""

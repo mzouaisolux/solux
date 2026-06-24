@@ -3,6 +3,7 @@
 import { randomUUID } from "crypto";
 import { createClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
+import { requireCapability } from "@/lib/permissions";
 
 /**
  * Order Documents actions (m099). Collaborative by design — any authenticated
@@ -42,6 +43,10 @@ export async function recordOrderDocument(formData: FormData): Promise<void> {
   const fileSize = Number.isFinite(sizeRaw) ? Math.round(sizeRaw) : null;
   const mime = optStr(formData, "mime_type");
   const category = optStr(formData, "category") ?? "other";
+  // m115 — canonical shipping-document kind (commercial_invoice,
+  // packing_list, …). Optional: free uploads stay kind-less, exactly the
+  // pre-m115 behavior. The Shipping Documents checklist matches on it.
+  const kind = optStr(formData, "kind");
   const replaceGroupId = optStr(formData, "replace_group_id");
 
   let groupId: string;
@@ -62,7 +67,7 @@ export async function recordOrderDocument(formData: FormData): Promise<void> {
     groupId = randomUUID();
   }
 
-  const { error } = await supabase.from("order_documents").insert({
+  const row: Record<string, any> = {
     production_order_id: orderId,
     group_id: groupId,
     version,
@@ -72,8 +77,21 @@ export async function recordOrderDocument(formData: FormData): Promise<void> {
     mime_type: mime,
     category,
     uploaded_by: userId,
-  });
-  if (error) throw new Error(error.message);
+  };
+  if (kind) row.kind = kind;
+  // Defensive write (house pattern): if m115 isn't applied yet, retry
+  // without `kind` so plain uploads keep working on a pre-m115 database.
+  let insertAttempt = await supabase.from("order_documents").insert(row);
+  if (
+    insertAttempt.error &&
+    kind &&
+    /kind/.test(insertAttempt.error.message ?? "")
+  ) {
+    const { kind: _drop, ...fallback } = row;
+    void _drop;
+    insertAttempt = await supabase.from("order_documents").insert(fallback);
+  }
+  if (insertAttempt.error) throw new Error(insertAttempt.error.message);
 
   await supabase.from("order_document_audit").insert({
     production_order_id: orderId,
@@ -83,6 +101,61 @@ export async function recordOrderDocument(formData: FormData): Promise<void> {
     actor: userId,
   });
   revalidateOrder(orderId);
+}
+
+/**
+ * Assign the Commercial Invoice number for an order (m115).
+ *
+ * Idempotent: the number is minted ONCE (own sequence, CI-XXXX) and then
+ * reused forever — regenerating the PDF creates a new VERSION of the same
+ * logical document, never a new number. Gated by
+ * `production_order.edit_shipment`: the CI is part of the shipment
+ * package, so whoever prepares the shipment mints it. Read-only roles
+ * can still view/download the generated document.
+ */
+export async function assignCommercialInvoiceNumber(
+  orderId: string
+): Promise<string> {
+  await requireCapability("production_order.edit_shipment");
+  if (!orderId) throw new Error("Missing production order id");
+  const supabase = createClient();
+
+  const { data: existing, error: loadErr } = await supabase
+    .from("production_orders")
+    .select("commercial_invoice_number")
+    .eq("id", orderId)
+    .maybeSingle();
+  if (loadErr) {
+    if (/commercial_invoice_number/.test(loadErr.message ?? "")) {
+      throw new Error(
+        "Commercial Invoice numbering is not installed — apply migration 115_shipping_documents_package.sql in Supabase first."
+      );
+    }
+    throw new Error(loadErr.message);
+  }
+  if (!existing) throw new Error("Production order not found");
+
+  const current = (existing as any).commercial_invoice_number as string | null;
+  if (current) return current;
+
+  const { data: minted, error: seqErr } = await supabase.rpc("next_ci_number");
+  if (seqErr) {
+    throw new Error(
+      /next_ci_number/.test(seqErr.message ?? "") || seqErr.code === "42883"
+        ? "next_ci_number() is not deployed — apply migration 115 in Supabase first."
+        : seqErr.message
+    );
+  }
+  const ciNumber = String(minted);
+
+  const { error: saveErr } = await supabase
+    .from("production_orders")
+    .update({ commercial_invoice_number: ciNumber })
+    .eq("id", orderId);
+  if (saveErr) throw new Error(saveErr.message);
+
+  revalidateOrder(orderId);
+  return ciNumber;
 }
 
 /** Soft-delete a logical document (all its versions). Files are kept. */

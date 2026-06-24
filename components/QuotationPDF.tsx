@@ -692,6 +692,14 @@ function SalesTermsBlock({ data }: { data: QuotationPDFData }) {
 
 function LinesTable({ data }: { data: QuotationPDFData }) {
   const cur = currencyMark(data.currency);
+  // Client Reference is a per-line, optional field. Only surface the column
+  // header when at least one line actually carries a reference — otherwise the
+  // label (and any "—" placeholders) must not appear at all. The column slot
+  // itself stays (it doubles as the Sub-Total / Total label slot below), so
+  // alignment is unaffected.
+  const anyClientRef = data.lines.some(
+    (l) => l.client_product_name != null && String(l.client_product_name).trim() !== ""
+  );
 
   /**
    * Description secondary line — surfaces customer-visible product
@@ -731,7 +739,7 @@ function LinesTable({ data }: { data: QuotationPDFData }) {
           column, not over the currency prefix. */}
       <View style={s.tableHead} fixed>
         <Text style={[s.tableHeadCell, s.colDescription]}>Description</Text>
-        <Text style={[s.tableHeadCell, s.colClientRef]}>Client Reference</Text>
+        <Text style={[s.tableHeadCell, s.colClientRef]}>{anyClientRef ? "Client Reference" : ""}</Text>
         <Text style={[s.tableHeadCell, s.colQty]}>Qty</Text>
         <Text style={[s.tableHeadCell, s.colUnit, { textAlign: "right" }]}>
           Unit Price
@@ -753,7 +761,10 @@ function LinesTable({ data }: { data: QuotationPDFData }) {
             </View>
             <View style={s.colClientRef}>
               <Text style={s.tableBodyCell}>
-                {line.client_product_name ?? "—"}
+                {line.client_product_name != null &&
+                String(line.client_product_name).trim() !== ""
+                  ? line.client_product_name
+                  : ""}
               </Text>
             </View>
             <View style={s.colQty}>

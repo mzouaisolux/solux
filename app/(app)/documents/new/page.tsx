@@ -8,7 +8,7 @@ import type { CostMap } from "@/lib/types";
 export default async function NewDocumentPage({
   searchParams,
 }: {
-  searchParams?: { revise?: string; edit?: string; affair?: string };
+  searchParams?: { revise?: string; edit?: string; affair?: string; client?: string };
 }) {
   const supabase = createClient();
 
@@ -43,6 +43,22 @@ export default async function NewDocumentPage({
       .eq("id", affairParamId)
       .maybeSingle();
     projectCtx = (data as any) ?? null;
+  }
+  // CRM refactor: launched from a Client Workspace (?client=<id>) — pre-fill
+  // and LOCK the client so it is never re-selected.
+  const clientParamId = searchParams?.client || null;
+  // W4 — when launched from a client, load that client's live affairs so the
+  // quote can be attached to one (a quotation must belong to an affaire).
+  let clientAffairs: { id: string; name: string }[] = [];
+  if (clientParamId) {
+    const { data: aff } = await supabase
+      .from("affairs")
+      .select("id, name")
+      .eq("client_id", clientParamId)
+      .is("archived_at", null)
+      .not("status", "in", "(lost,abandoned)")
+      .order("created_at", { ascending: false });
+    clientAffairs = (aff ?? []) as { id: string; name: string }[];
   }
   let initialDoc: any = null;
   if (sourceId) {
@@ -230,7 +246,7 @@ export default async function NewDocumentPage({
   }
 
   return (
-    <div className="mx-auto max-w-screen-2xl px-6 py-8">
+    <div className="solux-pro mx-auto max-w-screen-2xl px-6 py-8">
       {/* Pricing source — shows which published price list(s) feed this quote,
           and warns when an assigned list hasn't been published yet. */}
       {pricingCtx.appliedLists.length > 0 ? (
@@ -261,6 +277,7 @@ export default async function NewDocumentPage({
         </div>
       )}
       <NewDocumentForm
+        key={sourceId ?? affairParamId ?? clientParamId ?? "new"}
         products={products ?? []}
         options={options ?? []}
         clients={clients ?? []}
@@ -276,7 +293,9 @@ export default async function NewDocumentPage({
         editOfId={editOfId}
         affairId={projectCtx?.id ?? null}
         projectName={projectCtx?.name ?? null}
-        presetClientId={projectCtx?.client_id ?? null}
+        presetClientId={projectCtx?.client_id ?? clientParamId}
+        lockClient={!!clientParamId}
+        clientAffairs={clientAffairs}
       />
     </div>
   );

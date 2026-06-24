@@ -2,15 +2,19 @@
 
 import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { pdf } from "@react-pdf/renderer";
 import ProductConfigurator from "@/components/ProductConfigurator";
-import QuotationPDF, { type QuotationPDFData } from "@/components/QuotationPDF";
+// F3: @react-pdf/renderer + QuotationPDF are browser-only and break SSR if
+// imported at module load — loaded lazily inside the click handlers below.
+import { type QuotationPDFData } from "@/components/QuotationPDF";
 import { CountrySelect } from "@/components/forms/CountrySelect";
 import { PhoneField } from "@/components/forms/PhoneField";
 import { dialForCountry } from "@/lib/countries";
 import { createClient as createBrowserSupabase } from "@/lib/supabase/client";
+import { saveBlobAs } from "@/lib/saveBlob";
+import { buildPdfFilename } from "@/lib/pdf-filename";
 import { saveDocument } from "./actions";
 import { savePdfPath } from "../[id]/actions";
+import { quickCreateAffair } from "@/app/(app)/affairs/actions";
 import { computeMargin } from "@/lib/pricing";
 import {
   formatPaymentTerms,
@@ -110,9 +114,11 @@ export default function NewDocumentForm({
   initialDoc = null,
   reviseOfId = null,
   editOfId = null,
-  affairId = null,
+  affairId: presetAffairId = null,
+  clientAffairs = [],
   projectName = null,
   presetClientId = null,
+  lockClient = false,
 }: {
   products: Product[];
   options: Option[];
@@ -134,8 +140,12 @@ export default function NewDocumentForm({
   /** When set (m076), link the new quotation to this project on save and
    *  pre-fill its client. */
   affairId?: string | null;
+  /** W4 — the client's live affairs (client-launched flow) to attach the quote to. */
+  clientAffairs?: { id: string; name: string }[];
   projectName?: string | null;
   presetClientId?: string | null;
+  /** CRM refactor: launched from a Client Workspace — client fixed & hidden. */
+  lockClient?: boolean;
 }) {
   // Revision mode: are we creating a new version of an existing quote?
   const isRevision = !!reviseOfId && !!initialDoc;
@@ -162,6 +172,49 @@ export default function NewDocumentForm({
   const [clientId, setClientId] = useState<string>(
     initialDoc?.client_id ?? presetClientId ?? ""
   );
+  // W4 — when launched from a client the quote must be attached to one of the
+  // client's affairs (chosen below); seeded from a preset affair when present.
+  const [affairId, setAffairId] = useState<string>(presetAffairId ?? "");
+  // Mandatory-affair — the chosen client's open affairs. Seeded from the
+  // server (client-launched flow) and refreshed when the client changes so the
+  // general flow can attach the quote to an affaire too.
+  const [affairs, setAffairs] = useState<{ id: string; name: string }[]>(clientAffairs);
+  // Inline "+ New Project" — create an affair without leaving the quote.
+  const [showNewAffair, setShowNewAffair] = useState(false);
+  const [newAffairName, setNewAffairName] = useState("");
+  const [newAffairDesc, setNewAffairDesc] = useState("");
+  const [creatingAffair, setCreatingAffair] = useState(false);
+  const [newAffairError, setNewAffairError] = useState<string | null>(null);
+  async function handleCreateAffair() {
+    const nm = newAffairName.trim();
+    if (!nm) return setNewAffairError("Project name is required");
+    if (!clientId) return setNewAffairError("Select a client first");
+    setCreatingAffair(true);
+    setNewAffairError(null);
+    try {
+      const created = await quickCreateAffair({
+        clientId,
+        name: nm,
+        description: newAffairDesc,
+      });
+      // Append + auto-select, keeping every field already entered (no reload).
+      setAffairs((prev) => [created, ...prev.filter((a) => a.id !== created.id)]);
+      setAffairId(created.id);
+      setAffairName(created.name);
+      setShowNewAffair(false);
+      setNewAffairName("");
+      setNewAffairDesc("");
+    } catch (e: any) {
+      setNewAffairError(e?.message ?? "Could not create the project");
+    } finally {
+      setCreatingAffair(false);
+    }
+  }
+  // Numbering (#5) — once a brand-new doc is first saved, remember its id and
+  // assigned number so EVERY later save from this builder UPDATEs it in place
+  // (never re-mints the number) and the preview shows the real number.
+  const [createdId, setCreatedId] = useState<string | null>(null);
+  const [createdNumber, setCreatedNumber] = useState<string | null>(null);
   const [showNewClient, setShowNewClient] = useState(false);
   const [newClient, setNewClient] = useState({
     company_name: "",
@@ -549,6 +602,31 @@ export default function NewDocumentForm({
     }
   }
 
+  // Mandatory-affair — load the selected client's open affairs so the quote
+  // can be attached to one. Skipped for revise/edit (they inherit/keep their
+  // affair). Clears a stale selection when the client changes.
+  useEffect(() => {
+    if (!clientId || isRevision || isEdit) return;
+    let cancelled = false;
+    (async () => {
+      const supabase = createBrowserSupabase();
+      const { data } = await supabase
+        .from("affairs")
+        .select("id, name")
+        .eq("client_id", clientId)
+        .is("archived_at", null)
+        .not("status", "in", "(lost,abandoned)")
+        .order("created_at", { ascending: false });
+      if (cancelled) return;
+      const list = (data ?? []) as { id: string; name: string }[];
+      setAffairs(list);
+      setAffairId((cur) => (cur && list.some((a) => a.id === cur) ? cur : ""));
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [clientId, isRevision, isEdit]);
+
   function buildPayload() {
     if (!clientId) {
       setError("Please select a client");
@@ -576,6 +654,15 @@ export default function NewDocumentForm({
       );
       return null;
     }
+    // BUSINESS RULE — every quotation/invoice must belong to an affaire
+    // (projet). A revision inherits it and an edit keeps it, so only a fresh
+    // document needs an explicit selection here.
+    if (!affairId && !reviseOfId && !editOfId) {
+      setError(
+        "Ce document doit être rattaché à une affaire (projet). Sélectionnez une affaire (ou créez-en une via « New service request ») avant d'enregistrer."
+      );
+      return null;
+    }
     return {
       type: docType,
       client_id: clientId,
@@ -595,13 +682,15 @@ export default function NewDocumentForm({
       offer_validity_transport_days: offerValidityTransportDays,
       affair_name: affairName.trim() || null,
       // m076 — link to the real project when creating inside one.
-      affair_id: affairId ?? null,
+      affair_id: affairId || null,
       // m059 — when revising, this save becomes the next version of the
       // source's affair instead of a brand-new quotation.
       revise_of: reviseOfId ?? null,
       // Edit-in-place: when continuing a draft, update it rather than
-      // creating a new document (mutually exclusive with revise_of).
-      edit_of: editOfId ?? null,
+      // creating a new document (mutually exclusive with revise_of). Once a
+      // brand-new doc is first saved, createdId routes later saves here too so
+      // the number is assigned once and never re-minted (#5).
+      edit_of: editOfId ?? createdId ?? null,
       include_sales_conditions: includeSalesConditions,
       sales_conditions_id: includeSalesConditions ? salesConditionsId : null,
       bank_account_id: bankAccountId,
@@ -742,14 +831,13 @@ export default function NewDocumentForm({
     if (!buildPayload()) return; // reuse validation; payload not needed yet
     setPreviewBuilding(true);
     try {
-      // Peek at the document number that next_client_document_number()
-      // WILL return when the doc is saved, so the preview renders the
-      // canonical reference ("QUOTATION SLX-TST-26-007") instead of a
-      // bare "QUOTATION". The RPC is pure — it doesn't allocate, just
-      // looks at the existing rows for this client and computes the
-      // next sequence — so calling it here is safe and idempotent.
-      let previewNumber: string | null = null;
-      if (clientId) {
+      // The number is assigned ONCE and is never recomputed here. Use the
+      // number we already have — the just-saved doc (createdNumber) or the doc
+      // being edited/revised (initialDoc.number) — and only forecast via the
+      // RPC for a brand-new doc that has never been saved (#5). This stops an
+      // existing doc's number drifting (e.g. 001 → 002) on Preview/PDF.
+      let previewNumber: string | null = createdNumber ?? initialDoc?.number ?? null;
+      if (previewNumber == null && clientId) {
         const supabase = createBrowserSupabase();
         const { data: nextNum, error: nextErr } = await supabase.rpc(
           "next_client_document_number",
@@ -759,6 +847,10 @@ export default function NewDocumentForm({
           previewNumber = nextNum;
         }
       }
+      const [{ pdf }, { default: QuotationPDF }] = await Promise.all([
+        import("@react-pdf/renderer"),
+        import("@/components/QuotationPDF"),
+      ]);
       const blob = await pdf(
         <QuotationPDF data={buildPdfData(previewNumber)} />
       ).toBlob();
@@ -778,18 +870,19 @@ export default function NewDocumentForm({
     setPreviewBlob(null);
   }
 
-  function handleDownloadFromPreview() {
-    if (!previewBlob || !previewUrl) return;
+  async function handleDownloadFromPreview() {
+    if (!previewBlob) return;
     const selectedClient = clients.find((c) => c.id === clientId);
-    const filename = `${docType}-${(selectedClient?.company_name ?? "draft")
-      .replace(/[^\w\-]+/g, "_")
-      .toLowerCase()}.pdf`;
-    const a = document.createElement("a");
-    a.href = previewUrl;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
+    const filename = buildPdfFilename({
+      kind: docType,
+      number: createdNumber,
+      client: selectedClient?.company_name ?? null,
+      affair: affairs.find((a) => a.id === affairId)?.name ?? null,
+      version: initialDoc?.version ?? null,
+    });
+    // Native Save-As dialog (Chromium) with graceful fallback to Downloads.
+    // previewBlob is already in state → the user gesture is fresh here.
+    await saveBlobAs(previewBlob, filename);
   }
 
   async function persist(blob: Blob | null) {
@@ -798,7 +891,11 @@ export default function NewDocumentForm({
 
     setError(null);
     try {
-      const { id } = await saveDocument(payload);
+      const { id, number } = await saveDocument(payload);
+      // Remember the new doc so any later save here updates it in place and
+      // never re-mints the number (#5).
+      setCreatedId(id);
+      setCreatedNumber(number);
       if (blob) {
         const supabase = createBrowserSupabase();
         const path = `${id}.pdf`;
@@ -831,6 +928,10 @@ export default function NewDocumentForm({
     if (!buildPayload()) return;
     startTransition(async () => {
       try {
+        const [{ pdf }, { default: QuotationPDF }] = await Promise.all([
+          import("@react-pdf/renderer"),
+          import("@/components/QuotationPDF"),
+        ]);
         const blob = await pdf(<QuotationPDF data={buildPdfData()} />).toBlob();
         await persist(blob);
       } catch (e: any) {
@@ -963,26 +1064,37 @@ export default function NewDocumentForm({
       </div>
 
       {/* ---------- CLIENT ---------- */}
-      <section className="rounded-lg border bg-white p-4 space-y-3">
+      <section className="card sec space-y-3">
         <div className="flex items-center justify-between">
           <h2 className="text-lg font-semibold">Client</h2>
-          <button
-            type="button"
-            onClick={() => setShowNewClient((v) => !v)}
-            className="text-sm text-solux-dark hover:underline"
-          >
-            {showNewClient ? "Cancel" : "+ New client"}
-          </button>
+          {!lockClient && (
+            <button
+              type="button"
+              onClick={() => setShowNewClient((v) => !v)}
+              className="text-sm text-solux-dark hover:underline"
+            >
+              {showNewClient ? "Cancel" : "+ New client"}
+            </button>
+          )}
         </div>
 
         {affairId && (
           <div className="rounded-md bg-solux/10 px-3 py-2 text-[13px] text-solux-dark ring-1 ring-inset ring-solux/30">
             Creating a quotation in project:{" "}
-            <strong>{projectName ?? "this project"}</strong>
+            <strong>{projectName ?? affairs.find((a) => a.id === affairId)?.name ?? "this project"}</strong>
           </div>
         )}
 
-        {!showNewClient ? (
+        {lockClient ? (
+          <>
+            {/* CRM refactor: launched from a Client Workspace — client is fixed. */}
+            <div className="w-full rounded border border-neutral-200 bg-neutral-50 px-3 py-2 text-sm text-neutral-700">
+              {selectedClientObj?.company_name ?? "Selected client"}
+              {selectedClientObj?.country ? ` (${selectedClientObj.country})` : ""}
+            </div>
+            {/* Affair selector is rendered once, below, for every flow. */}
+          </>
+        ) : !showNewClient ? (
           <select
             value={clientId}
             onChange={(e) => setClientId(e.target.value)}
@@ -1287,6 +1399,123 @@ export default function NewDocumentForm({
           </div>
         )}
 
+        {/* Affair (project) — MANDATORY for every quotation/invoice. Rendered
+            for both the client-launched (locked) and the general flow. Hidden
+            on revise/edit (the affair is inherited/kept). */}
+        {clientId && !showNewClient && !isRevision && !isEdit && (
+          <div className="mt-3">
+            <span className="text-neutral-500 text-xs uppercase tracking-widerx">
+              Affair / Project *
+            </span>
+            <div className="mt-1 flex items-center gap-2">
+              {affairs.length > 0 ? (
+                <select
+                  value={affairId}
+                  onChange={(e) => {
+                    setAffairId(e.target.value);
+                    const a = affairs.find((x) => x.id === e.target.value);
+                    setAffairName(a?.name ?? "");
+                  }}
+                  className="flex-1 rounded border px-3 py-2"
+                >
+                  <option value="">— Select project —</option>
+                  {affairs.map((a) => (
+                    <option key={a.id} value={a.id}>
+                      {a.name}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <span className="flex-1 text-[13px] text-neutral-500">
+                  No project yet for this client — create one →
+                </span>
+              )}
+              <button
+                type="button"
+                onClick={() => {
+                  setNewAffairError(null);
+                  setShowNewAffair(true);
+                }}
+                className="shrink-0 rounded-md border border-solux bg-solux/5 px-3 py-2 text-sm font-medium text-solux-dark hover:bg-solux/10"
+              >
+                + New Project
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Inline "Create new project" modal — creates the affair, auto-selects
+            it, and keeps every field already entered in the quote (no reload,
+            no redirect). */}
+        {showNewAffair && (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+            onClick={() => !creatingAffair && setShowNewAffair(false)}
+          >
+            <div
+              className="w-full max-w-md rounded-lg bg-white p-5 shadow-xl"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <h3 className="text-base font-semibold">Create new project</h3>
+              <p className="mt-0.5 text-xs text-neutral-500">
+                For{" "}
+                {clients.find((c) => c.id === clientId)?.company_name ??
+                  "this client"}
+                . Your quotation is kept as-is.
+              </p>
+              <label className="mt-4 block">
+                <span className="text-xs font-medium text-neutral-600">
+                  Project name *
+                </span>
+                <input
+                  autoFocus
+                  value={newAffairName}
+                  onChange={(e) => setNewAffairName(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") handleCreateAffair();
+                    if (e.key === "Escape" && !creatingAffair)
+                      setShowNewAffair(false);
+                  }}
+                  placeholder="e.g. SONABEL — new lighting project"
+                  className="mt-1 w-full rounded border px-3 py-2"
+                />
+              </label>
+              <label className="mt-3 block">
+                <span className="text-xs font-medium text-neutral-600">
+                  Description (optional)
+                </span>
+                <textarea
+                  value={newAffairDesc}
+                  onChange={(e) => setNewAffairDesc(e.target.value)}
+                  rows={2}
+                  className="mt-1 w-full rounded border px-3 py-2 text-sm"
+                />
+              </label>
+              {newAffairError && (
+                <p className="mt-2 text-sm text-rose-700">{newAffairError}</p>
+              )}
+              <div className="mt-4 flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowNewAffair(false)}
+                  disabled={creatingAffair}
+                  className="rounded-md border px-3 py-2 text-sm hover:bg-neutral-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleCreateAffair}
+                  disabled={creatingAffair}
+                  className="rounded-md bg-solux px-3 py-2 text-sm font-semibold text-white hover:bg-solux-dark disabled:opacity-50"
+                >
+                  {creatingAffair ? "Creating…" : "Create"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* ---------- CLIENT HISTORY ---------- */}
         {clientId && (
           <div className="mt-2 rounded border bg-neutral-50 p-3">
@@ -1343,28 +1572,10 @@ export default function NewDocumentForm({
         )}
       </section>
 
-      {/* ---------- AFFAIR / PROJECT NAME ----------
-          Sits between Client and Products. Prominent because we work
-          by project — this internal label shows next to the code in
-          every list. */}
-      <section className="rounded-lg border border-solux/30 bg-solux/5 p-4">
-        <label className="block">
-          <span className="text-xs font-semibold uppercase tracking-widerx text-solux-dark">
-            Affair / project name
-          </span>
-          <input
-            type="text"
-            value={affairName}
-            onChange={(e) => setAffairName(e.target.value)}
-            placeholder="e.g. Benin Highway Solar Upgrade"
-            className="mt-1.5 w-full rounded-md border border-neutral-300 px-3 py-2.5 text-base font-medium focus:border-solux focus:outline-none focus:ring-1 focus:ring-solux"
-          />
-          <span className="block text-[11px] text-neutral-500 mt-1.5">
-            Internal only — appears beside the quotation code in lists.
-            Easier to recognise than <code>SLX-…</code>.
-          </span>
-        </label>
-      </section>
+      {/* Affair / Project is chosen via the single selector above; its label
+          becomes the document's affair name. The previously separate free-text
+          "Affair / project name" field was removed (#4) — one field, no
+          ambiguity. */}
 
       {/* ---------- VALIDATION REQUEST (advisory, m068) ----------
           Optional: flag the quote for a manager's review on save. Never
@@ -1749,7 +1960,7 @@ export default function NewDocumentForm({
       </section>
 
       {/* ---------- PRODUCTION TIME ---------- */}
-      <section className="rounded-lg border bg-white p-4 space-y-3">
+      <section className="card sec space-y-3">
         <h2 className="text-lg font-semibold">Production time</h2>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
@@ -2075,7 +2286,7 @@ export default function NewDocumentForm({
       </section>
 
       {/* ---------- BANK ACCOUNT ---------- */}
-      <section className="rounded-lg border bg-white p-4 space-y-3">
+      <section className="card sec space-y-3">
         <div className="flex items-start justify-between gap-3">
           <div>
             <h2 className="text-lg font-semibold">Banking information</h2>
@@ -2141,7 +2352,7 @@ export default function NewDocumentForm({
       </section>
 
       {/* ---------- SALES CONDITIONS ---------- */}
-      <section className="rounded-lg border bg-white p-4 space-y-3">
+      <section className="card sec space-y-3">
         <div className="flex items-start justify-between gap-3">
           <div>
             <h2 className="text-lg font-semibold">Sales conditions</h2>
@@ -2195,7 +2406,7 @@ export default function NewDocumentForm({
       </section>
 
       {/* ---------- COMMISSION ---------- */}
-      <section className="rounded-lg border bg-white p-4 space-y-3">
+      <section className="card sec space-y-3">
         <div className="flex items-start justify-between gap-3">
           <div>
             <h2 className="text-lg font-semibold">Commission</h2>
@@ -2276,7 +2487,7 @@ export default function NewDocumentForm({
       </section>
 
       {/* ---------- TOTALS + SUBMIT ---------- */}
-      <section className="rounded-lg border bg-white p-4 space-y-3">
+      <section className="card sec space-y-3">
         <div className="flex items-center justify-between text-sm">
           <span>Items total</span>
           <span>{itemsTotal.toFixed(2)}</span>

@@ -27,7 +27,10 @@ import WorkflowStepper, {
 import {
   PRODUCTION_ORDER_STATUSES,
   PRODUCTION_ORDER_STATUS_LABEL,
+  PRODUCTION_COMPLETED_STATUSES,
   PRODUCTION_PAYMENT_STATE_LABEL,
+  BALANCE_DUE_SOURCE_LABEL,
+  computeEffectiveBalanceDueDate,
   computeExpectedBalance,
   computeExpectedDeposit,
   computeProductionDelay,
@@ -44,8 +47,28 @@ import {
   updateProductionOrderShipment,
   updateProductionOrderStatus,
 } from "../actions";
-import { addWorkingDays } from "@/lib/working-days";
+import {
+  addWorkingDays,
+  calendarDaysBetween,
+  todayISO,
+} from "@/lib/working-days";
 import { normalizeShippingDetails } from "@/lib/shipping";
+import {
+  normalizeBlProfile,
+  blProfileStatus,
+  SOLUX_SHIPPER_DEFAULT,
+} from "@/lib/bl";
+import {
+  requiredShippingDocs,
+  computeShippingDocsReadiness,
+} from "@/lib/shipping-docs";
+import {
+  ShippingDocumentsCard,
+  type ShippingDocPresent,
+} from "@/components/production/ShippingDocumentsCard";
+import type { CommercialInvoicePDFData } from "@/components/CommercialInvoicePDF";
+import { formatPaymentTerms } from "@/lib/payment";
+import type { BankAccount } from "@/lib/types";
 import {
   computeDelayBreakdown,
   type DelayType,
@@ -61,6 +84,7 @@ import {
 } from "@/lib/production-lifecycle";
 import {
   computeOperationsAlert,
+  LC_EXPIRY_WARNING_DAYS,
 } from "@/lib/operations-alerts";
 import { OperationsAlertBadge } from "@/components/OperationsAlertBadge";
 import {
@@ -112,52 +136,47 @@ export default async function ProductionOrderDetailPage({
   const eventDiscussionId = parseEventSearchParam(searchParams?.event);
   const technical = isTechnicalRole(effectiveRole);
   const adminLike = isAdminLike(effectiveRole);
-  // Capability-driven gating for the deposit-override button. Sales
-  // (or any role without the capability) won't even see the button.
-  // Backend keeps requireCapability() as the source of truth.
-  const canStartWithoutDeposit = await hasUiCapability(
-    "production_order.start_without_deposit"
-  );
-  // Same capability that gates updateProductionOrderStatus + the new
-  // markProductionComplete action. We render the Mark Complete CTA only
-  // for roles that can actually flip status; sales sees a read-only view.
-  const canEditStatus = await hasUiCapability(
-    "production_order.edit_status"
-  );
-
-  // Selecting `*` instead of an explicit column list — this way the
-  // page keeps rendering even if migration 021 (production_validation_date,
-  // production_working_days) hasn't been applied yet. PostgREST returns
-  // whatever columns exist; missing fields just come back undefined.
-  const { data: order, error: orderErr } = await supabase
-    .from("production_orders")
-    .select(
-      "*, documents:quotation_id(id, number, total_price, currency, status, payment_mode, payment_terms, incoterm), clients(company_name, country, client_code, contact_name, bl_profile), task_lists:task_list_id(id, number, status)"
-    )
-    .eq("id", params.id)
-    .maybeSingle();
-
-  if (orderErr) {
-    console.error("[production order detail] load failed:", orderErr.message);
-    notFound();
-  }
-  if (!order) notFound();
-
-  // Deadline change history. Tries the full m074 (updated_at / updated_by) +
-  // m073 (days_added) + m072 (delay_type) shape first; falls back
-  // step-by-step if migrations haven't been applied yet.
-  let history: any[] | null = null;
-  {
-    const full = await supabase
-      .from("production_deadline_changes")
+  /* ---- Parallel fetch wave (perf, 2026-06-12) -------------------------
+     The database lives in the cloud (~110 ms per round trip). Everything
+     that only needs `params.id` fires in ONE wave instead of a sequential
+     waterfall — capabilities, the order row, the deadline history, the
+     events timeline and the documents hub. This alone removes ~0.5 s of
+     stacked latency from the most-used operations page. Each query keeps
+     its original shape; only the WHEN changed. */
+  const [
+    canStartWithoutDeposit,
+    canEditStatus,
+    orderRes,
+    history,
+    events,
+    docRowsRes,
+    docAuditRes,
+  ] = await Promise.all([
+    // Capability-driven gating for the deposit-override button. Backend
+    // keeps requireCapability() as the source of truth.
+    hasUiCapability("production_order.start_without_deposit"),
+    // Gates the status switcher + Mark Complete CTA (sales = read-only).
+    hasUiCapability("production_order.edit_status"),
+    // Selecting `*` instead of an explicit column list — this way the
+    // page keeps rendering even if migration 021 hasn't been applied yet.
+    supabase
+      .from("production_orders")
       .select(
-        "id, previous_date, new_date, days_added, delay_type, reason, changed_by, created_at, updated_at, updated_by"
+        "*, documents:quotation_id(id, number, type, total_price, currency, status, payment_mode, payment_terms, incoterm, port_of_loading, port_of_destination, purchase_order_number, bank_account_id), clients(company_name, country, client_code, contact_name, bl_profile), task_lists:task_list_id(id, number, status)"
       )
-      .eq("production_order_id", params.id)
-      .order("created_at", { ascending: false });
-    if (!full.error) {
-      history = full.data ?? [];
-    } else {
+      .eq("id", params.id)
+      .maybeSingle(),
+    // Deadline change history. Tries the full m074 shape first; falls
+    // back step-by-step if migrations haven't been applied yet.
+    (async (): Promise<any[] | null> => {
+      const full = await supabase
+        .from("production_deadline_changes")
+        .select(
+          "id, previous_date, new_date, days_added, delay_type, reason, changed_by, created_at, updated_at, updated_by"
+        )
+        .eq("production_order_id", params.id)
+        .order("created_at", { ascending: false });
+      if (!full.error) return full.data ?? [];
       const m073 = await supabase
         .from("production_deadline_changes")
         .select(
@@ -165,29 +184,43 @@ export default async function ProductionOrderDetailPage({
         )
         .eq("production_order_id", params.id)
         .order("created_at", { ascending: false });
-      if (!m073.error) {
-        history = m073.data ?? [];
-      } else {
-        const m072 = await supabase
-          .from("production_deadline_changes")
-          .select(
-            "id, previous_date, new_date, delay_type, reason, changed_by, created_at"
-          )
-          .eq("production_order_id", params.id)
-          .order("created_at", { ascending: false });
-        if (!m072.error) {
-          history = m072.data ?? [];
-        } else {
-          const legacy = await supabase
-            .from("production_deadline_changes")
-            .select("id, previous_date, new_date, reason, changed_by, created_at")
-            .eq("production_order_id", params.id)
-            .order("created_at", { ascending: false });
-          history = legacy.data ?? [];
-        }
-      }
-    }
+      if (!m073.error) return m073.data ?? [];
+      const m072 = await supabase
+        .from("production_deadline_changes")
+        .select(
+          "id, previous_date, new_date, delay_type, reason, changed_by, created_at"
+        )
+        .eq("production_order_id", params.id)
+        .order("created_at", { ascending: false });
+      if (!m072.error) return m072.data ?? [];
+      const legacy = await supabase
+        .from("production_deadline_changes")
+        .select("id, previous_date, new_date, reason, changed_by, created_at")
+        .eq("production_order_id", params.id)
+        .order("created_at", { ascending: false });
+      return legacy.data ?? [];
+    })(),
+    // Operational events — drives the Timeline section below.
+    listEventsForEntity("production_order", params.id, 100),
+    // Order Documents hub (m099) — soft-fails to empty pre-migration.
+    supabase
+      .from("order_documents")
+      .select("*")
+      .eq("production_order_id", params.id)
+      .order("version", { ascending: false }),
+    supabase
+      .from("order_document_audit")
+      .select("*")
+      .eq("production_order_id", params.id)
+      .order("created_at", { ascending: false }),
+  ]);
+
+  const { data: order, error: orderErr } = orderRes;
+  if (orderErr) {
+    console.error("[production order detail] load failed:", orderErr.message);
+    notFound();
   }
+  if (!order) notFound();
 
   // m072 / m073 — split the total slip into FACTORY vs EXTERNAL so the
   // page surfaces both axes (and the factory KPI stays honest). Each
@@ -272,8 +305,7 @@ export default async function ProductionOrderDetailPage({
     paymentTerms: ((order.documents as any)?.payment_terms ?? null) as any,
   });
 
-  // Load operational events for this order — drives the Timeline below.
-  const events = await listEventsForEntity("production_order", params.id, 100);
+  // Operational events (`events`) were fetched in the parallel wave above.
 
   /* ---- Order configuration summary ----
      Sales (and trackers in general) need a glanceable "what was
@@ -403,6 +435,137 @@ export default async function ProductionOrderDetailPage({
     paymentState === "no_deposit_required";
   const currency = (doc?.currency as string) ?? "USD";
 
+  // m114 (audit Phase 1 — cash): effective balance due date + LC expiry.
+  // The due date is derived at read time (manual override → production
+  // deadline → ETA + LC days → ETA) so it follows deadline/ETA changes
+  // until someone freezes it in the payment editor below.
+  const balanceOutstanding =
+    expectedBalance > 0 && balanceReceived + 0.01 < expectedBalance;
+  const balanceDue = computeEffectiveBalanceDueDate({
+    balanceDueDate: ((order as any).balance_due_date ?? null) as string | null,
+    paymentMode,
+    paymentTerms,
+    currentProductionDeadline: (order.current_production_deadline ??
+      null) as string | null,
+    eta: ((order as any).eta ?? null) as string | null,
+  });
+  const balanceDueDaysLate = balanceDue.date
+    ? calendarDaysBetween(balanceDue.date, todayISO())
+    : null;
+  const balanceDueIsLate =
+    balanceOutstanding && balanceDueDaysLate !== null && balanceDueDaysLate > 0;
+  const lcExpiryDate = ((order as any).lc_expiry_date ?? null) as
+    | string
+    | null;
+  const lcDaysToExpiry = lcExpiryDate
+    ? calendarDaysBetween(todayISO(), lcExpiryDate)
+    : null;
+  const lcCritical =
+    balanceOutstanding &&
+    lcDaysToExpiry !== null &&
+    lcDaysToExpiry <= LC_EXPIRY_WARNING_DAYS;
+
+  // ---- m115 — Shipping documents package + Commercial Invoice payload ----
+  // Requirements are DERIVED from payment mode + the client's BL profile
+  // (lib/shipping-docs). The CI payload is assembled here, server-side,
+  // from the won proforma's lines (m089 snapshots), the BL profile parties
+  // and the order's shipping details; the browser renders the PDF.
+  const blProfile = normalizeBlProfile((order as any).clients?.bl_profile);
+  // Collapsed-header signal: Operations must see the booking blockers
+  // WITHOUT opening the section (UX directive 2026-06-12).
+  const blStatus = blProfileStatus(blProfile);
+  const shippingRequirements = requiredShippingDocs({
+    paymentMode,
+    blDocuments: blProfile.documents,
+  });
+  const shippingDocsByKind: Record<string, ShippingDocPresent | undefined> = {};
+
+  // CI lines + bank account in one parallel pair (perf 2026-06-12).
+  const [ciLinesRes, ciBankRes] = await Promise.all([
+    order.quotation_id
+      ? supabase
+          .from("document_lines")
+          .select(
+            "quantity, unit_price, total_price, client_product_name, product_name, products(name)"
+          )
+          .eq("document_id", order.quotation_id)
+      : Promise.resolve({ data: null } as any),
+    (doc as any)?.bank_account_id
+      ? supabase
+          .from("bank_accounts")
+          .select("*")
+          .eq("id", (doc as any).bank_account_id)
+          .maybeSingle()
+      : Promise.resolve({ data: null } as any),
+  ]);
+  const ciLines: CommercialInvoicePDFData["lines"] = (
+    ((ciLinesRes as any).data ?? []) as any[]
+  ).map((l) => ({
+    description: l.product_name ?? l.products?.name ?? "Goods",
+    client_ref: l.client_product_name ?? null,
+    quantity: Number(l.quantity ?? 0),
+    unit_price: Number(l.unit_price ?? 0),
+    total_price: Number(l.total_price ?? 0),
+  }));
+  const ciBank: BankAccount | null = ((ciBankRes as any).data as any) ?? null;
+  const cli = (order as any).clients ?? null;
+  const sv = (v: unknown) => (v == null || v === "" ? null : String(v));
+  const ciLinesTotal = ciLines.reduce((s2, l) => s2 + l.total_price, 0);
+  const ciData: Omit<CommercialInvoicePDFData, "ci_number" | "date"> | null =
+    ciLines.length
+      ? {
+          order_number: (order as any).number ?? null,
+          proforma_number: (doc as any)?.number ?? null,
+          purchase_order_number: (doc as any)?.purchase_order_number ?? null,
+          incoterm: (doc as any)?.incoterm ?? null,
+          port_of_loading: (doc as any)?.port_of_loading ?? null,
+          port_of_destination: (doc as any)?.port_of_destination ?? null,
+          country_of_origin: "China",
+          payment_label: formatPaymentTerms(paymentMode, paymentTerms),
+          currency: currency as any,
+          shipper: {
+            company_name:
+              blProfile.shipper.company_name ??
+              SOLUX_SHIPPER_DEFAULT.company_name,
+            address:
+              blProfile.shipper.address ?? SOLUX_SHIPPER_DEFAULT.address,
+            contact_person: blProfile.shipper.contact_person,
+            phone: blProfile.shipper.phone,
+            email: blProfile.shipper.email,
+          },
+          consignee: {
+            company_name:
+              blProfile.consignee.company_name ?? cli?.company_name ?? null,
+            address: blProfile.consignee.address,
+            country: blProfile.consignee.country ?? cli?.country ?? null,
+            contact_person:
+              blProfile.consignee.contact_person ?? cli?.contact_name ?? null,
+            phone: blProfile.consignee.phone,
+            email: blProfile.consignee.email,
+            tax_id: blProfile.consignee.tax_id,
+          },
+          notify: blProfile.notify.company_name ? blProfile.notify : null,
+          shipping: {
+            bl_number: sv(ship.bl_number),
+            vessel: sv(ship.vessel),
+            voyage: sv(ship.voyage),
+            forwarder: sv(ship.forwarder),
+            etd: sv((order as any).etd),
+            hs_code: sv((ship as any).hs_code),
+            packages: sv(ship.packages),
+            gross_weight:
+              ship.gross_weight != null ? `${ship.gross_weight} kg` : null,
+            net_weight:
+              ship.net_weight != null ? `${ship.net_weight} kg` : null,
+            cbm: ship.cbm != null ? `${ship.cbm} m³` : null,
+          },
+          lines: ciLines,
+          freight_amount: Math.max(0, totalPrice - ciLinesTotal),
+          total_amount: totalPrice,
+          bank: ciBank,
+        }
+      : null;
+
   // Single derivation of the live operational state — feeds both the top
   // OrderOperationsStrip and the sticky LiveStatusSidebar so they never drift.
   const liveStatus = {
@@ -483,39 +646,34 @@ export default async function ProductionOrderDetailPage({
     }
   }
 
-  // ---- Order Documents hub (m099) — soft-fails to empty pre-migration. ----
+  // ---- Order Documents hub (m099) — rows fetched in the parallel wave. ----
   const activeTab = searchParams?.tab === "documents" ? "documents" : "overview";
-  const docRows = (
-    (
-      await supabase
-        .from("order_documents")
-        .select("*")
-        .eq("production_order_id", params.id)
-        .order("version", { ascending: false })
-    ).data ?? []
-  ) as any[];
-  const docAuditRows = (
-    (
-      await supabase
-        .from("order_document_audit")
-        .select("*")
-        .eq("production_order_id", params.id)
-        .order("created_at", { ascending: false })
-    ).data ?? []
-  ) as any[];
+  const docRows = (((docRowsRes as any).data ?? []) as any[]);
+  const docAuditRows = (((docAuditRes as any).data ?? []) as any[]);
   const docUserIds = Array.from(
     new Set([...docRows.map((r) => r.uploaded_by), ...docAuditRows.map((a) => a.actor)].filter(Boolean))
   ) as string[];
-  const docUserLabels = docUserIds.length
-    ? await resolveUserLabelStrings(docUserIds)
-    : new Map<string, string>();
   const docSigned = new Map<string, string>();
-  await Promise.all(
-    docRows.map(async (r) => {
-      const { data } = await supabase.storage.from(ATTACHMENTS_BUCKET).createSignedUrl(r.storage_path, 3600);
-      if (data?.signedUrl) docSigned.set(r.id, data.signedUrl);
-    })
-  );
+  // Labels + signed URLs in parallel; URLs minted in ONE storage round
+  // trip (createSignedUrls) instead of one per file — on an order with
+  // 20 files that's 20 round trips → 1.
+  const [docUserLabels] = await Promise.all([
+    docUserIds.length
+      ? resolveUserLabelStrings(docUserIds)
+      : Promise.resolve(new Map<string, string>()),
+    (async () => {
+      if (!docRows.length) return;
+      const { data } = await supabase.storage
+        .from(ATTACHMENTS_BUCKET)
+        .createSignedUrls(
+          docRows.map((r) => r.storage_path),
+          3600
+        );
+      (data ?? []).forEach((entry: any, i: number) => {
+        if (entry?.signedUrl) docSigned.set(docRows[i].id, entry.signedUrl);
+      });
+    })(),
+  ]);
   const toDocVersion = (r: any): DocVersionView => ({
     id: r.id,
     version: r.version,
@@ -544,6 +702,16 @@ export default async function ProductionOrderDetailPage({
       versions: sorted.map(toDocVersion),
     };
     (current.archived_at ? archivedDocs : activeDocs).push(view);
+    // m115 — feed the Shipping Documents checklist: best (first-seen,
+    // non-archived) logical document per canonical kind.
+    if (!current.archived_at && current.kind) {
+      shippingDocsByKind[current.kind] ??= {
+        groupId,
+        name: current.name,
+        version: current.version,
+        signedUrl: docSigned.get(current.id) ?? null,
+      };
+    }
   }
   const docAuditView: AuditView[] = docAuditRows.map((a) => ({
     id: a.id,
@@ -553,6 +721,14 @@ export default async function ProductionOrderDetailPage({
     createdAt: a.created_at,
   }));
   const docCount = activeDocs.length;
+  // m115 — readiness of the export documentation package. Required docs
+  // (mandatory + client-profile/LC-driven) gate readiness; optional docs
+  // never block. Drives the collapsed headers of BOTH the Shipping &
+  // logistics and Shipping documents sections.
+  const docsReadiness = computeShippingDocsReadiness(
+    shippingRequirements,
+    Object.keys(shippingDocsByKind)
+  );
   const ORDER_TABS: { key: string; label: string }[] = [
     { key: "overview", label: "Overview" },
     { key: "documents", label: "Documents" },
@@ -578,12 +754,31 @@ export default async function ProductionOrderDetailPage({
       </div>
 
       {activeTab === "documents" ? (
-        <OrderDocumentsTab
-          orderId={params.id}
-          active={activeDocs}
-          archived={archivedDocs}
-          audit={docAuditView}
-        />
+        <div className="space-y-5">
+          {/* m115 — the export documentation package, ABOVE the free-form
+              hub: this is the operational checklist (Generate CI, upload
+              signed docs); the hub below stays the full folder. */}
+          <ShippingDocumentsCard
+            orderId={params.id}
+            canGenerate={technical}
+            ciNumber={
+              (((order as any).commercial_invoice_number ?? null) as
+                | string
+                | null)
+            }
+            requirements={shippingRequirements}
+            docs={shippingDocsByKind}
+            ciData={ciData}
+            clientName={(order as any).clients?.company_name ?? null}
+            affairName={affairName}
+          />
+          <OrderDocumentsTab
+            orderId={params.id}
+            active={activeDocs}
+            archived={archivedDocs}
+            audit={docAuditView}
+          />
+        </div>
       ) : (
       <>
       {/* ---------- HEADER ---------- */}
@@ -1379,6 +1574,52 @@ export default async function ProductionOrderDetailPage({
                 {fmtDate(order.balance_received_at)}
               </b>
             </div>
+            {/* m114 — effective due date (derived unless overridden). */}
+            <div className="text-[11px] text-neutral-500">
+              Due:{" "}
+              <b
+                className={`font-mono ${
+                  balanceDueIsLate ? "text-rose-700" : "text-neutral-700"
+                }`}
+              >
+                {fmtDate(balanceDue.date)}
+              </b>
+              {balanceDue.source && (
+                <span className="text-neutral-400">
+                  {" "}
+                  · {BALANCE_DUE_SOURCE_LABEL[balanceDue.source]}
+                </span>
+              )}
+              {balanceDueIsLate && (
+                <b className="text-rose-700"> · {balanceDueDaysLate}d late</b>
+              )}
+            </div>
+            {/* m114 — LC expiry. Shown when an LC is in play (mode or date). */}
+            {(lcExpiryDate ||
+              paymentMode === "lc" ||
+              paymentMode === "hybrid") && (
+              <div className="text-[11px] text-neutral-500">
+                LC expiry:{" "}
+                <b
+                  className={`font-mono ${
+                    lcCritical ? "text-rose-700" : "text-neutral-700"
+                  }`}
+                >
+                  {fmtDate(lcExpiryDate)}
+                </b>
+                {lcCritical && lcDaysToExpiry !== null && (
+                  <b className="text-rose-700">
+                    {" "}
+                    ·{" "}
+                    {lcDaysToExpiry < 0
+                      ? `expired ${Math.abs(lcDaysToExpiry)}d ago`
+                      : lcDaysToExpiry === 0
+                      ? "expires today"
+                      : `${lcDaysToExpiry}d left`}
+                  </b>
+                )}
+              </div>
+            )}
           </div>
         </div>
 
@@ -1429,6 +1670,40 @@ export default async function ProductionOrderDetailPage({
                   defaultValue={order.balance_received_at ?? undefined}
                   className="input"
                 />
+              </label>
+              {/* m114 — cash tracking. Blank due date = derived
+                  automatically (deadline / ETA + LC days / ETA). */}
+              <label className="block">
+                <span className="label">Balance due date (override)</span>
+                <input
+                  type="date"
+                  name="balance_due_date"
+                  defaultValue={
+                    ((order as any).balance_due_date ?? undefined) as
+                      | string
+                      | undefined
+                  }
+                  className="input"
+                />
+                <span className="text-[10px] text-neutral-400">
+                  Leave blank to derive from the production deadline / ETA.
+                </span>
+              </label>
+              <label className="block">
+                <span className="label">LC expiry date</span>
+                <input
+                  type="date"
+                  name="lc_expiry_date"
+                  defaultValue={
+                    ((order as any).lc_expiry_date ?? undefined) as
+                      | string
+                      | undefined
+                  }
+                  className="input"
+                />
+                <span className="text-[10px] text-neutral-400">
+                  Validity end of the Letter of Credit covering this order.
+                </span>
               </label>
             </div>
             <label className="block">
@@ -1497,42 +1772,104 @@ export default async function ProductionOrderDetailPage({
         )}
       </CollapsibleSection>
 
-      {/* ---------- SHIPPING & LOGISTICS (BL summary + shipment) ---------- */}
+      {/* ---------- SHIPPING & LOGISTICS (BL summary + shipment) ----------
+          Collapsed state MUST surface the booking blockers (UX directive
+          2026-06-12): booking status, BL profile completeness and document
+          readiness all show as header pills — the Hazard rail (attention)
+          fires when something actually blocks the shipment. */}
       <CollapsibleSection
         title="Shipping & logistics"
-        attention={status === "production_completed" && !order.shipment_booked}
-        attentionLabel="Book shipment"
+        attention={
+          (status === "production_completed" && !order.shipment_booked) ||
+          (!order.shipment_booked && blStatus !== "complete")
+        }
+        attentionLabel={
+          blStatus !== "complete" && !order.shipment_booked
+            ? "BL profile required"
+            : "Book shipment"
+        }
         badge={
-          order.shipment_booked ? (
-            <PremiumPill variant="pos">Booked</PremiumPill>
-          ) : (
-            <PremiumPill variant="line">Not booked</PremiumPill>
-          )
+          <>
+            {order.shipment_booked ? (
+              <PremiumPill variant="pos">Booked</PremiumPill>
+            ) : (
+              <PremiumPill variant="line">Not booked</PremiumPill>
+            )}
+            {blStatus === "complete" ? (
+              <PremiumPill variant="pos">BL profile complete</PremiumPill>
+            ) : (
+              <PremiumPill variant="ink">
+                {blStatus === "missing"
+                  ? "BL profile missing"
+                  : "BL profile incomplete"}
+              </PremiumPill>
+            )}
+            {docsReadiness.allRequiredReady ? (
+              <PremiumPill variant="pos">Docs ready</PremiumPill>
+            ) : (
+              <PremiumPill variant="ink">
+                Docs {docsReadiness.requiredReady}/{docsReadiness.requiredTotal}
+              </PremiumPill>
+            )}
+          </>
         }
         summary={
           <SummaryRow>
             <SummaryStat
               label="Shipment"
-              value={order.shipment_booked ? "Booked" : "Not booked"}
-              tone={order.shipment_booked ? "success" : "muted"}
+              value={
+                order.shipment_booked
+                  ? "Booked"
+                  : blStatus === "complete"
+                  ? "Ready for booking"
+                  : "Blocked — BL profile"
+              }
+              tone={
+                order.shipment_booked
+                  ? "success"
+                  : blStatus === "complete"
+                  ? "default"
+                  : "danger"
+              }
+            />
+            <SummaryStat
+              label="BL profile"
+              value={
+                blStatus === "complete"
+                  ? "Complete"
+                  : blStatus === "partial"
+                  ? "Incomplete"
+                  : "Missing"
+              }
+              tone={blStatus === "complete" ? "success" : "warn"}
+            />
+            <SummaryStat
+              label="Shipping docs"
+              value={`${docsReadiness.requiredReady}/${docsReadiness.requiredTotal} required ready`}
+              tone={docsReadiness.allRequiredReady ? "success" : "warn"}
+            />
+            <SummaryStat
+              label="Payment"
+              value={PRODUCTION_PAYMENT_STATE_LABEL[paymentState]}
+              tone={
+                paymentState === "paid_in_full" ||
+                paymentState === "deposit_received" ||
+                paymentState === "no_deposit_required"
+                  ? "success"
+                  : "warn"
+              }
             />
             <SummaryStat label="ETD" value={fmtDate(order.etd)} />
             <SummaryStat label="ETA" value={fmtDate(order.eta)} />
-            <SummaryStat label="BL number" value={ship.bl_number ?? "—"} />
-            <SummaryStat label="Forwarder" value={ship.forwarder ?? "—"} />
-            <SummaryStat
-              label="Vessel / voyage"
-              value={
-                [ship.vessel, ship.voyage].filter(Boolean).join(" · ") || "—"
-              }
-            />
           </SummaryRow>
         }
       >
-        {/* SHIP-1 — consignee / notify-party for the BL packet. */}
+        {/* SHIP-1 — consignee / notify-party for the BL packet, with the
+            computed completeness badge + "Request from Sales" workflow. */}
         <ClientBlSummary
           clientId={(order as any).client_id}
           rawProfile={(order.clients as any)?.bl_profile ?? null}
+          requestOrderId={order.id}
         />
 
         {/* --- Shipment --- */}
@@ -1667,6 +2004,84 @@ export default async function ProductionOrderDetailPage({
             />
           </div>
         )}
+        </div>
+      </CollapsibleSection>
+
+      {/* ---------- SHIPPING DOCUMENTS (export documentation package) ----------
+          UX directive 2026-06-12: the documents must NOT hide behind the
+          small Documents tab. Full collapsible section next to Shipping &
+          logistics — collapsed header shows required/optional readiness,
+          open state embeds the SAME components as the tab (checklist with
+          Generate CI + the full hub with drag&drop, versions, audit). */}
+      <CollapsibleSection
+        title="Shipping documents"
+        attention={
+          !docsReadiness.allRequiredReady &&
+          (order.shipment_booked ||
+            PRODUCTION_COMPLETED_STATUSES.includes(status))
+        }
+        attentionLabel="Documents required"
+        badge={
+          docsReadiness.allRequiredReady ? (
+            <PremiumPill variant="pos">Required documents ready</PremiumPill>
+          ) : (
+            <PremiumPill variant="ink">
+              {docsReadiness.requiredReady}/{docsReadiness.requiredTotal}{" "}
+              required ready
+            </PremiumPill>
+          )
+        }
+        summary={
+          <SummaryRow>
+            <SummaryStat
+              label="Required docs"
+              value={`${docsReadiness.requiredReady} of ${docsReadiness.requiredTotal} ready`}
+              tone={docsReadiness.allRequiredReady ? "success" : "warn"}
+            />
+            <SummaryStat
+              label="Optional docs"
+              value={`${docsReadiness.optionalReady}/${docsReadiness.optionalTotal} uploaded`}
+              tone="muted"
+            />
+            <SummaryStat
+              label="Commercial Invoice"
+              value={
+                shippingDocsByKind["commercial_invoice"]
+                  ? (order as any).commercial_invoice_number ?? "Generated"
+                  : "Not generated"
+              }
+              tone={
+                shippingDocsByKind["commercial_invoice"] ? "success" : "muted"
+              }
+            />
+            <SummaryStat
+              label="All files"
+              value={`${docCount} document${docCount === 1 ? "" : "s"}`}
+            />
+          </SummaryRow>
+        }
+      >
+        <div className="space-y-5 pt-3">
+          <ShippingDocumentsCard
+            orderId={params.id}
+            canGenerate={technical}
+            ciNumber={
+              (((order as any).commercial_invoice_number ?? null) as
+                | string
+                | null)
+            }
+            requirements={shippingRequirements}
+            docs={shippingDocsByKind}
+            ciData={ciData}
+            clientName={(order as any).clients?.company_name ?? null}
+            affairName={affairName}
+          />
+          <OrderDocumentsTab
+            orderId={params.id}
+            active={activeDocs}
+            archived={archivedDocs}
+            audit={docAuditView}
+          />
         </div>
       </CollapsibleSection>
 

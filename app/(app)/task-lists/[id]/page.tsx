@@ -1,4 +1,8 @@
 import "./tasklist.css";
+// Render fresh: the factory-mapping "missing" count + Release-button state must
+// reflect mappings saved in the autonomous zone immediately (#12). force-dynamic
+// makes this route's reads no-store WITHOUT the app-wide cache penalty.
+export const dynamic = "force-dynamic";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
@@ -32,9 +36,15 @@ import {
 } from "@/components/dashboard/EventDiscussionPanel";
 import { formatPaymentTerms } from "@/lib/payment";
 import { formatProductionTime, fromProductionColumns } from "@/lib/logistics";
+import { countMissingMappings } from "@/lib/task-list-mapping-status";
+import {
+  revisionCategoryLabel,
+  type RevisionThreadInfo,
+} from "@/lib/revision-shared";
 import {
   TASK_LIST_LOCKED_FOR_SALES,
   isTechnicalRole,
+  optionLookupKey,
   type ConfigField,
   type ConfigFieldOption,
   type FactoryMapping,
@@ -60,13 +70,7 @@ export default async function TaskListDetailPage({
   // even attempt it. Backend still enforces via requireCapability().
   const canDeleteTaskList = await hasUiCapability("task_list.delete");
 
-  const [
-    { data: task },
-    { data: lines },
-    { data: fields },
-    { data: opts },
-    { data: mappings },
-  ] = await Promise.all([
+  const [{ data: task }, { data: lines }] = await Promise.all([
     supabase
       .from("production_task_lists")
       .select(
@@ -87,26 +91,61 @@ export default async function TaskListDetailPage({
       )
       .eq("task_list_id", params.id)
       .order("position"),
-    supabase
+  ]);
+
+  if (!task) notFound();
+
+  // ---- Config fetch MUST be scoped to this task list's categories ----------
+  // config_field_options and factory_mappings are app-wide tables. An UNSCOPED
+  // select(...) hits the PostgREST row cap and returns a NON-DETERMINISTIC
+  // subset (no stable total order), so a saved + active mapping intermittently
+  // fails to resolve → the "missing mappings" count oscillates (5→3→5) across
+  // reloads of identical data (the 2026-06-19 E2E bug). Scoping by the
+  // categories on the lines makes every result set tiny, deterministic and
+  // cap-proof. countMissingTaskListMappings (the server gate) applies the SAME
+  // scoping so the page count and the release gate can never diverge.
+  const lineCategoryIds = Array.from(
+    new Set(
+      ((lines ?? []) as any[]).map((l) => l.products?.category_id).filter(Boolean)
+    )
+  ) as string[];
+
+  let fields: any[] | null = [];
+  let opts: any[] | null = [];
+  let mappings: any[] | null = [];
+  if (lineCategoryIds.length > 0) {
+    const fieldsRes = await supabase
       .from("config_fields")
       .select(
         "id, category_id, field_name, field_type, required, required_for_production, default_value, placeholder, field_order, visible_in_quotation, visible_in_task_list, visible_in_factory, internal_only, access_level, allow_custom_value, field_scope, active"
       )
+      .in("category_id", lineCategoryIds)
       .eq("active", true)
       .eq("visible_in_task_list", true)
-      .order("field_order"),
-    supabase
-      .from("config_field_options")
-      .select("id, field_id, option_value, option_order")
-      .order("option_order"),
-    supabase
-      .from("factory_mappings")
-      .select(
-        "id, field_id, option_id, factory_instruction, factory_code, notes, active"
-      ),
-  ]);
-
-  if (!task) notFound();
+      .order("field_order");
+    fields = fieldsRes.data;
+    const configFieldIds = ((fields ?? []) as any[]).map((f) => f.id);
+    if (configFieldIds.length > 0) {
+      // factory_mappings.field_id is always populated, so scope both queries by
+      // it and run them in parallel. Explicit ordering keeps results stable.
+      const [optsRes, mappingsRes] = await Promise.all([
+        supabase
+          .from("config_field_options")
+          .select("id, field_id, option_value, option_order")
+          .in("field_id", configFieldIds)
+          .order("field_id")
+          .order("option_order"),
+        supabase
+          .from("factory_mappings")
+          .select(
+            "id, field_id, option_id, factory_instruction, factory_code, notes, active"
+          )
+          .in("field_id", configFieldIds),
+      ]);
+      opts = optsRes.data;
+      mappings = mappingsRes.data;
+    }
+  }
 
   const status = task.status as ProductionTaskListStatus;
   const lockedForSales = TASK_LIST_LOCKED_FOR_SALES.includes(status);
@@ -252,9 +291,12 @@ export default async function TaskListDetailPage({
 
   // Build the factory-mapping lookup maps used by the resolver:
   //   - mappingByOption: option_id → FactoryMapping row
-  //   - optionIdByFieldValue: "${field_name}|${value-lowercased}" → option_id
+  //   - optionIdByFieldValue: optionLookupKey(category_id, field_name, value) → option_id
   // We key by field_name (not field_id) because that's what the line's
-  // `config_values` JSONB uses. Field names are unique within a category.
+  // `config_values` JSONB uses — but field names are only unique WITHIN a
+  // category, and `fields`/`opts` here span ALL categories, so the key MUST be
+  // category-scoped or a duplicated family (identical field names + values)
+  // collides and resolves to "missing". optionLookupKey() does that scoping.
   const mappingByOption = new Map<string, FactoryMapping>();
   for (const m of (mappings ?? []) as FactoryMapping[]) {
     mappingByOption.set(m.option_id, m);
@@ -265,7 +307,7 @@ export default async function TaskListDetailPage({
     const fieldOpts = optionsByField.get(f.id) ?? [];
     for (const o of fieldOpts as any[]) {
       optionIdByFieldValue.set(
-        `${f.field_name}|${String(o.option_value).toLowerCase()}`,
+        optionLookupKey(f.category_id, f.field_name, o.option_value),
         o.id
       );
     }
@@ -354,6 +396,77 @@ export default async function TaskListDetailPage({
   // Prefer human display names (m052) over "role · uuid" — used by the
   // Timeline AND the validation history.
   const tlActorLabels = await resolveUserLabelStrings(tlActorIds);
+
+  // ---- D1: revision-loop thread (latest request + response) ----------
+  // Surfaced on both NEXT-STEP banners so neither role ever sees a blind
+  // "Needs revision". Read from the entity_messages conversation (m049).
+  const labelOf = (uid: string | null | undefined): string | null =>
+    uid ? (tlActorLabels as Map<string, string>).get(uid) ?? null : null;
+  const cleanBody = (raw: string | null): string => {
+    const s = raw ?? "";
+    const i = s.indexOf("\n\n");
+    return i >= 0 ? s.slice(i + 2) : s;
+  };
+  const { data: revMsgs } = await supabase
+    .from("entity_messages")
+    .select(
+      "message, message_kind, structured_payload, user_id, created_at, resolved_at"
+    )
+    .eq("entity_type", "task_list")
+    .eq("entity_id", params.id)
+    .in("message_kind", ["request", "reply"])
+    .order("created_at", { ascending: false });
+  const reqRow = (revMsgs ?? []).find(
+    (m: any) =>
+      m.message_kind === "request" &&
+      m.structured_payload?.kind === "revision_request"
+  ) as any;
+  const respRow = (revMsgs ?? []).find(
+    (m: any) =>
+      m.message_kind === "reply" &&
+      m.structured_payload?.kind === "revision_response"
+  ) as any;
+  const revisionThread: RevisionThreadInfo = {
+    request: reqRow
+      ? {
+          category: reqRow.structured_payload?.category ?? null,
+          categoryLabel: revisionCategoryLabel(
+            reqRow.structured_payload?.category
+          ),
+          field: reqRow.structured_payload?.field ?? null,
+          message: cleanBody(reqRow.message),
+          authorName: labelOf(reqRow.user_id),
+          createdAt: reqRow.created_at,
+          resolved: !!reqRow.resolved_at,
+        }
+      : null,
+    response: respRow
+      ? {
+          message: cleanBody(respRow.message),
+          authorName: labelOf(respRow.user_id),
+          createdAt: respRow.created_at,
+        }
+      : null,
+  };
+
+  // ---- D1/E3: required-mapping completeness (drives the Release guard) ----
+  // SAME pure helper the server-side release gate uses → no logic divergence.
+  const missingMappingCount = countMissingMappings({
+    lines: ((lines ?? []) as any[]).map((l) => ({
+      productId: l.product_id,
+      categoryId: l.products?.category_id ?? null,
+      config: (l.config_values ?? {}) as Record<string, string>,
+      overrides: (l.factory_overrides ?? {}) as Record<string, string>,
+    })),
+    salesFieldsByCategory,
+    mappingsByOption: mappingByOption,
+    optionIdByFieldValue,
+    clientOverridesByProduct: presetByProduct,
+  });
+  const clientName =
+    (Array.isArray((task as any).clients)
+      ? (task as any).clients[0]
+      : (task as any).clients)?.company_name ?? null;
 
   const flowSteps = deriveFlowSteps(
     status,
@@ -464,7 +577,11 @@ export default async function TaskListDetailPage({
           {technical &&
             (status === "validated" || status === "production_ready") && (
               <div className="row">
-                <ExportPdfButton taskListId={task.id} />
+                <ExportPdfButton
+                  taskListId={task.id}
+                  client={client?.company_name ?? null}
+                  affair={linkedQuote?.affair_name ?? null}
+                />
                 <ExportExcelButton taskListId={task.id} />
               </div>
             )}
@@ -523,6 +640,10 @@ export default async function TaskListDetailPage({
             taskListId={task.id}
             status={status}
             isTechnical={technical}
+            revisionThread={revisionThread}
+            missingMappingCount={missingMappingCount}
+            clientName={clientName}
+            taskNumber={task.number ?? null}
           />
         </div>
         {task.submitted_at && (
@@ -596,6 +717,7 @@ export default async function TaskListDetailPage({
                 taskListId={task.id}
                 clientId={task.client_id ?? null}
                 productId={l.product_id}
+                categoryId={categoryId}
                 productName={`${l.products?.name ?? l.product_name ?? "—"}${
                   (l.products?.sku ?? l.product_sku)
                     ? ` · ${l.products?.sku ?? l.product_sku}`
@@ -639,6 +761,12 @@ export default async function TaskListDetailPage({
       <div className="sec-head">
         <div className="lhs">
           <h2>Known risks &amp; warnings</h2>
+          <p className="micro">
+            These notes help transfer commercial knowledge and project-specific
+            requirements — client commitments, sensitive points, negotiated
+            trade-offs, logistics constraints and anything agreed verbally — to
+            the operations &amp; production teams.
+          </p>
         </div>
       </div>
       <div className="risk-shell">

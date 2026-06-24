@@ -45,7 +45,7 @@ import {
   EventDiscussionPanel,
   parseEventSearchParam,
 } from "@/components/dashboard/EventDiscussionPanel";
-import { isTechnicalRole, isAdminLike } from "@/lib/types";
+import { isTechnicalRole, isAdminLike, canSupervise } from "@/lib/types";
 import { computeMargin, formatDiscount } from "@/lib/pricing";
 import { formatPaymentTerms } from "@/lib/payment";
 import {
@@ -97,7 +97,7 @@ export default async function DocumentViewPage({
   let docWithAttention = await supabase
     .from("documents")
     .select(
-      "id, number, type, date, status, incoterm, freight_type, freight_cost, total_price, manual_pricing, pdf_url, payment_mode, payment_terms, port_of_loading, port_of_destination, production_mode, production_days, production_date, currency, include_sales_conditions, sales_conditions_id, bank_account_id, purchase_order_number, commission_enabled, commission_percentage, commission_amount, commission_description, show_commission_in_pdf, client_id, attention_to, warranty_years, offer_validity_products_days, offer_validity_transport_days, forecast_probability, forecast_category, forecast_expected_close_date, forecast_updated_at, archived_at, affair_name, version, root_document_id, clients(company_name, contact_name, email, phone_number, country, client_code, custom_fields), sales_conditions(id, title, content, is_default), bank_accounts(id, account_name, business_account_name, currency, bank_name, bank_address, account_number, swift, is_default)"
+      "id, number, type, date, status, incoterm, freight_type, freight_cost, total_price, manual_pricing, pdf_url, payment_mode, payment_terms, port_of_loading, port_of_destination, production_mode, production_days, production_date, currency, include_sales_conditions, sales_conditions_id, bank_account_id, purchase_order_number, commission_enabled, commission_percentage, commission_amount, commission_description, show_commission_in_pdf, client_id, affair_id, attention_to, warranty_years, offer_validity_products_days, offer_validity_transport_days, forecast_probability, forecast_category, forecast_expected_close_date, forecast_updated_at, archived_at, affair_name, version, root_document_id, clients(company_name, contact_name, email, phone_number, country, client_code, custom_fields), sales_conditions(id, title, content, is_default), bank_accounts(id, account_name, business_account_name, currency, bank_name, bank_address, account_number, swift, is_default)"
     )
     .eq("id", params.id)
     .maybeSingle();
@@ -109,7 +109,7 @@ export default async function DocumentViewPage({
     docWithAttention = await supabase
       .from("documents")
       .select(
-        "id, number, type, date, status, incoterm, freight_type, freight_cost, total_price, manual_pricing, pdf_url, payment_mode, payment_terms, port_of_loading, port_of_destination, production_mode, production_days, production_date, currency, include_sales_conditions, sales_conditions_id, bank_account_id, purchase_order_number, commission_enabled, commission_percentage, commission_amount, commission_description, show_commission_in_pdf, client_id, clients(company_name, contact_name, email, phone_number, country, client_code, custom_fields), sales_conditions(id, title, content, is_default), bank_accounts(id, account_name, currency, bank_name, bank_address, account_number, swift, is_default)"
+        "id, number, type, date, status, incoterm, freight_type, freight_cost, total_price, manual_pricing, pdf_url, payment_mode, payment_terms, port_of_loading, port_of_destination, production_mode, production_days, production_date, currency, include_sales_conditions, sales_conditions_id, bank_account_id, purchase_order_number, commission_enabled, commission_percentage, commission_amount, commission_description, show_commission_in_pdf, client_id, affair_id, clients(company_name, contact_name, email, phone_number, country, client_code, custom_fields), sales_conditions(id, title, content, is_default), bank_accounts(id, account_name, currency, bank_name, bank_address, account_number, swift, is_default)"
       )
       .eq("id", params.id)
       .maybeSingle();
@@ -195,6 +195,28 @@ export default async function DocumentViewPage({
       .eq("quotation_id", params.id)
       .maybeSingle(),
   ]);
+
+  // For a WON quotation, resolve the proforma "command" launched from its
+  // affair (if any) — drives DocQuickActions ("Launch Production" vs "→ View
+  // command") and the "command launched" indicator. One command per affair.
+  let commandDoc: { id: string; number: string | null } | null = null;
+  if (
+    (doc as any).type === "quotation" &&
+    doc.status === "won" &&
+    (doc as any).affair_id
+  ) {
+    // NB: order by `date` — the live `documents` table has no `created_at`
+    // column (ordering by it throws and silently nulls the command link).
+    const { data: cmd } = await supabase
+      .from("documents")
+      .select("id, number")
+      .eq("affair_id", (doc as any).affair_id)
+      .eq("type", "proforma")
+      .order("date", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    commandDoc = (cmd as any) ?? null;
+  }
 
   const client = (doc as any).clients as
     | {
@@ -524,7 +546,7 @@ export default async function DocumentViewPage({
   // ---- Sales owner (deal owner) — management-only reassignment (m066).
   // The deal owner flows down to the task list + production order, so this
   // one control attributes the whole affair. Defensive read for the column.
-  const canAssignOwner = isTechnicalRole(role);
+  const canAssignOwner = canSupervise(role);
   let docSalesOwnerId: string | null = null;
   let ownerOptions: { id: string; name: string; role?: string | null }[] = [];
   if (canAssignOwner) {
@@ -590,7 +612,7 @@ export default async function DocumentViewPage({
   // limits who sees it); only management can REVIEW (approve / request
   // changes). Managers can request too — handy for a director sign-off.
   // Price/quote validation review is Admin / Super Admin only.
-  const canReviewValidation = isAdminLike(role);
+  const canReviewValidation = canSupervise(role);
   const canRequestValidation = true;
   // Relevant while the quote is in play, or whenever a trail already exists.
   const showValidation =
@@ -670,7 +692,7 @@ export default async function DocumentViewPage({
           {/* Primary next-action button — prominent, one-click. */}
           <div className="mt-4">
             <DocQuickActions
-              doc={{ id: doc.id, status: doc.status }}
+              doc={{ id: doc.id, status: doc.status, type: (doc as any).type }}
               taskList={
                 existingTaskList
                   ? {
@@ -679,9 +701,27 @@ export default async function DocumentViewPage({
                     }
                   : null
               }
+              command={commandDoc}
               size="md"
             />
           </div>
+          {doc.status === "won" && (doc as any).type === "quotation" && (
+            <p className="mt-2 max-w-md text-xs text-neutral-500">
+              {commandDoc ? (
+                <>
+                  ✓ Production launched — the command (proforma{" "}
+                  {commandDoc.number ?? ""}) and its task list carry the order
+                  from here.
+                </>
+              ) : (
+                <>
+                  Won. Click <b>Launch Production</b> to create the proforma
+                  command and the production task list in one step — you
+                  don&apos;t need to handle the proforma yourself.
+                </>
+              )}
+            </p>
+          )}
 
           {/* Sales owner (deal owner) — management-only. Attributes the
               whole affair (flows to task list + production order). */}
@@ -800,10 +840,17 @@ export default async function DocumentViewPage({
                 documentId={doc.id}
                 data={pdfData}
                 label="Regenerate"
+                affair={(doc as any).affair_name ?? null}
+                version={Number((doc as any).version ?? 1)}
               />
             </div>
           ) : (
-            <GeneratePdfButton documentId={doc.id} data={pdfData} />
+            <GeneratePdfButton
+              documentId={doc.id}
+              data={pdfData}
+              affair={(doc as any).affair_name ?? null}
+              version={Number((doc as any).version ?? 1)}
+            />
           )}
 
           {/* Destructive actions — discreet 3-dot menu. Archive is the
@@ -863,7 +910,8 @@ export default async function DocumentViewPage({
           We replace the stepper with a clear resume banner — "Continue
           editing" reopens the builder in edit-in-place mode; "Mark as
           sent" officially starts the lifecycle. */}
-      {doc.status === "draft" ? (
+      {doc.status === "draft" &&
+      !((doc as any).type === "proforma" && existingTaskList) ? (
         <section className="panel p-4 border-2 border-amber-300 bg-amber-50/70">
           <div className="flex items-start justify-between gap-4 flex-wrap">
             <div className="min-w-0">
@@ -871,12 +919,13 @@ export default async function DocumentViewPage({
                 Draft · work in progress
               </div>
               <p className="text-sm text-amber-900 mt-1 max-w-xl">
-                This quotation hasn&apos;t been sent yet, so it isn&apos;t in
-                the order lifecycle. Pick up where you left off, then send it
-                to the client to start the flow{" "}
+                This {doc.type === "proforma" ? "proforma" : "quotation"}{" "}
+                hasn&apos;t been sent yet, so it isn&apos;t in the order
+                lifecycle. Pick up where you left off, then send it to the
+                client to start the flow{" "}
                 <span className="whitespace-nowrap">
-                  Quotation → Won → Task list → Production → Shipped →
-                  Delivered
+                  {doc.type === "proforma" ? "Proforma" : "Quotation"} → Won →
+                  Task list → Production → Shipped → Delivered
                 </span>
                 .
               </p>
@@ -1041,7 +1090,7 @@ export default async function DocumentViewPage({
         )}
       </section>
 
-      <section className="panel overflow-hidden">
+      <section className="panel overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
             <tr className="bg-solux-accent text-left">
@@ -1091,7 +1140,8 @@ export default async function DocumentViewPage({
                         "—"}
                     </div>
                     {(l.products?.name || l.product_name) &&
-                      l.client_product_name && (
+                      l.client_product_name &&
+                      String(l.client_product_name).trim() !== "" && (
                         <div className="text-[11px] text-neutral-600 mt-0.5 font-normal italic">
                           (Client reference: {l.client_product_name})
                         </div>
@@ -1101,13 +1151,16 @@ export default async function DocumentViewPage({
                         {l.products?.category ?? l.product_category}
                       </div>
                     )}
+                    {/* Configuration summary moved to the Configuration column. */}
+                  </td>
+                  <td className="px-4 py-3 text-xs align-top">
                     {(() => {
                       const cfg = (l.config_values ?? {}) as Record<
                         string,
                         string
                       >;
-                      // Build display rows: skip side-channel keys, resolve
-                      // "Custom…" sentinels, render true/false as Yes/No.
+                      // Skip side-channel keys, resolve "Custom…" sentinels,
+                      // render true/false as Yes/No.
                       const rows = Object.entries(cfg)
                         .filter(([k, v]) => {
                           if (isCustomValueKey(k)) return false;
@@ -1123,29 +1176,26 @@ export default async function DocumentViewPage({
                           return [k, display] as const;
                         })
                         .filter(([, v]) => v !== "");
-                      if (rows.length === 0) return null;
+                      const opts = Object.entries(l.selected_options ?? {});
+                      if (rows.length === 0 && opts.length === 0)
+                        return <span className="text-neutral-400">—</span>;
                       return (
-                        <div className="mt-1 space-y-0.5">
+                        <div className="space-y-0.5">
                           {rows.map(([k, display]) => (
-                            <div
-                              key={k}
-                              className="text-[11px] text-neutral-600"
-                            >
+                            <div key={k} className="text-neutral-600">
                               <span className="text-neutral-500">{k}:</span>{" "}
                               {display}
+                            </div>
+                          ))}
+                          {opts.map(([k, v]) => (
+                            <div key={k} className="text-neutral-600">
+                              <span className="text-neutral-500">{k}:</span>{" "}
+                              {String(v)}
                             </div>
                           ))}
                         </div>
                       );
                     })()}
-                  </td>
-                  <td className="px-4 py-3 text-xs">
-                    {Object.entries(l.selected_options ?? {}).map(([k, v]) => (
-                      <div key={k}>
-                        <span className="text-neutral-500">{k}:</span>{" "}
-                        {String(v)}
-                      </div>
-                    ))}
                   </td>
                   <td className="px-4 py-3 capitalize text-neutral-700">
                     {l.pricing_tier ?? "—"}

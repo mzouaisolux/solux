@@ -1525,7 +1525,8 @@
    --------------------------------------------------------------------- */
 @media (max-width: 900px) {
   .tl-detail .grid2,
-  .tl-detail .fi-grid {
+  .tl-detail .fi-grid,
+  .tl-detail .cfg-wrap {
     grid-template-columns: 1fr;
   }
   .tl-detail .logi-grid {

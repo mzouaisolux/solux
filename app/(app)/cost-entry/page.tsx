@@ -1,8 +1,8 @@
-import { redirect } from "next/navigation";
-import Link from "next/link";
+import AccessDenied from "@/components/AccessDenied";
 import { getEffectiveRole } from "@/lib/auth";
+import { canAccessOrAdmin } from "@/lib/permissions";
 import { isAdminLike } from "@/lib/types";
-import { getCostEntryData } from "../admin/pricing/actions";
+import { getCostEntryData, getCostVersions } from "../admin/pricing/actions";
 import CostGrid from "./CostGrid";
 
 export const dynamic = "force-dynamic";
@@ -14,10 +14,10 @@ export const dynamic = "force-dynamic";
  */
 export default async function CostEntryPage({ searchParams }: { searchParams?: { cat?: string } }) {
   const { effectiveRole } = await getEffectiveRole();
-  const allowed = isAdminLike(effectiveRole) || effectiveRole === "finance";
-  if (!allowed) redirect("/dashboard");
+  const allowed = await canAccessOrAdmin(["pricing.manage_costs"], { finance: true });
+  if (!allowed) return <AccessDenied capability="pricing.manage_costs" />;
 
-  const { categories, products, latestBatch } = await getCostEntryData();
+  const [{ categories, products }, versions] = await Promise.all([getCostEntryData(), getCostVersions()]);
   const initialCategoryId =
     searchParams?.cat && categories.some((c) => c.id === searchParams.cat)
       ? searchParams.cat
@@ -26,31 +26,16 @@ export default async function CostEntryPage({ searchParams }: { searchParams?: {
         : "__all__";
 
   return (
-    <div className="mx-auto max-w-screen-xl px-6 py-8 space-y-5">
-      <div>
-        <div className="eyebrow">Finance</div>
-        <h1 className="doc-title mt-1">Cost entry (RMB)</h1>
-        <p className="mt-1 text-sm text-neutral-500">
-          Enter product costs in RMB, one category at a time. Tab/Enter moves down; paste a column from Excel.
-          Saving creates a dated cost version. Margins &amp; selling prices are set under{" "}
-          {isAdminLike(effectiveRole) ? (
-            <Link href="/admin/pricing" className="row-link">
-              Pricing
-            </Link>
-          ) : (
-            "Pricing"
-          )}
-          .
-          {latestBatch && (
-            <>
-              {" "}Latest version: <span className="font-medium">{latestBatch.effective_date}</span>
-              {latestBatch.note ? ` — ${latestBatch.note}` : ""}.
-            </>
-          )}
-        </p>
+    <div className="solux-pro sx-page">
+      <div className="sx-wrap">
+        <CostGrid
+          products={products}
+          categories={categories}
+          initialCategoryId={initialCategoryId}
+          versions={versions}
+          canLinkPricing={isAdminLike(effectiveRole)}
+        />
       </div>
-
-      <CostGrid products={products} categories={categories} initialCategoryId={initialCategoryId} />
     </div>
   );
 }

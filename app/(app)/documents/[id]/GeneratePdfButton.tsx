@@ -2,19 +2,26 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { pdf } from "@react-pdf/renderer";
-import QuotationPDF, { type QuotationPDFData } from "@/components/QuotationPDF";
+import { type QuotationPDFData } from "@/components/QuotationPDF";
 import { createClient } from "@/lib/supabase/client";
 import { savePdfPath } from "./actions";
+import { saveBlobAs } from "@/lib/saveBlob";
+import { buildPdfFilename } from "@/lib/pdf-filename";
 
 export default function GeneratePdfButton({
   documentId,
   data,
   label = "Generate PDF",
+  affair = null,
+  version = null,
 }: {
   documentId: string;
   data: QuotationPDFData;
   label?: string;
+  /** Affair (project) name — for the canonical download filename. */
+  affair?: string | null;
+  /** Document version — adds a _V{n} suffix when > 1. */
+  version?: number | null;
 }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
@@ -25,8 +32,29 @@ export default function GeneratePdfButton({
     setError(null);
     setWorking(true);
     try {
+      // F3 fix: @react-pdf/renderer is browser-only and breaks SSR if imported
+      // at module load (it made every /documents/[id] render throw "Element type
+      // is invalid" → recoverable error → HTTP 500 while the page still rendered).
+      // Load the PDF engine + document component lazily, on click only.
+      const [{ pdf }, { default: QuotationPDF }] = await Promise.all([
+        import("@react-pdf/renderer"),
+        import("@/components/QuotationPDF"),
+      ]);
       const blob = await pdf(<QuotationPDF data={data} />).toBlob();
 
+      // Let the user choose folder + filename via the native Save-As dialog
+      // (Chromium); falls back to the Downloads folder elsewhere. Called right
+      // after toBlob so the user gesture is still active for the picker.
+      const filename = buildPdfFilename({
+        kind: data.type,
+        number: data.number,
+        client: data.client?.company_name ?? null,
+        affair,
+        version,
+      });
+      await saveBlobAs(blob, filename);
+
+      // Keep a stored copy so the doc page can re-serve the PDF later.
       const supabase = createClient();
       const path = `${documentId}.pdf`;
       const { error: upErr } = await supabase.storage
@@ -36,20 +64,6 @@ export default function GeneratePdfButton({
           upsert: true,
         });
       if (upErr) throw new Error(upErr.message);
-
-      const filename = `${data.number ?? documentId}.pdf`;
-      const url = URL.createObjectURL(blob);
-
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = filename;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-
-      window.open(url, "_blank", "noopener,noreferrer");
-
-      setTimeout(() => URL.revokeObjectURL(url), 60_000);
 
       startTransition(async () => {
         await savePdfPath(documentId, path);

@@ -117,7 +117,7 @@ async function maybeRequestValidation(
 
 export async function saveDocument(
   input: SaveDocumentInput
-): Promise<{ id: string }> {
+): Promise<{ id: string; number: string | null }> {
   // Capability gate — gated by the real role (server-side enforcement).
   // The "+ New quotation" buttons are also hidden via hasUiCapability
   // for roles that can't create. This is the security layer.
@@ -132,6 +132,14 @@ export async function saveDocument(
 
   if (!input.client_id) throw new Error("Please select a client");
   if (!input.lines.length) throw new Error("Add at least one product line");
+  // BUSINESS RULE — a quotation/invoice cannot exist without an affaire
+  // (projet). A fresh document must carry affair_id; a revision inherits it
+  // (revise_of, m076 trigger) and an edit-in-place keeps its link (edit_of).
+  if (!input.affair_id && !input.revise_of && !input.edit_of) {
+    throw new Error(
+      "Impossible d'enregistrer : ce document doit être rattaché à une affaire (projet)."
+    );
+  }
 
   const normalizedTerms = normalizePaymentTerms(
     input.payment_mode,
@@ -340,7 +348,7 @@ export async function saveDocument(
     revalidatePath("/clients");
     revalidatePath("/dashboard");
     revalidatePath(`/documents/${input.edit_of}`);
-    return { id: input.edit_of };
+    return { id: input.edit_of, number: src.number ?? null };
   }
 
   // Numbering — two paths:
@@ -576,5 +584,5 @@ export async function saveDocument(
 
   revalidatePath("/clients");
   revalidatePath("/dashboard");
-  return { id: inserted!.id };
+  return { id: inserted!.id, number: numberRow };
 }

@@ -96,6 +96,7 @@ export default function TaskLineEditor({
   taskListId,
   clientId,
   productId,
+  categoryId,
   productName,
   initialQty,
   initialConfig,
@@ -116,6 +117,8 @@ export default function TaskLineEditor({
   taskListId: string;
   clientId: string | null;
   productId: string;
+  /** The line's product category — scopes the option lookup to this family. */
+  categoryId: string | null;
   productName: string;
   initialQty: number;
   initialConfig: Record<string, string>;
@@ -128,7 +131,7 @@ export default function TaskLineEditor({
   technicalEditable: boolean;
   /** option_id → FactoryMapping (serialized from a Map on the server). */
   mappingByOption: Record<string, FactoryMapping>;
-  /** "${field_name}|${value-lowercased}" → option_id. */
+  /** optionLookupKey(category_id, field_name, value) → option_id. */
   optionIdByFieldValue: Record<string, string>;
   /**
    * This client's saved technical preset (fieldName → factory instruction),
@@ -493,6 +496,7 @@ export default function TaskLineEditor({
         const display = displayValueFor(f.field_name, config);
         if (!display) return null;
         return resolveFactoryInstruction({
+          categoryId,
           fieldName: f.field_name,
           salesValue: display,
           overrides: factoryOverrides,
@@ -503,6 +507,7 @@ export default function TaskLineEditor({
       })
       .filter((r): r is NonNullable<typeof r> => r !== null);
   }, [
+    categoryId,
     salesFields,
     config,
     factoryOverrides,

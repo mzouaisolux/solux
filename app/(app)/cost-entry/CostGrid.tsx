@@ -1,13 +1,21 @@
 "use client";
 
 import { useMemo, useRef, useState, useTransition } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { saveCostBatch, type CostEntry, type CostEntryProduct } from "../admin/pricing/actions";
+import {
+  saveCostBatch,
+  type CostEntry,
+  type CostEntryProduct,
+  type CostVersionEntry,
+} from "../admin/pricing/actions";
 
 const ALL = "__all__";
 const UNCAT = "__uncat__";
 
 type Category = { id: string; name: string; count: number };
+
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 /**
  * Parse a pasted/typed cost cell into a number. Tolerant of Excel currency
@@ -47,18 +55,33 @@ function fmtDate(iso: string | null): string {
   return iso.slice(0, 10);
 }
 
+/** "2026-06-04" / ISO timestamp → "04 Jun 2026" (no timezone math). */
+function fmtDateLong(s: string | null): string {
+  if (!s) return "—";
+  const m = String(s).slice(0, 10).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return String(s).slice(0, 10);
+  const [, y, mo, d] = m;
+  return `${d} ${MONTHS[Number(mo) - 1] ?? mo} ${y}`;
+}
+
 /**
- * Finance cost grid — cost data only, by category. Current cost + editable new
- * cost + last-updated. Tab/Enter to move down; paste a column from Excel.
+ * Finance cost-entry page body — cost data only, by category. Renders the
+ * header, latest-version banner, category selector, the editable cost grid
+ * (Tab/Enter to move down; paste a column from Excel) and the audited version
+ * history. Saving creates a dated cost version; margins/prices live in Pricing.
  */
 export default function CostGrid({
   products,
   categories,
   initialCategoryId = ALL,
+  versions,
+  canLinkPricing,
 }: {
   products: CostEntryProduct[];
   categories: Category[];
   initialCategoryId?: string;
+  versions: CostVersionEntry[];
+  canLinkPricing: boolean;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -167,116 +190,289 @@ export default function CostGrid({
     });
   }
 
-  const chip = (id: string, label: string, count: number) => (
+  // "+ New version" — start a fresh cost version: clear the version metadata and
+  // status, then drop focus into the grid. Non-destructive to entered costs.
+  function onNewVersion() {
+    setNote("");
+    setEffectiveDate("");
+    setErr(null);
+    setMsg(null);
+    focusRow(0);
+  }
+
+  const editingLabel =
+    selectedCat === ALL
+      ? "All categories"
+      : selectedCat === UNCAT
+        ? "Uncategorized"
+        : categories.find((c) => c.id === selectedCat)?.name ?? "—";
+
+  const latest = versions[0] ?? null;
+
+  const catTab = (id: string, label: string, count: number) => (
     <button
       key={id}
+      type="button"
       onClick={() => setSelectedCat(id)}
-      className={`rounded-full px-3 py-1 text-sm border whitespace-nowrap ${
-        id === selectedCat ? "bg-solux-accent border-neutral-400 font-medium" : "bg-white border-neutral-200 text-neutral-600 hover:bg-neutral-50"
-      }`}
+      className={`ce-cat-tab${id === selectedCat ? " on" : ""}`}
     >
-      {label} <span className="text-neutral-400">({count})</span>
+      <span>{label}</span>
+      <span className="ct-count">{count}</span>
     </button>
   );
 
-  const editingLabel =
-    selectedCat === ALL ? "All categories" : selectedCat === UNCAT ? "Uncategorized" : categories.find((c) => c.id === selectedCat)?.name ?? "—";
-
   return (
-    <div className="space-y-4">
-      {/* category selector */}
-      <div className="flex flex-wrap gap-2">
-        {chip(ALL, "All categories", products.length)}
-        {categories.map((c) => chip(c.id, c.name, c.count))}
-        {uncatCount > 0 && chip(UNCAT, "Uncategorized", uncatCount)}
-      </div>
-
-      <div className="text-sm">
-        <span className="text-neutral-500">Entering costs for: </span>
-        <span className="font-semibold">{editingLabel}</span>
-      </div>
-
-      {/* toolbar */}
-      <div className="flex flex-wrap items-end gap-3">
-        <input
-          value={filter}
-          onChange={(e) => setFilter(e.target.value)}
-          placeholder="Filter by name / SKU…"
-          className="rounded border px-3 py-1.5 text-sm w-56"
-        />
-        <label className="block">
-          <span className="text-[11px] text-neutral-500">Effective date</span>
-          <input type="date" value={effectiveDate} onChange={(e) => setEffectiveDate(e.target.value)} className="mt-0.5 block rounded border px-2 py-1 text-sm" />
-        </label>
-        <label className="block flex-1 min-w-[10rem]">
-          <span className="text-[11px] text-neutral-500">Version note (optional)</span>
-          <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="e.g. Q3 supplier update" className="mt-0.5 block w-full rounded border px-2 py-1 text-sm" />
-        </label>
-        <div className="ml-auto flex items-center gap-3">
-          {dirtyIds.length > 0 && <span className="text-xs text-amber-700">{dirtyIds.length} unsaved</span>}
-          {msg && <span className="text-sm text-emerald-700">{msg}</span>}
-          {err && <span className="text-sm text-rose-700">{err}</span>}
-          <button onClick={onSave} disabled={pending || dirtyIds.length === 0} className="btn-primary disabled:opacity-50">
-            {pending ? "Saving…" : "Save cost version"}
-          </button>
+    <>
+      {/* HEADER */}
+      <div className="sx-head">
+        <div>
+          <div className="ce-label-row">
+            <span className="sx-micro">Finance · Pricing</span>
+            <span className="px-pill">
+              <span className="d" />
+              RMB costs
+            </span>
+          </div>
+          <h1 className="sx-h1">Cost entry</h1>
+          <div className="ce-lead">Finance — RMB costs &amp; versions</div>
+          <div className="ce-ref-line">
+            Enter product costs in RMB, one category at a time. Tab / Enter moves down; paste a column from Excel.
+            Saving creates a dated, audited cost version. Margins &amp; selling prices are set under{" "}
+            {canLinkPricing ? (
+              <Link className="sx-link" href="/admin/pricing">
+                Pricing
+              </Link>
+            ) : (
+              "Pricing"
+            )}
+            .
+          </div>
+        </div>
+        <div className="ce-head-actions">
+          {canLinkPricing && (
+            <div className="row">
+              <Link className="sx-btn sx-btn-sm" href="/admin/pricing">
+                ← Pricing
+              </Link>
+            </div>
+          )}
+          <div className="row">
+            <button type="button" className="sx-btn sx-btn-ink" onClick={onNewVersion}>
+              + New version
+            </button>
+            <button
+              type="button"
+              className="sx-btn sx-btn-go"
+              onClick={onSave}
+              disabled={pending || dirtyIds.length === 0}
+            >
+              {pending ? "Saving…" : "Save cost version"}
+            </button>
+          </div>
         </div>
       </div>
 
-      <div className="panel overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="bg-solux-accent text-left">
-              <th className="px-3 py-2 text-xs font-semibold text-neutral-700">Product</th>
-              <th className="px-3 py-2 text-xs font-semibold text-neutral-700">SKU</th>
-              <th className="px-3 py-2 text-xs font-semibold text-neutral-700">Category</th>
-              <th className="px-3 py-2 text-xs font-semibold text-neutral-700 text-right">Current RMB</th>
-              <th className="px-3 py-2 text-xs font-semibold text-neutral-700 text-right w-40">New cost RMB</th>
-              <th className="px-3 py-2 text-xs font-semibold text-neutral-700">Last updated</th>
-            </tr>
-          </thead>
-          <tbody>
-            {visible.length === 0 ? (
-              <tr>
-                <td colSpan={6} className="px-3 py-6 text-center text-neutral-500">
-                  No products in {editingLabel}.
-                </td>
-              </tr>
-            ) : (
-              visible.map((p, i) => {
-                const newCost = parseCost(draft[p.id] ?? "");
-                const dirty = newCost !== baseline[p.id];
-                return (
-                  <tr key={p.id} className={`border-t border-neutral-100 ${dirty ? "bg-amber-50/50" : ""}`}>
-                    <td className="px-3 py-1.5 font-medium">{p.name}</td>
-                    <td className="px-3 py-1.5 font-mono text-[11px] text-neutral-500">{p.sku ?? "—"}</td>
-                    <td className="px-3 py-1.5 text-xs text-neutral-500">{p.categoryName ?? "—"}</td>
-                    <td className="px-3 py-1.5 text-right tabular-nums text-neutral-500">{p.costRmb ? p.costRmb.toFixed(2) : "—"}</td>
-                    <td className="px-3 py-1.5 text-right">
-                      <input
-                        ref={(el) => {
-                          inputRefs.current[i] = el;
-                        }}
-                        value={draft[p.id] ?? ""}
-                        onChange={(e) => setCost(p.id, e.target.value)}
-                        onKeyDown={(e) => onKeyDown(e, i)}
-                        onPaste={(e) => onPaste(e, i)}
-                        onFocus={(e) => e.target.select()}
-                        inputMode="decimal"
-                        placeholder="0.00"
-                        className={`w-32 rounded border px-2 py-1 text-right tabular-nums ${dirty ? "border-amber-400" : ""}`}
-                      />
-                    </td>
-                    <td className="px-3 py-1.5 text-xs text-neutral-400">{fmtDate(p.updatedAt)}</td>
-                  </tr>
-                );
-              })
-            )}
-          </tbody>
-        </table>
+      {/* VERSION BANNER */}
+      {latest && (
+        <div className="px-banner ce-ver-banner" style={{ marginTop: 24 }}>
+          <div className="ce-ver-left">
+            <span className="ce-ver-tag">Version {latest.versionNo}</span>
+            <span className="ce-ver-text">
+              <b>Latest cost version</b> &nbsp;·&nbsp; <span className="muted">saved by</span> {latest.savedBy}{" "}
+              <span className="muted">·</span> {fmtDateLong(latest.effectiveDate)}
+              {latest.note ? (
+                <>
+                  {" "}
+                  <span className="muted">· note:</span> {latest.note}
+                </>
+              ) : null}
+            </span>
+          </div>
+          <a className="sx-link" href="#history">
+            View version history ↓
+          </a>
+        </div>
+      )}
+
+      {/* CATEGORIES */}
+      <h2 className="ce-h2">Categories</h2>
+      <div className="card sec">
+        <div className="sx-micro" style={{ marginBottom: 11 }}>
+          Select a category to enter costs
+        </div>
+        <div className="ce-cat-tabs">
+          {catTab(ALL, "All categories", products.length)}
+          {categories.map((c) => catTab(c.id, c.name, c.count))}
+          {uncatCount > 0 && catTab(UNCAT, "Uncategorized", uncatCount)}
+        </div>
+        <div className="ce-editing-line">
+          Entering costs for: <b>{editingLabel}</b>
+        </div>
       </div>
-      <p className="text-[11px] text-neutral-400">
-        Cost entry stores RMB costs only. Selling prices &amp; margins are configured by category under Pricing.
-      </p>
-    </div>
+
+      {/* COST GRID */}
+      <h2 className="ce-h2">Cost grid</h2>
+      <div className="card sec">
+        <div className="ce-toolbar">
+          <div className="ce-tb-field">
+            <span className="ce-tbl">Filter</span>
+            <input
+              className="ce-tb-search"
+              type="text"
+              value={filter}
+              onChange={(e) => setFilter(e.target.value)}
+              placeholder="Filter by name / SKU…"
+            />
+          </div>
+          <div className="ce-tb-field">
+            <span className="ce-tbl">Effective date</span>
+            <input
+              type="date"
+              value={effectiveDate}
+              onChange={(e) => setEffectiveDate(e.target.value)}
+              style={{ width: "auto" }}
+            />
+          </div>
+          <div className="ce-tb-field ce-tb-note">
+            <span className="ce-tbl">Version note (optional)</span>
+            <input
+              type="text"
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              placeholder="e.g. Q3 supplier update"
+            />
+          </div>
+          <div className="ce-tb-right">
+            {dirtyIds.length > 0 && <span className="ce-unsaved-pill">{dirtyIds.length} unsaved</span>}
+            {msg && (
+              <span className="ce-saved-msg">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="20 6 9 17 4 12" />
+                </svg>
+                {msg}
+              </span>
+            )}
+            {err && <span className="ce-err-msg">{err}</span>}
+            <button
+              type="button"
+              className="sx-btn sx-btn-go"
+              onClick={onSave}
+              disabled={pending || dirtyIds.length === 0}
+            >
+              {pending ? "Saving…" : "Save cost version"}
+            </button>
+          </div>
+        </div>
+
+        <div className="ce-grid-wrap" style={{ marginTop: 18 }}>
+          <table className="ce-cost">
+            <thead>
+              <tr>
+                <th>Product</th>
+                <th>SKU</th>
+                <th>Category</th>
+                <th className="num">Current RMB</th>
+                <th className="num">New cost RMB</th>
+                <th className="num">Δ Delta</th>
+                <th>Last updated</th>
+              </tr>
+            </thead>
+            <tbody>
+              {visible.length === 0 ? (
+                <tr className="ce-grid-empty">
+                  <td colSpan={7}>No products in {editingLabel}.</td>
+                </tr>
+              ) : (
+                visible.map((p, i) => {
+                  const newCost = parseCost(draft[p.id] ?? "");
+                  const base = baseline[p.id];
+                  const dirty = newCost !== base;
+                  const delta = newCost - base;
+                  let deltaEl: React.ReactNode;
+                  if (base <= 0 && newCost > 0) {
+                    deltaEl = <span className="ce-delta new">New</span>;
+                  } else if (Math.abs(delta) < 0.005) {
+                    deltaEl = <span className="ce-delta flat">—</span>;
+                  } else if (delta > 0) {
+                    deltaEl = <span className="ce-delta up">▲ +{delta.toFixed(2)}</span>;
+                  } else {
+                    deltaEl = <span className="ce-delta down">▼ −{Math.abs(delta).toFixed(2)}</span>;
+                  }
+                  return (
+                    <tr key={p.id} className={dirty ? "dirty" : ""}>
+                      <td className="ce-pname">{p.name}</td>
+                      <td>
+                        <span className="ce-psku">{p.sku ?? "—"}</span>
+                      </td>
+                      <td className="ce-pcat">{p.categoryName ?? "—"}</td>
+                      <td className={`num ce-cur-rmb${base ? "" : " ce-cell-empty"}`}>{base ? base.toFixed(2) : "—"}</td>
+                      <td className="num">
+                        <input
+                          ref={(el) => {
+                            inputRefs.current[i] = el;
+                          }}
+                          className={`ce-cost-input${dirty ? " dirty" : ""}`}
+                          value={draft[p.id] ?? ""}
+                          onChange={(e) => setCost(p.id, e.target.value)}
+                          onKeyDown={(e) => onKeyDown(e, i)}
+                          onPaste={(e) => onPaste(e, i)}
+                          onFocus={(e) => e.target.select()}
+                          inputMode="decimal"
+                          placeholder="0.00"
+                        />
+                      </td>
+                      <td className="num">{deltaEl}</td>
+                      <td className="ce-updated">{fmtDate(p.updatedAt)}</td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+        <p className="ce-grid-foot">
+          Cost entry stores RMB costs only. Selling prices &amp; margins are configured by category under Pricing.
+        </p>
+      </div>
+
+      {/* VERSION HISTORY */}
+      <div className="card sec" id="history">
+        <div className="ce-vh-head">
+          <div>
+            <div className="sx-micro">Version history</div>
+            <div className="ce-seclead">
+              Every save creates a dated, audited cost version. Each version records who saved it, the effective date,
+              the category scope and an optional note.
+            </div>
+          </div>
+          <div className="ce-vh-count">
+            {versions.length} version{versions.length === 1 ? "" : "s"}
+          </div>
+        </div>
+        {versions.length === 0 ? (
+          <div className="ce-vh-empty">No cost versions yet. Saving cost changes creates the first version.</div>
+        ) : (
+          versions.map((v, idx) => (
+            <div className="ce-vh-row" key={v.id}>
+              <div className="ce-vh-left">
+                <span className={`ce-vh-num${idx === 0 ? " current" : ""}`}>v{v.versionNo}</span>
+                <div className="ce-vh-body">
+                  <div className="ce-vh-title">{v.note || "Cost update"}</div>
+                  <div className="ce-vh-sub">
+                    Scope: {v.categoryName ?? "All categories"} · {v.changeCount} cost change
+                    {v.changeCount === 1 ? "" : "s"}
+                  </div>
+                </div>
+              </div>
+              <div className="ce-vh-meta">
+                Saved by <b>{v.savedBy}</b>
+                <br />
+                {fmtDateLong(v.createdAt)} · effective {fmtDateLong(v.effectiveDate)}
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+    </>
   );
 }
