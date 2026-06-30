@@ -95,7 +95,7 @@ export default function FreightEntryForm({
         <label className="block">
           <span className="text-[11px] text-neutral-500">Transport mode</span>
           <select name="transport_mode" defaultValue={defaults.transport_mode ?? ""} className="mt-0.5 w-full rounded border px-2 py-1.5 text-sm">
-            <option value="">—</option>
+            <option value="">Select…</option>
             {TRANSPORT_MODES.map((m) => (
               <option key={m} value={m}>{TRANSPORT_MODE_LABEL[m]}</option>
             ))}
@@ -104,7 +104,7 @@ export default function FreightEntryForm({
         <label className="block">
           <span className="text-[11px] text-neutral-500">Incoterm</span>
           <select name="incoterm" defaultValue={defaults.incoterm ?? ""} className="mt-0.5 w-full rounded border px-2 py-1.5 text-sm">
-            <option value="">—</option>
+            <option value="">Select…</option>
             {["EXW", "FOB", "CFR", "CIF", "DDP", "DDU"].map((it) => (
               <option key={it} value={it}>{it}</option>
             ))}
@@ -125,7 +125,7 @@ export default function FreightEntryForm({
         <div className="grid grid-cols-[1fr_auto_auto_auto] gap-2 border-b border-neutral-100 px-2 py-1 text-[10px] uppercase tracking-wide text-neutral-400">
           <span>Container (from packing)</span>
           <span className="text-right">Qty</span>
-          <span className="text-right">Freight / unit</span>
+          <span className="text-right">Rate / container</span>
           <span className="text-right">Total</span>
         </div>
         {packingContainers.map((c, i) => {
@@ -142,7 +142,7 @@ export default function FreightEntryForm({
                 onChange={(e) => setPerUnit((prev) => prev.map((v, idx) => (idx === i ? e.target.value : v)))}
                 placeholder="0.00"
                 className="w-28 justify-self-end rounded border border-neutral-200 px-2 py-1 text-right text-sm tabular-nums"
-                aria-label={`Freight per unit for ${c.type}`}
+                aria-label={`Freight rate per ${c.type} container`}
               />
               <span className="w-24 text-right tabular-nums font-medium">{money(lineTotal)}</span>
             </div>

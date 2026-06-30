@@ -329,45 +329,50 @@ export async function OperationsTab({ actionData }: { actionData: ActionCenterDa
   // ---- render: the old OperationsSlot, unchanged ----
   return (
     <div className="space-y-6">
-      {/* TOP STRIP — operational KPI cards, the 4 numbers an ops
-          manager needs to see first thing each morning. */}
-      <div>
-        <div className="text-[10px] font-semibold uppercase tracking-widerx text-neutral-500 mb-1.5">
-          {t("ops.key_numbers")}
+      {/* KPI OVERVIEW (#16) — ONE section instead of two scattered strips
+          (old top "Key numbers" + bottom "Business snapshot"). Operational
+          numbers stay prominent (first row, featured); the commercial snapshot
+          is a quieter second row under a divider. Single source — no number
+          dropped. */}
+      <section className="rounded-xl border border-neutral-200/80 bg-white p-4 space-y-4">
+        <div>
+          <div className="text-[10px] font-semibold uppercase tracking-widerx text-neutral-500 mb-1.5">
+            {t("ops.key_numbers")}
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+            <KpiCard
+              label={t("ops.revenue_in_production")}
+              value={formatMoney(opsRevenueInProduction)}
+              featured
+            />
+            <KpiCard label={t("ops.active_orders")} value={String(opsActiveCount)} />
+            <KpiCard label={t("ops.awaiting_deposit")} value={String(opsAwaitingDepositCount)} />
+            <KpiCard label={t("ops.delayed_overdue")} value={String(opsDelayedCount)} />
+          </div>
         </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-          <KpiCard
-            label={t("ops.revenue_in_production")}
-            value={formatMoney(opsRevenueInProduction)}
-            featured
-          />
-          <KpiCard label={t("ops.active_orders")} value={String(opsActiveCount)} />
-          <KpiCard label={t("ops.awaiting_deposit")} value={String(opsAwaitingDepositCount)} />
-          <KpiCard label={t("ops.delayed_overdue")} value={String(opsDelayedCount)} />
+        <div className="border-t border-neutral-100 pt-3">
+          <div className="flex items-baseline justify-between mb-1.5">
+            <div className="text-[10px] font-semibold uppercase tracking-widerx text-neutral-500">
+              {t("ops.business_snapshot")}
+            </div>
+            <Link href="/business" className="text-[10px] text-neutral-400 italic">
+              {t("ops.open_business")}
+            </Link>
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <KpiCard label={t("ops.active_pipeline")} value={formatMoney(livePipelineValue)} />
+            <KpiCard label={t("ops.active_deals")} value={String(livePipelineCount)} />
+            <KpiCard label={t("ops.revenue_90d")} value={formatMoney(liveWon90Revenue)} />
+            <KpiCard label={t("ops.lifetime_won")} value={formatMoney(liveLifetimeWonValue)} />
+          </div>
         </div>
-      </div>
+      </section>
 
       {/* ACTION CENTER — original sections, original ordering. */}
       <ActionCenter data={actionData} />
 
       {/* ORDERS IN FLIGHT — standalone (own header + chrome). */}
       <OrdersInFlight orders={ordersInFlight} />
-
-      {/* COMPACT KPI SUMMARY — Business KPIs visible but de-prioritised. */}
-      <section className="rounded-xl border border-neutral-200/80 bg-neutral-50/30 p-4 space-y-3">
-        <div className="text-[10px] font-semibold uppercase tracking-widerx text-neutral-500">
-          {t("ops.business_snapshot")}
-        </div>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          <KpiCard label={t("ops.active_pipeline")} value={formatMoney(livePipelineValue)} />
-          <KpiCard label={t("ops.active_deals")} value={String(livePipelineCount)} />
-          <KpiCard label={t("ops.revenue_90d")} value={formatMoney(liveWon90Revenue)} />
-          <KpiCard label={t("ops.lifetime_won")} value={formatMoney(liveLifetimeWonValue)} />
-        </div>
-        <Link href="/business" className="text-[10px] text-neutral-400 italic block">
-          {t("ops.open_business")}
-        </Link>
-      </section>
     </div>
   );
 }

@@ -251,7 +251,7 @@ export function computeOrderPills(meta: OrderPillInput): OrderPill[] {
     // anonymous "Delayed" — operators see WHO owns the slip at a glance.
     pills.push({
       kind: "production",
-      label: `Factory +${factoryDelay}d`,
+      label: `${factoryDelay}d late · factory`,
       tone: "danger",
       title: `Factory is ${factoryDelay} day(s) past baseline — counts toward factory KPI`,
     });
@@ -259,7 +259,7 @@ export function computeOrderPills(meta: OrderPillInput): OrderPill[] {
     // Non-factory blocker. Amber, not red — doesn't damage factory KPI.
     pills.push({
       kind: "production",
-      label: `External +${externalDelay}d`,
+      label: `${externalDelay}d late · external`,
       tone: "warn",
       title: `Project is ${externalDelay} day(s) behind for external reasons (payment / shipping / client / supplier / customs). Factory is not responsible.`,
     });

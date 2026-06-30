@@ -732,13 +732,13 @@ async function gatherSignals(
           const lateChips: ActionContextChip[] = [];
           if (o.initial_production_deadline) {
             lateChips.push({
-              label: "Initial",
+              label: "Baseline",
               value: fmtShortDate(o.initial_production_deadline),
             });
           }
           if (o.current_production_deadline) {
             lateChips.push({
-              label: "Current",
+              label: "Now due",
               value: fmtShortDate(o.current_production_deadline),
               tone: "warn",
             });
@@ -749,7 +749,7 @@ async function gatherSignals(
           if (factorySlip > 0) {
             lateChips.push({
               label: "Factory",
-              value: `+${factorySlip}d`,
+              value: `${factorySlip}d late`,
               tone: "danger",
             });
           }
@@ -757,7 +757,7 @@ async function gatherSignals(
           if (externalSlip > 0) {
             lateChips.push({
               label: "External",
-              value: `+${externalSlip}d`,
+              value: `${externalSlip}d late`,
               tone: "warn",
             });
           }

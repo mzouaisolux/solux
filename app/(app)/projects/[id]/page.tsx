@@ -539,11 +539,39 @@ export default async function ProjectDetailPage({ params }: { params: { id: stri
                 )}
               </section>
 
+              {/* O1 — make the Operations pricing SEQUENCE explicit up front.
+                  Freight is built from the packing list (an INTENDED dependency,
+                  not a bug) — surfaced here as a sequence instead of as a late
+                  dead-end inside the freight card. */}
+              {(canCost || canLogistics) &&
+                (status === "waiting_factory_cost" || status === "waiting_logistics") && (
+                  <div
+                    style={{
+                      display: "flex",
+                      flexWrap: "wrap",
+                      alignItems: "baseline",
+                      gap: "4px 10px",
+                      margin: "0 0 14px",
+                      padding: "10px 14px",
+                      border: "1px solid var(--sx-line, #e5e5e5)",
+                      borderRadius: 10,
+                      background: "var(--sx-soft, #f8f8f7)",
+                    }}
+                  >
+                    <span className="sx-micro" style={{ fontWeight: 700 }}>
+                      Operations pricing — complete in order
+                    </span>
+                    <span style={{ fontSize: 12.5, color: "var(--sx-mute, #666)" }}>
+                      ① Factory cost → ② Packing list → ③ Freight (built from the packing list)
+                    </span>
+                  </div>
+                )}
+
               {/* FACTORY COST — view_cost only (hidden from Sales) */}
               {canViewCost && p.req_product_pricing && (
                 <section className="card sec" style={{ marginTop: 0, borderLeft: "3px solid var(--sx-ink)" }}>
                   <div className="sechead">
-                    <div className="eyebrow">Factory cost (RMB)</div>
+                    <div className="eyebrow">① Factory cost (RMB)</div>
                     <span className="right">{cost?.status ?? "not requested"}</span>
                   </div>
                   {cost && (
@@ -600,7 +628,7 @@ export default async function ProjectDetailPage({ params }: { params: { id: stri
               <div className="sx-pf-grid">
                 {p.req_packing_list && (
                   <section className="card sec" style={{ marginTop: 0 }}>
-                    <div className="sechead"><div className="eyebrow">Packing list</div><span className="right">{pack?.status ?? "not requested"}</span></div>
+                    <div className="sechead"><div className="eyebrow">② Packing list</div><span className="right">{pack?.status ?? "not requested"}</span></div>
                     {pack?.status === "completed" && (
                       <div style={{ fontSize: 13.5 }}>
                         <div style={{ fontWeight: 600 }}>
@@ -647,7 +675,7 @@ export default async function ProjectDetailPage({ params }: { params: { id: stri
                 {p.req_freight && (
                   <section className="card sec" style={{ marginTop: 0 }}>
                     <div className="sechead">
-                      <div className="eyebrow">Freight cost</div>
+                      <div className="eyebrow">③ Freight cost</div>
                       <span className="right">
                         {freight?.valid_until && <FreightStatusBadge validUntil={freight.valid_until} today={today} />}
                         {freight?.status ?? "not requested"}

@@ -202,7 +202,13 @@ function ActionCardRow({
           {a.resolution === "manual" && (
             <form action={markActionDone}>
               <input type="hidden" name="action_key" value={a.id} />
-              <button className="rounded-md border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-700 hover:bg-emerald-100 whitespace-nowrap">
+              {/* Quiet secondary (D3): the prominent emerald button was an easy
+                  accidental click. Neutral/ghost styling matches "Open" and
+                  de-emphasises it. Recoverable server-side via unacknowledgeAction. */}
+              <button
+                title="Mark this off-app follow-up as done"
+                className="rounded-md border border-neutral-200 bg-white px-2 py-0.5 text-[11px] font-medium text-neutral-500 hover:bg-neutral-50 hover:text-neutral-700 whitespace-nowrap"
+              >
                 ✓ Done
               </button>
             </form>
