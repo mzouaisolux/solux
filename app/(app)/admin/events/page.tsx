@@ -1,40 +1,29 @@
 // =====================================================================
-// Event Registry — index (Step 1, m136).
-//
-// The home of "everything that happens after an event is emitted". One
-// row per business event, grouped by category, with at-a-glance badges
-// showing which consumers it currently feeds. Click through to configure
-// the event's whole downstream life on one page.
+// Event Registry — index (m136). Conservative redesign pass: clearer
+// hierarchy, honest runtime banner, search/filters + a per-row status
+// that says what actually happens today (live notification routing vs
+// default vs stored-for-later). Data resolution stays server-side; the
+// interactive table is a thin client island. NO override is written by
+// viewing — this page only reads.
 // =====================================================================
 
-import { Fragment } from "react";
-import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { getEffectiveRole } from "@/lib/auth";
-import { isAdminLike } from "@/lib/types";
+import { isAdminLike, ROLE_SHORT_LABEL, type Role } from "@/lib/types";
 import AccessDenied from "@/components/AccessDenied";
 import {
-  NOTIFICATION_CATALOG,
   NOTIFICATION_EVENT_KEYS,
+  NOTIFICATION_CATALOG,
+  defaultChannel,
 } from "@/lib/notification-catalog";
 import {
-  CONSUMERS,
-  CONSUMER_BY_KEY,
   resolveEventIdentity,
-  activeConsumers,
   type RoutingRow,
   type CatalogOverride,
 } from "@/lib/event-registry";
-import type { EventType } from "@/lib/events-shared";
+import EventRegistryTable, { type EvtRow } from "./EventRegistryTable";
 
 export const dynamic = "force-dynamic";
-
-const SEV_TINT: Record<string, string> = {
-  low: "#eef2f7",
-  medium: "#e0f2fe",
-  high: "#fef3c7",
-  critical: "#fde2e2",
-};
 
 export default async function EventRegistryIndex() {
   const { effectiveRole } = await getEffectiveRole();
@@ -55,7 +44,7 @@ export default async function EventRegistryIndex() {
   }
   {
     const { data } = await supabase.from("event_catalog_overrides").select("*");
-    overrides = (data ?? []) as any[];
+    overrides = (data ?? []) as Array<{ event_key: string } & CatalogOverride>;
   }
 
   const byEvent = new Map<string, RoutingRow[]>();
@@ -67,15 +56,48 @@ export default async function EventRegistryIndex() {
   const ovByKey = new Map<string, CatalogOverride>();
   for (const o of overrides) ovByKey.set(o.event_key, o);
 
-  // Group events by (resolved) category, preserving catalog order.
-  const grouped = new Map<string, EventType[]>();
+  // Resolve every event server-side into a flat, serializable row.
+  const events: EvtRow[] = [];
+  const categories: string[] = [];
   for (const key of NOTIFICATION_EVENT_KEYS) {
-    const cat = resolveEventIdentity(key, ovByKey.get(key) ?? null).category;
-    if (!grouped.has(cat)) grouped.set(cat, []);
-    grouped.get(cat)!.push(key);
+    const ov = ovByKey.get(key) ?? null;
+    const id = resolveEventIdentity(key, ov);
+    if (!categories.includes(id.category)) categories.push(id.category);
+    const rows = byEvent.get(key) ?? [];
+    const notif = rows
+      .filter((r) => r.consumer === "notification" && r.enabled !== false)
+      .map((r) => ({
+        role: r.role,
+        roleLabel: ROLE_SHORT_LABEL[r.role as Role] ?? r.role,
+        channel: r.config?.channel as "bell" | "feed" | "off",
+      }))
+      .filter((n) => n.channel === "bell" || n.channel === "feed" || n.channel === "off");
+    const futureStored = rows.some((r) =>
+      ["dashboard", "kpi", "audit"].includes(r.consumer)
+    );
+    events.push({
+      key,
+      label: id.label,
+      icon: id.icon,
+      category: id.category,
+      severity: id.severity,
+      enabled: id.enabled,
+      isModified: !!ov && Object.keys(ov).length > 0,
+      notif,
+      futureStored,
+      // Effective default channel when a role inherits (no override). Uses the
+      // CODE severity (runtime ignores the metadata-only severity override), so
+      // this matches what the bell actually does today.
+      defaultCh: defaultChannel(key, NOTIFICATION_CATALOG[key].severity) as
+        | "bell"
+        | "feed",
+    });
   }
 
-  const configuredCount = byEvent.size;
+  const modifiedCount = events.filter(
+    (e) => e.isModified || e.notif.length > 0 || e.futureStored
+  ).length;
+  const criticalCount = events.filter((e) => e.severity === "critical").length;
 
   return (
     <div className="solux-pro sx-page">
@@ -84,107 +106,65 @@ export default async function EventRegistryIndex() {
           <div className="eyebrow">Admin · Event Registry</div>
           <h2 className="ad-doc-title">Events</h2>
           <p className="ad-lead">
-            Every business event and where it goes once emitted. Events are still
-            emitted from code — here you configure the <b>routing &amp; presentation</b>{" "}
-            of each (who consumes it, in which surfaces). Open an event to see and
-            configure its whole downstream life on one page.
+            Every business event and where it goes once emitted. Events are{" "}
+            <b>emitted from code</b> — here you configure their{" "}
+            <b>routing &amp; presentation</b> (who is notified, in which surfaces).
+            Open an event to configure its whole downstream life on one page.
           </p>
 
-          {/* Consumer legend */}
-          <div style={{ display: "flex", gap: 14, flexWrap: "wrap", margin: "10px 0 4px", fontSize: 12 }}>
-            {CONSUMERS.map((c) => (
-              <span key={c.key} title={c.description}>
-                {c.icon} {c.label}
-                <span
-                  style={{
-                    marginLeft: 4,
-                    fontSize: 10,
-                    padding: "1px 5px",
-                    borderRadius: 8,
-                    background: c.status === "live" ? "#dcfce7" : c.status === "described" ? "#e0e7ff" : "#f1f5f9",
-                    color: "#334155",
-                  }}
-                >
-                  {c.status}
-                </span>
-              </span>
-            ))}
+          {/* Honest runtime banner — what actually takes effect today. */}
+          <div className="evt-banner" role="note">
+            <span className="evt-banner-dot" />
+            <div>
+              <b>Today, only notifications are enforced at runtime.</b> Bell &amp;
+              feed routing takes effect immediately. Dashboard, KPI and Audit
+              settings are <b>stored for later</b> and have no effect yet.
+            </div>
           </div>
-          <p style={{ fontSize: 11, color: "#71717a", margin: "2px 0 0" }}>
-            <b>live</b> = enforced at runtime now · <b>described</b> = stored only, projection not wired yet · <b>reserved</b> = future. Today only <b>Notification</b> is live.
-          </p>
+
+          {/* Status legend. */}
+          <div className="evt-legend">
+            <span className="evt-leg">
+              <span className="evt-leg-badge live">Live</span> enforced today
+              (Notification)
+            </span>
+            <span className="evt-leg">
+              <span className="evt-leg-badge store">Stored only</span> saved, not
+              used yet (Dashboard, KPI, Audit)
+            </span>
+            <span className="evt-leg">
+              <span className="evt-leg-badge future">Future</span> not
+              configurable yet (Automations)
+            </span>
+          </div>
 
           {tableMissing && (
-            <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-[13px] text-amber-900" style={{ marginTop: 12 }}>
-              ⚠ Tables <code>event_routing</code> / <code>event_catalog_overrides</code> missing —
-              apply migration <code>136_event_registry.sql</code>. Until then every event shows its
-              code defaults (read-only routing).
+            <div
+              className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-[13px] text-amber-900"
+              style={{ marginTop: 12 }}
+            >
+              ⚠ Tables <code>event_routing</code> /{" "}
+              <code>event_catalog_overrides</code> missing — apply migration{" "}
+              <code>136_event_registry.sql</code>. Until then every event shows
+              its code defaults (read-only routing).
             </div>
           )}
 
-          <p style={{ fontSize: 12, color: "#71717a", margin: "8px 0 0" }}>
-            {NOTIFICATION_EVENT_KEYS.length} events · {configuredCount} with overrides
+          <p className="evt-counts">
+            <span className="evt-stat">
+              <b>{events.length}</b> events
+            </span>
+            <span className="evt-stat-sep">·</span>
+            <span className="evt-stat">
+              <b>{modifiedCount}</b> modified
+            </span>
+            <span className="evt-stat-sep">·</span>
+            <span className="evt-stat crit">
+              <b>{criticalCount}</b> critical
+            </span>
           </p>
 
-          <div className="ad-mtx-wrap" style={{ marginTop: 12 }}>
-            <table className="ad-mtx">
-              <thead>
-                <tr>
-                  <th className="cap">Event</th>
-                  <th>Severity</th>
-                  <th>Consumers</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody>
-                {Array.from(grouped.entries()).map(([category, keys]) => (
-                  <Fragment key={`cat-${category}`}>
-                    <tr>
-                      <td colSpan={4} style={{ background: "#f4f4f5", fontWeight: 700, textTransform: "uppercase", fontSize: 11, letterSpacing: ".04em", padding: "6px 8px" }}>
-                        {category}
-                      </td>
-                    </tr>
-                    {keys.map((key) => {
-                      const id = resolveEventIdentity(key, ovByKey.get(key) ?? null);
-                      const active = activeConsumers(byEvent.get(key) ?? []);
-                      return (
-                        <tr key={key}>
-                          <td className="cap">
-                            <div style={{ fontWeight: 600 }}>
-                              {id.icon ? `${id.icon} ` : ""}
-                              {id.label}
-                              {!id.enabled && (
-                                <span style={{ marginLeft: 6, fontSize: 10, color: "#b91c1c", border: "1px solid #fca5a5", borderRadius: 6, padding: "0 5px" }}>disabled</span>
-                              )}
-                            </div>
-                            <div style={{ fontSize: 11, color: "#71717a" }}>{key}</div>
-                          </td>
-                          <td>
-                            <span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 10, background: SEV_TINT[id.severity] ?? "#eef2f7" }}>
-                              {id.severity}
-                            </span>
-                          </td>
-                          <td>
-                            <span style={{ fontSize: 15, letterSpacing: 2 }}>
-                              {CONSUMERS.filter((c) => active.has(c.key)).map((c) => (
-                                <span key={c.key} title={`${c.label} configured`}>{c.icon}</span>
-                              ))}
-                              {active.size === 0 && <span style={{ fontSize: 11, color: "#a1a1aa" }}>defaults</span>}
-                            </span>
-                          </td>
-                          <td style={{ textAlign: "right" }}>
-                            <Link href={`/admin/events/${key}`} className="sx-btn" style={{ fontSize: 12, padding: "3px 10px" }}>
-                              Configure →
-                            </Link>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </Fragment>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <EventRegistryTable events={events} categories={categories} />
         </section>
       </div>
     </div>

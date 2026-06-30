@@ -1193,3 +1193,203 @@ body {
 .solux-pro .ad-status-meta { font-size:11.5px; color:var(--sx-mute); text-align:right; }
 .solux-pro .ad-sub-block { box-shadow:none; padding:15px 16px; }
 .solux-pro .ad-mini-h { font-size:11px; font-weight:700; letter-spacing:.05em; text-transform:uppercase; color:var(--sx-mute); }
+
+/* =====================================================================
+   Event Registry — premium UI pass (m136). Sober B2B-SaaS execution:
+   neutral foundation, desaturated accents as thin dots/borders, calm
+   hierarchy. No logic / runtime / structure change — visual only.
+   Accent dots: live=emerald, feed=blue, off/critical=red, neutral=slate.
+   ===================================================================== */
+
+/* status badges — quiet pills with a leading status dot (currentColor) */
+.solux-pro .evt-leg-badge { display:inline-flex; align-items:center; gap:6px; font-size:10.5px; font-weight:600; letter-spacing:.01em; line-height:1.5; padding:2px 9px 2px 8px; border-radius:999px; border:1px solid transparent; white-space:nowrap; }
+.solux-pro .evt-leg-badge::before { content:""; width:5px; height:5px; border-radius:50%; background:currentColor; flex:none; }
+.solux-pro .evt-leg-badge.live   { background:#ecfdf5; color:#047857; border-color:#bbf7d0; }
+.solux-pro .evt-leg-badge.store  { background:#f3f4f6; color:#5b6472; border-color:#e5e7eb; }
+.solux-pro .evt-leg-badge.future { background:#f7f8fa; color:#9aa0ad; border-color:#ececf0; }
+
+/* ---- index: header banner + legend + stat row ---- */
+.solux-pro .evt-banner { display:flex; gap:11px; align-items:flex-start; margin:18px 0 0; padding:13px 16px; border:1px solid var(--sx-line); background:#fbfcfd; border-radius:13px; font-size:12.5px; line-height:1.55; color:var(--sx-ink-soft); max-width:none; }
+.solux-pro .evt-banner-dot { width:8px; height:8px; border-radius:50%; background:#10b981; box-shadow:0 0 0 3px rgba(16,185,129,.16); flex:none; margin-top:4px; }
+.solux-pro .evt-banner b { color:var(--sx-ink); font-weight:600; }
+.solux-pro .evt-legend { display:flex; flex-wrap:wrap; gap:9px 20px; margin:14px 0 0; font-size:11.5px; color:var(--sx-mute); }
+.solux-pro .evt-leg { display:inline-flex; align-items:center; gap:7px; }
+.solux-pro .evt-counts { display:flex; align-items:center; gap:12px; margin:16px 0 0; font-size:12.5px; color:var(--sx-mute); }
+.solux-pro .evt-stat b { color:var(--sx-ink); font-weight:600; font-variant-numeric:tabular-nums; }
+.solux-pro .evt-stat-sep { color:var(--sx-mute-2); }
+.solux-pro .evt-stat.crit b { color:#b42318; }
+
+/* ---- index: toolbar ---- */
+.solux-pro .evt-toolbar { display:flex; gap:10px; flex-wrap:wrap; margin-top:18px; }
+.solux-pro .evt-search { flex:1 1 320px; min-width:240px; font-family:inherit; font-size:13px; padding:10px 13px; border:1px solid var(--sx-line-2); border-radius:10px; background:#fff; color:var(--sx-ink); transition:border-color .12s, box-shadow .12s; }
+.solux-pro .evt-search::placeholder { color:var(--sx-mute-2); }
+.solux-pro .evt-search:focus { outline:none; border-color:#b9bcc4; box-shadow:0 0 0 3px rgba(15,15,15,.05); }
+.solux-pro .evt-catsel { font-family:inherit; font-size:13px; padding:10px 13px; border:1px solid var(--sx-line-2); border-radius:10px; background:#fff; color:var(--sx-ink-soft); cursor:pointer; transition:border-color .12s, box-shadow .12s; }
+.solux-pro .evt-catsel:focus { outline:none; border-color:#b9bcc4; box-shadow:0 0 0 3px rgba(15,15,15,.05); }
+
+/* ---- index: segmented filter ---- */
+.solux-pro .evt-chips { display:inline-flex; gap:3px; margin-top:12px; padding:4px; background:#f4f5f7; border:1px solid var(--sx-line); border-radius:11px; }
+.solux-pro .evt-chip { display:inline-flex; align-items:center; gap:7px; font-family:inherit; font-size:12px; font-weight:500; padding:6px 13px; border:none; border-radius:8px; background:transparent; color:var(--sx-mute); cursor:pointer; transition:background .12s, color .12s, box-shadow .12s; }
+.solux-pro .evt-chip:hover { color:var(--sx-ink-soft); }
+.solux-pro .evt-chip.on { background:#fff; color:var(--sx-ink); font-weight:600; box-shadow:0 1px 2px rgba(15,15,15,.08); }
+.solux-pro .evt-chip.crit::before { content:""; width:5px; height:5px; border-radius:50%; background:#dc2626; flex:none; }
+.solux-pro .evt-chip-ct { font-size:10.5px; font-weight:600; color:var(--sx-mute-2); font-variant-numeric:tabular-nums; }
+.solux-pro .evt-chip.on .evt-chip-ct { color:var(--sx-mute); }
+
+/* ---- index: table ---- */
+.solux-pro table.evt-mtx { width:100%; border-collapse:separate; border-spacing:0; font-size:13px; margin-top:6px; }
+.solux-pro table.evt-mtx th { text-align:left; font-size:10px; font-weight:700; letter-spacing:.06em; text-transform:uppercase; color:var(--sx-mute-2); padding:0 10px 11px; border-bottom:1px solid var(--sx-line); }
+.solux-pro table.evt-mtx th.cap { padding-left:16px; }
+.solux-pro table.evt-mtx td { padding:13px 10px; border-bottom:1px solid var(--sx-line); vertical-align:middle; }
+.solux-pro table.evt-mtx td.cap { padding-left:16px; }
+.solux-pro table.evt-mtx tbody tr:hover td { background:#fafbfc; }
+.solux-pro .evt-catrow td { background:transparent !important; padding:20px 10px 8px 16px !important; border-bottom:1px solid var(--sx-line) !important; }
+.solux-pro .evt-catrow:hover td { background:transparent !important; }
+.solux-pro .evt-cat-name { font-size:10.5px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; color:var(--sx-mute); }
+.solux-pro .evt-cat-ct { margin-left:9px; font-size:10px; font-weight:600; color:var(--sx-mute-2); font-variant-numeric:tabular-nums; }
+.solux-pro .evt-row-crit td.cap { box-shadow:inset 2px 0 0 #dc2626; }
+.solux-pro table.evt-mtx td.cap .cl { font-size:13px; font-weight:600; color:var(--sx-ink); letter-spacing:-.005em; }
+.solux-pro table.evt-mtx td.cap .ck { display:flex; align-items:center; gap:9px; margin-top:4px; }
+.solux-pro .evt-key { font-family:ui-monospace, SFMono-Regular, Menlo, monospace; font-size:10.5px; color:var(--sx-mute); }
+
+/* row tags */
+.solux-pro .evt-tag { font-size:9.5px; font-weight:600; letter-spacing:.02em; padding:1px 7px; border-radius:6px; border:1px solid transparent; }
+.solux-pro .evt-tag-off { margin-left:8px; color:#b42318; background:#fef2f2; border-color:#fde0e0; }
+.solux-pro .evt-tag-mod { color:#3358cc; background:#eef4ff; border-color:#dbe6ff; }
+.solux-pro .evt-tag-store { color:#6b7280; background:#f3f4f6; border-color:#e5e7eb; }
+
+/* severity — dot + label */
+.solux-pro .evt-sev { display:inline-flex; align-items:center; gap:7px; font-size:12px; font-weight:500; color:var(--sx-ink-soft); text-transform:capitalize; }
+.solux-pro .evt-sev::before { content:""; width:6px; height:6px; border-radius:50%; background:#b4bac6; flex:none; }
+.solux-pro .evt-sev-medium::before { background:#e0a23a; }
+.solux-pro .evt-sev-high::before { background:#e8870e; }
+.solux-pro .evt-sev-critical::before { background:#dc2626; }
+.solux-pro .evt-sev-critical { color:#b42318; font-weight:600; }
+
+/* notification routing chips */
+.solux-pro .evt-routes { display:inline-flex; flex-wrap:wrap; gap:6px; }
+.solux-pro .evt-ch { display:inline-flex; align-items:center; gap:6px; font-size:11px; font-weight:500; padding:3px 9px; border-radius:7px; border:1px solid transparent; white-space:nowrap; }
+.solux-pro .evt-ch::before { content:""; width:5px; height:5px; border-radius:50%; flex:none; }
+.solux-pro .evt-ch-bell { background:#f0fdf9; color:#047857; border-color:#d1fae5; } .solux-pro .evt-ch-bell::before { background:#10b981; }
+.solux-pro .evt-ch-feed { background:#f5f9ff; color:#1d4ed8; border-color:#dbeafe; } .solux-pro .evt-ch-feed::before { background:#3b82f6; }
+.solux-pro .evt-ch-off  { background:#fff5f5; color:#b42318; border-color:#fde0e0; } .solux-pro .evt-ch-off::before { background:#ef4444; }
+.solux-pro .evt-default { font-size:12px; color:var(--sx-mute-2); }
+.solux-pro .evt-cfg-btn { font-family:inherit; font-size:12px; font-weight:500; padding:5px 13px; border-radius:8px; border:1px solid var(--sx-line-2); color:var(--sx-ink-soft); background:#fff; text-decoration:none; transition:border-color .12s, background .12s; }
+.solux-pro .evt-cfg-btn:hover { border-color:var(--sx-ink); background:#fafafa; }
+.solux-pro .evt-empty { padding:34px 14px !important; text-align:center; color:var(--sx-mute); font-size:12.5px; }
+
+/* ---- configure: header ---- */
+.solux-pro .evt-head-meta { display:flex; flex-wrap:wrap; align-items:center; gap:8px 12px; margin:9px 0 0; }
+.solux-pro .evt-head-meta code { font-family:ui-monospace, SFMono-Regular, Menlo, monospace; font-size:11.5px; font-weight:600; background:#f4f5f7; border:1px solid var(--sx-line); color:var(--sx-ink-soft); padding:2px 8px; border-radius:7px; }
+.solux-pro .evt-head-chip { font-size:11.5px; color:var(--sx-mute); }
+.solux-pro .evt-head-chip.mod { color:#3358cc; font-weight:600; background:#eef4ff; border:1px solid #dbe6ff; padding:1px 9px; border-radius:999px; }
+.solux-pro .evt-muted { color:var(--sx-mute-2); font-size:11px; }
+
+/* flash + critical banner — calm, not error-like */
+.solux-pro .evt-flash { display:flex; align-items:center; gap:8px; margin-top:12px; padding:11px 14px; border-radius:11px; font-size:12.5px; line-height:1.45; }
+.solux-pro .evt-flash.ok { background:#f0fdf9; border:1px solid #c7f0dd; color:#0f7a4d; }
+.solux-pro .evt-crit-banner { display:flex; gap:11px; align-items:flex-start; margin-top:12px; padding:12px 15px; background:#fff; border:1px solid var(--sx-line); border-left:3px solid #dc2626; border-radius:11px; font-size:12.5px; line-height:1.55; color:var(--sx-ink-soft); }
+.solux-pro .evt-crit-ic { color:#dc2626; flex:none; font-size:13px; line-height:1.3; }
+.solux-pro .evt-crit-banner b { color:var(--sx-ink); font-weight:600; }
+
+/* ---- configure: form + sections ---- */
+.solux-pro .evt-form { margin-top:18px; display:grid; gap:16px; }
+.solux-pro .evt-form .sx-input { font-family:inherit; font-size:13px; padding:8px 11px; border:1px solid var(--sx-line-2); border-radius:9px; background:#fff; color:var(--sx-ink); width:100%; transition:border-color .12s, box-shadow .12s; }
+.solux-pro .evt-form .sx-input:focus { outline:none; border-color:#b9bcc4; box-shadow:0 0 0 3px rgba(15,15,15,.05); }
+.solux-pro .evt-form select.sx-input { cursor:pointer; }
+.solux-pro .evt-form input[type="checkbox"] { width:16px; height:16px; accent-color:var(--sx-ink); cursor:pointer; }
+.solux-pro .evt-section { border:1px solid var(--sx-line); border-radius:14px; padding:18px 20px; background:#fff; }
+.solux-pro .evt-section-primary { border-color:#e3e5e9; box-shadow:var(--sx-shadow); }
+.solux-pro .evt-section-legend { display:inline-flex; align-items:center; gap:10px; font-weight:600; font-size:15px; color:var(--sx-ink); letter-spacing:-.01em; padding:0 2px; }
+.solux-pro .evt-section-sub { font-size:12.5px; color:var(--sx-mute); margin:7px 0 14px; }
+
+/* neutral guidance callout (super admin / admin) — calm, not amber */
+.solux-pro .evt-callout { display:flex; gap:9px; align-items:flex-start; font-size:12px; line-height:1.5; padding:11px 14px; border-radius:10px; background:#f6f8fc; border:1px solid #e4e8f0; border-left:2px solid #aab6d4; color:var(--sx-ink-soft); margin:0 0 16px; }
+.solux-pro .evt-callout-ic { flex:none; color:var(--sx-mute); font-size:12.5px; line-height:1.35; }
+.solux-pro .evt-callout b { color:var(--sx-ink); font-weight:600; }
+
+/* notification grid */
+.solux-pro .evt-notif-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(176px,1fr)); gap:13px 14px; }
+.solux-pro .evt-notif-cell { display:flex; flex-direction:column; gap:6px; }
+.solux-pro .evt-notif-role { font-size:10.5px; font-weight:600; letter-spacing:.04em; text-transform:uppercase; color:var(--sx-mute); }
+.solux-pro .evt-notif-cell.danger select.sx-input { border-color:#f0a9a9; box-shadow:0 0 0 3px rgba(220,38,38,.08); }
+.solux-pro .evt-notif-warn { display:inline-flex; align-items:center; gap:5px; font-size:10.5px; font-weight:500; color:#b42318; }
+
+/* who-will-be-notified — impact summary */
+.solux-pro .evt-preview { margin-top:16px; padding:14px 16px; border:1px solid var(--sx-line); border-radius:12px; background:#fbfcfd; }
+.solux-pro .evt-preview-h { display:flex; align-items:center; gap:8px; font-size:10.5px; font-weight:700; letter-spacing:.06em; text-transform:uppercase; color:var(--sx-mute); margin-bottom:11px; }
+.solux-pro .evt-preview-row { display:flex; flex-wrap:wrap; gap:7px; }
+.solux-pro .evt-pv { display:inline-flex; align-items:center; gap:7px; font-size:11.5px; padding:4px 11px 4px 10px; border-radius:8px; border:1px solid var(--sx-line); background:#fff; color:var(--sx-ink-soft); }
+.solux-pro .evt-pv::before { content:""; width:6px; height:6px; border-radius:50%; flex:none; background:#c0c4cf; }
+.solux-pro .evt-pv b { font-weight:600; color:var(--sx-ink); }
+.solux-pro .evt-pv-ch { color:var(--sx-mute); font-weight:500; }
+.solux-pro .evt-pv-bell { background:#f0fdf9; border-color:#d1fae5; } .solux-pro .evt-pv-bell::before { background:#10b981; }
+.solux-pro .evt-pv-feed { background:#f5f9ff; border-color:#dbeafe; } .solux-pro .evt-pv-feed::before { background:#3b82f6; }
+.solux-pro .evt-pv-off  { background:#fff5f5; border-color:#fde0e0; color:#b42318; } .solux-pro .evt-pv-off::before { background:#ef4444; } .solux-pro .evt-pv-off b { color:#b42318; }
+.solux-pro .evt-preview-note { font-size:10.5px; color:var(--sx-mute-2); margin-top:11px; }
+
+/* collapsible: future projections + metadata */
+.solux-pro .evt-details { border:1px solid var(--sx-line); border-radius:14px; background:#fff; overflow:hidden; }
+.solux-pro .evt-details > .evt-summary { display:flex; align-items:center; gap:11px; flex-wrap:wrap; padding:15px 18px; cursor:pointer; list-style:none; user-select:none; transition:background .12s; }
+.solux-pro .evt-details > .evt-summary::-webkit-details-marker { display:none; }
+.solux-pro .evt-details > .evt-summary:hover { background:#fafbfc; }
+.solux-pro .evt-summary-title { font-weight:600; font-size:14px; color:var(--sx-ink); letter-spacing:-.005em; }
+.solux-pro .evt-summary-hint { font-size:11.5px; color:var(--sx-mute-2); }
+.solux-pro .evt-summary-chev { margin-left:auto; color:var(--sx-mute-2); font-size:11px; transition:transform .15s ease; }
+.solux-pro .evt-details[open] > .evt-summary { border-bottom:1px solid var(--sx-line); }
+.solux-pro .evt-details[open] > .evt-summary .evt-summary-chev { transform:rotate(90deg); }
+.solux-pro .evt-details-body { padding:18px; display:grid; gap:16px; }
+
+/* planned-capability note (calm, no colored box) */
+.solux-pro .evt-plan-note { display:flex; gap:9px; align-items:flex-start; font-size:12px; line-height:1.5; color:var(--sx-mute); margin:0; }
+.solux-pro .evt-plan-note b { color:var(--sx-ink-soft); font-weight:600; }
+.solux-pro .evt-plan-ic { flex:none; color:var(--sx-mute-2); }
+
+/* sub-blocks in future projections (de-emphasised) */
+.solux-pro .evt-sub { border:1px solid var(--sx-line); border-radius:12px; padding:14px 15px; background:#fcfcfd; }
+.solux-pro .evt-sub-h { display:flex; align-items:center; gap:8px; font-size:12.5px; font-weight:600; color:var(--sx-mute); margin-bottom:11px; }
+.solux-pro .evt-field { display:block; font-size:11.5px; color:var(--sx-mute); }
+.solux-pro .evt-field-label { font-size:11.5px; color:var(--sx-mute); margin:12px 0 7px; }
+.solux-pro .evt-checks { display:flex; flex-wrap:wrap; gap:10px 16px; }
+.solux-pro .evt-check { display:inline-flex; align-items:center; gap:7px; font-size:12.5px; color:var(--sx-ink-soft); cursor:pointer; }
+.solux-pro .evt-future-foot { display:flex; align-items:center; gap:8px; font-size:11.5px; color:var(--sx-mute-2); margin:0; }
+
+/* metadata grid + stored-only box */
+.solux-pro .evt-grid2 { display:grid; grid-template-columns:1fr 1fr; gap:14px 16px; }
+.solux-pro .evt-stored-box { border:1px solid var(--sx-line); background:#fafbfc; border-radius:12px; padding:15px 16px; display:grid; gap:14px; }
+.solux-pro .evt-stored-head { display:flex; align-items:center; gap:9px; font-size:11.5px; color:var(--sx-mute); }
+.solux-pro .evt-enabled { display:flex; align-items:flex-start; gap:10px; font-size:13px; color:var(--sx-ink-soft); padding-top:2px; }
+.solux-pro .evt-enabled b { font-weight:600; color:var(--sx-ink); }
+.solux-pro .evt-enabled-note { display:block; font-size:11px; color:var(--sx-mute); margin-top:3px; }
+
+/* sticky save footer */
+.solux-pro .evt-savebar { position:sticky; bottom:16px; display:flex; align-items:center; justify-content:space-between; gap:14px; margin-top:2px; padding:13px 16px 13px 18px; background:rgba(255,255,255,.9); -webkit-backdrop-filter:saturate(1.6) blur(10px); backdrop-filter:saturate(1.6) blur(10px); border:1px solid var(--sx-line); border-radius:14px; box-shadow:0 10px 28px -14px rgba(15,15,15,.22), 0 1px 0 rgba(15,15,15,.02); }
+.solux-pro .evt-savebar .note { font-size:11.5px; color:var(--sx-mute); }
+.solux-pro .evt-savebar-actions { display:flex; align-items:center; gap:10px; }
+.solux-pro .evt-reset-btn { font-family:inherit; font-size:12.5px; font-weight:500; padding:8px 14px; border-radius:9px; border:1px solid var(--sx-line-2); background:#fff; color:var(--sx-mute); cursor:pointer; transition:border-color .12s, color .12s, background .12s; }
+.solux-pro .evt-reset-btn:not(:disabled):hover { border-color:#f0a9a9; color:#b42318; background:#fff8f8; }
+.solux-pro .evt-reset-btn:disabled { opacity:.45; cursor:not-allowed; }
+.solux-pro .evt-save-btn { display:inline-flex; align-items:center; gap:8px; font-family:inherit; font-size:13px; font-weight:600; padding:9px 18px; border-radius:9px; border:1px solid var(--sx-ink); background:var(--sx-ink); color:#fff; cursor:pointer; transition:background .12s, opacity .12s; }
+.solux-pro .evt-save-btn:not(:disabled):hover { background:#000; }
+.solux-pro .evt-save-btn:disabled { opacity:.55; cursor:not-allowed; }
+
+/* section head (div replaces fieldset/legend) + inline line-icons */
+.solux-pro .evt-section-head { display:flex; align-items:center; gap:9px; }
+.solux-pro .evt-section-head svg { color:var(--sx-ink); flex:none; }
+.solux-pro .evt-section-title { font-weight:600; font-size:15px; color:var(--sx-ink); letter-spacing:-.01em; }
+.solux-pro .evt-sub-h svg { flex:none; opacity:.9; }
+.solux-pro .evt-future-foot svg { flex:none; opacity:.85; }
+/* impact summary extras */
+.solux-pro .evt-ovr-ct { font-size:9.5px; font-weight:600; letter-spacing:.01em; text-transform:none; color:var(--sx-mute); background:#fff; border:1px solid var(--sx-line); border-radius:999px; padding:1px 8px; }
+.solux-pro .evt-preview-empty { font-size:12px; color:var(--sx-mute); }
+.solux-pro .evt-pv-more { color:var(--sx-mute); }
+/* resolved-default chips (index + preview): outline + colored dot, vs filled overrides */
+.solux-pro .evt-ch.is-default { background:#fff; color:var(--sx-mute); border-color:var(--sx-line); font-weight:500; }
+.solux-pro .evt-pv.is-default { background:#fff; border-color:var(--sx-line); color:var(--sx-mute); }
+.solux-pro .evt-pv.is-default b { color:var(--sx-ink-soft); }
+
+@media (max-width:720px){
+  .solux-pro .evt-grid2 { grid-template-columns:1fr; }
+  .solux-pro .evt-savebar { flex-direction:column; align-items:stretch; }
+  .solux-pro .evt-savebar-actions { justify-content:flex-end; }
+}

@@ -137,3 +137,38 @@ export async function saveEventConfig(formData: FormData): Promise<void> {
   revalidatePath(`/admin/events/${eventKey}`);
   redirect(`/admin/events/${eventKey}?saved=1`);
 }
+
+/**
+ * Reset ONE event back to its code defaults: drop its identity override
+ * AND every routing row. Same "clean slate" as a save with all-default
+ * values, but explicit and one-click. Scoped to a single event_key, so it
+ * can never touch another event. Gated to admin / super_admin (m136 RLS).
+ * No schema / model change — just deletes this event's override rows.
+ */
+export async function resetEventConfig(formData: FormData): Promise<void> {
+  const { role } = await getCurrentUserRole();
+  if (!isAdminLike(role)) throw new Error("Admins only");
+
+  const eventKey = String(formData.get("event_key") ?? "");
+  if (!(eventKey in NOTIFICATION_CATALOG)) throw new Error(`Unknown event: ${eventKey}`);
+
+  const supabase = createClient();
+  const { data: auth } = await supabase.auth.getUser();
+  const uid = auth?.user?.id ?? null;
+
+  await supabase.from("event_catalog_overrides").delete().eq("event_key", eventKey);
+  await supabase.from("event_routing").delete().eq("event_key", eventKey);
+
+  await emitEvent({
+    entity_type: "system",
+    entity_id: uid ?? "00000000-0000-0000-0000-000000000000",
+    event_type: "admin.permissions_changed",
+    message: `Event registry: ${eventKey} configuration reset to defaults`,
+    payload: { scope: "event_registry", event_key: eventKey, action: "reset" },
+    bestEffort: true,
+  });
+
+  revalidatePath("/", "layout");
+  revalidatePath(`/admin/events/${eventKey}`);
+  redirect(`/admin/events/${eventKey}?reset=1`);
+}
