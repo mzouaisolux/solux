@@ -253,22 +253,11 @@ export default async function ProjectDetailPage({ params }: { params: { id: stri
   const showPricing =
     status === "ready_for_pricing" || status === "priced" || status === "quotation_generated" || status === "won" || status === "lost";
 
-  // P11 — workflow summary (only requested steps gate the project).
-  const STEP_TEXT: Record<string, { text: string; cls: string }> = {
-    complete: { text: "✓ Complete", cls: "ok" },
-    pending: { text: "Pending", cls: "pending" },
-    ready: { text: "Ready", cls: "ready" },
-    na: { text: "Not requested", cls: "na" },
-  };
-  const stepOf = (requested: boolean, done: boolean) => (!requested ? "na" : done ? "complete" : "pending");
-  const pricingDone = ["priced", "quotation_generated", "won", "lost"].includes(status);
-  const workflowSteps: Array<{ label: string; state: keyof typeof STEP_TEXT }> = [
-    { label: "Factory Cost", state: stepOf(!!p.req_product_pricing, cost?.status === "completed") },
-    { label: "Packing List", state: stepOf(!!p.req_packing_list, pack?.status === "completed") },
-    { label: "Freight Cost", state: stepOf(!!p.req_freight, freight?.status === "completed") },
-    { label: "Pricing", state: pricingDone ? "complete" : status === "ready_for_pricing" ? "ready" : "pending" },
-    { label: "Quotation", state: p.generated_document_id ? "complete" : "pending" },
-  ];
+  // #17 — the redundant "Workflow summary" tracker was removed. Per-deliverable
+  // status now lives ONLY on each Cost/Packing/Freight card (single source, in
+  // context with its actions); the stepper shows the lifecycle and the
+  // "Next step" panel shows what to do. This also removes the old mixed signal
+  // (tracker "Pending" vs a card reading "not requested").
 
   return (
     <div className="solux-pro sx-page">
@@ -512,18 +501,6 @@ export default async function ProjectDetailPage({ params }: { params: { id: stri
             )}
           </div>
 
-          {/* WORKFLOW SUMMARY (P11) — understand status at a glance */}
-          <div className="card sec">
-            <div className="eyebrow" style={{ marginBottom: 14 }}>Workflow — only requested steps gate the project</div>
-            <div className="wf-grid">
-              {workflowSteps.map((s) => (
-                <div key={s.label} className="wf">
-                  <div className="wk">{s.label}</div>
-                  <div className={`wv ${STEP_TEXT[s.state].cls}`}>{STEP_TEXT[s.state].text}</div>
-                </div>
-              ))}
-            </div>
-          </div>
 
           <div className="detail-cols">
             <div className="detail-main">

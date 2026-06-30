@@ -41,20 +41,20 @@ Legend: ✅ done · 🟡 partial · ⬜ untouched. Evidence = `file:line`.
 | 6 | TLM queue hero + de-dupe PTL + color | ✅ | "Awaiting your review (N)" hero (`task-lists/page.tsx:282-295`); PTL number already single (`366-369`); status color (`401-415`). |
 | 7 | Split task-list page + required-empty + mapping up front | 🟡 | Sectioned + quick-nav done (S1-6) ✅. ⬜ no top "N fields needed before validation" summary; required flags per-line only (`TaskLineEditor.tsx:66-74`). |
 | 8 | Mapping readiness at launch, not only at gate | ⬜ | Still surfaced ONLY at the Release modal (`TaskListWorkflow.tsx:704-801`). No flag at option-selection / launch. |
-| 9 | SR form steps + Pole off + toggle helper | 🟡 | 4-step wizard ✅ + toggle helper text ✅ (`NewProjectForm.tsx:110-111,342`). ⬜ Pole still defaults ON (`:100`); ⬜ destination still a single "port/airport" field (`:395`). |
+| 9 | SR form steps + Pole off + toggle helper | ✅ | **Sprint 2**: Pole now defaults **OFF** (`NewProjectForm.tsx:100`); freight destination relabeled "Delivery destination" + helper ("city, port or airport") — fixes the inland-city (Paris) mental model via a **data-model-preserving relabel**, not a new column. 4-step wizard + toggle helper already shipped. Verified live (new SR created pole-off). |
 | 10 | Confirm Mark Won + chips in "⋯" menu | ✅ | `window.confirm` on Mark Won (`DocQuickActions.tsx:152`); raw chips collapsed into "Other status" row (`DocStatusActions.tsx:83-98`). |
 | 11 | Flatten navigation | ⬜ | Still grouped under "Clients & Projects" etc.; Service Requests = 2 clicks (`navigation.ts:84-150`). (Owner-deferred.) |
-| 12 | Localize FR/EN fully | 🟡 | Task-list detail now English; `srNeed` labels FR→EN (Sprint 1 §C). Full app sweep not verified. |
+| 12 | Localize FR/EN fully | 🟡 | ✅ **SR domain** (Sprint 2: wizard guard toasts FR→EN; no residual FR on SR screens). Task-list detail English; `srNeed` FR→EN (Sprint 1). Full app sweep → Sprint 6. |
 | 13 | Order lifecycle: hide proforma "draft" contradiction | ⬜ | Won order still shows "Draft — not sent" from the proforma (`WorkflowStepper.tsx:217-223`). |
 | 14 | Auto-open generated quotation | ✅ | `generateQuotationFromProject` redirects to `/documents/new?edit=` (`projects/actions.ts:1228`). |
 | 15 | Ops chips plain language + legend | 🟡 | Order chips already plain ("Awaiting deposit"…); cryptic delay chips ("Factory +4d…") + legend not addressed. |
 | 16 | Merge the two Ops KPI strips | 🟡 | Two strips remain; 2nd ("Business snapshot") de-emphasized, not merged (`OperationsTab.tsx:333-370`). |
-| 17 | Collapse SR-detail duplicate status surfaces | ⬜ | Badge + stepper + tracker + per-card "not requested" still coexist (`projects/[id]/page.tsx:259-349,570-676`). |
+| 17 | Collapse SR-detail duplicate status surfaces | ✅ | **Sprint 2**: removed the redundant "Workflow summary" tracker (the mixed-signal source: tracker "Pending" vs card "not requested"). Now stepper (lifecycle) + "Next step" panel (action, single source) + per-card status (in-context). Verified Sales + Director paths render clean. |
 | 18 | Remove the "Messages" support bubble | ✅ | Global `ConversationLauncher` removed (`layout.tsx`, Sprint 1 §C). |
-| 19 | Inline, form-preserving errors everywhere | 🟡 | Done for client-code (`NewClientPanel.tsx:45-47,174-176`). Not generalized (other create forms use toasts). |
+| 19 | Inline, form-preserving errors everywhere | 🟡 | ✅ client-code + **SR create/edit** (Sprint 2: persistent inline error near submit; wizard keeps all input mounted so nothing is lost). App-wide generalization → Sprint 6. |
 | 20 | Skeletons + status color on dense tables | 🟡 | Color-coding on TLM queue ✅; skeleton loaders ⬜ (none in codebase). |
 
-**Score: 8 ✅ · 8 🟡 · 4 ⬜.** Sprint 1 (Dashboards & notifications) **fully satisfies its core items** — #1, #2, #3, #5, plus greeting (#4a), bell, Messages bubble (#18), auto-open quote (#14), the "✓✓" fix, and Orders-in-Flight restored. Its *trailing edges* (#4b account menu, #15/#16 Ops refinements) are reassigned to the domain sprints below rather than left dangling.
+**Score: 10 ✅ · 7 🟡 · 3 ⬜** (after Sprint 2 — #9 & #17 → ✅; #12 & #19 → ✅ for the SR domain, app-wide remainder in Sprint 6). Sprint 1 (Dashboards & notifications) **fully satisfies its core items** — #1, #2, #3, #5, plus greeting (#4a), bell, Messages bubble (#18), auto-open quote (#14), the "✓✓" fix, and Orders-in-Flight restored. Its *trailing edges* (#4b account menu, #15/#16 Ops refinements) are reassigned to the domain sprints below rather than left dangling.
 
 ---
 
@@ -62,7 +62,9 @@ Legend: ✅ done · 🟡 partial · ⬜ untouched. Evidence = `file:line`.
 
 Rule: a sprint is closed only when **implemented → verified with real per-role logins → regression green → committed**, before the next opens. Recommended order below; **Sprint 2 proposed = Service Requests** (small, completes a domain Sprint 1 began, lowest risk).
 
-### Sprint 2 — Service Requests  *(recommended next)*
+### Sprint 2 — Service Requests  ✅ COMPLETE (2026-06-30)
+> **Delivered:** #9 Pole default OFF + freight destination relabel ("Delivery destination", city/port/airport — no schema change); #17 removed the redundant SR-detail "Workflow summary" tracker (single source = stepper + Next-step + per-card status); #12 SR-domain FR→EN; #19 inline form-preserving error on SR create/edit. **Files:** `projects/new/NewProjectForm.tsx`, `projects/[id]/page.tsx`. **Verified** (genuine logins): Sales create (pole-off) → submit → Director request-info (note) → Sales sees note + can edit, all on the clean detail; `tsc` (no new errors) + `check:schema` ✅ + `e2e:regression` 23/23. Committed.
+
 - **Objective:** finish the SR domain to production quality (Sprint 1 shipped the 4-step wizard; close the gaps).
 - **Screens:** New SR wizard (`projects/new/NewProjectForm.tsx`), SR detail (`projects/[id]/page.tsx`).
 - **Deliverables:** #9 Pole default **OFF** + destination split into **delivery city + optional port** (fixes the "Paris ≠ port" mental model); #17 collapse the duplicate status surfaces on SR detail (keep stepper + "Next step" as the single source; drop redundant per-card "pending/not requested"); #19 inline form-preserving errors on SR create/edit; #12 localize any residual FR/EN on these two screens.

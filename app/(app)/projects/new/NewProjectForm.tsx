@@ -96,8 +96,10 @@ export default function NewProjectForm({
   const [reqProduct, setReqProduct] = useState(initial?.reqProduct ?? true);
   const [reqPacking, setReqPacking] = useState(initial?.reqPacking ?? false);
   const [reqFreight, setReqFreight] = useState(initial?.reqFreight ?? false);
-  // pole
-  const [poleRequired, setPoleRequired] = useState(initial?.poleRequired ?? true);
+  // pole — default OFF (#9): poles are the exception, not the rule; an opt-in
+  // checkbox stops every request silently including poles. Edit mode keeps the
+  // stored value (initial?.poleRequired wins when defined).
+  const [poleRequired, setPoleRequired] = useState(initial?.poleRequired ?? false);
   const [poleQuantity, setPoleQuantity] = useState(initial?.poleQuantity ?? "");
   const [poleHeight, setPoleHeight] = useState(initial?.poleHeight ?? "");
   const [armLength, setArmLength] = useState(initial?.armLength ?? "");
@@ -109,6 +111,10 @@ export default function NewProjectForm({
   // <form> still submits a complete FormData on the final step.
   const STEPS = ["General", "Services", "Configuration", "Review"];
   const [step, setStep] = useState(0);
+  // #19 — inline, form-preserving error: a server failure is surfaced
+  // persistently near the submit button (not just a transient toast). All
+  // wizard fields stay mounted, so the user's input is never lost on failure.
+  const [formError, setFormError] = useState<string | null>(null);
 
   const hasQty = quantity.trim() !== "" && Number(quantity) > 0;
 
@@ -157,18 +163,19 @@ export default function NewProjectForm({
   return (
     <form
       action={async (fd) => {
+        setFormError(null);
         // Create mode: affaire mandatory — exactly one of {existing, new}.
         // Edit mode: client + affaire are fixed, so skip that gate.
         if (!isEdit) {
           const hasExisting = affairId.trim() !== "";
           const hasNew = newAffairName.trim() !== "";
           if (hasExisting && hasNew) {
-            toast.error("Veuillez sélectionner une affaire existante OU saisir une nouvelle affaire.");
-            return;
+            const m = "Pick an existing affair OR name a new one — not both.";
+            setFormError(m); toast.error(m); return;
           }
           if (!hasExisting && !hasNew && !tenderMode) {
-            toast.error("Une affaire est obligatoire pour créer une Service Request.");
-            return;
+            const m = "An affair is required to create a service request.";
+            setFormError(m); toast.error(m); return;
           }
         }
         try {
@@ -177,10 +184,11 @@ export default function NewProjectForm({
           else await createProjectRequest(fd);
         } catch (e: any) {
           if (isNavError(e)) throw e;
-          toast.error(
+          const m =
             e?.message ??
-              (isEdit ? "Could not save the changes." : "Could not create the service request.")
-          );
+            (isEdit ? "Could not save the changes." : "Could not create the service request.");
+          setFormError(m); // input preserved (fields stay mounted)
+          toast.error(m);
         }
       }}
       className="card form-card"
@@ -392,8 +400,9 @@ export default function NewProjectForm({
               </select>
             </div>
             <div className="fcol">
-              <span className="fl">Destination port / airport <span className="req">*</span></span>
-              <input name="freight_destination" value={freightDestination} onChange={(e) => setFreightDestination(e.target.value)} placeholder="e.g. Port of Cotonou" />
+              <span className="fl">Delivery destination <span className="req">*</span></span>
+              <input name="freight_destination" value={freightDestination} onChange={(e) => setFreightDestination(e.target.value)} placeholder="e.g. Paris (France) · Port of Cotonou" />
+              <span style={{ fontSize: 11, color: "var(--sx-mute-2)", marginTop: 4 }}>City, port or airport — wherever the goods must be delivered.</span>
             </div>
             <div className="fcol"><span className="fl">Freight notes</span><input name="freight_notes" placeholder="optional" defaultValue={initial?.freightNotes || undefined} /></div>
           </div>
@@ -443,6 +452,11 @@ export default function NewProjectForm({
           <SubmitButton className="sx-btn sx-btn-go" pendingLabel={isEdit ? "Saving…" : "Creating…"}>
             {isEdit ? "Save changes" : "Create service request"}
           </SubmitButton>
+        )}
+        {formError && (
+          <p role="alert" style={{ color: "#dc2626", fontSize: 13, fontWeight: 600, margin: 0, flexBasis: "100%", order: -1 }}>
+            {formError}
+          </p>
         )}
         <span className="note">
           {step < STEPS.length - 1
