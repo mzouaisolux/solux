@@ -426,9 +426,14 @@ export default function TaskLineEditor({
       fd.set("manual_specs", specs);
     }
     startSales(async () => {
-      await updateTaskListLine(fd);
-      setSavedAt(Date.now());
-      setIsDirty(false);
+      try {
+        await updateTaskListLine(fd);
+        setSavedAt(Date.now());
+        setIsDirty(false);
+        pushToast("Line saved", "success");
+      } catch (e: any) {
+        pushToast(e?.message ?? "Could not save the line — try again.", "error");
+      }
     });
   }
 
@@ -438,9 +443,14 @@ export default function TaskLineEditor({
     fd.set("task_list_id", taskListId);
     fd.set("technical_values", JSON.stringify(technical));
     startTech(async () => {
-      await updateTaskListLineTechnical(fd);
-      setSavedTechAt(Date.now());
-      setIsTechDirty(false);
+      try {
+        await updateTaskListLineTechnical(fd);
+        setSavedTechAt(Date.now());
+        setIsTechDirty(false);
+        pushToast("Technical edits saved", "success");
+      } catch (e: any) {
+        pushToast(e?.message ?? "Could not save technical edits — try again.", "error");
+      }
     });
   }
 

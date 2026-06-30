@@ -901,6 +901,42 @@
   border-radius: 0;
   box-shadow: none;
 }
+/* ----- Release readiness banner (Sprint 3 #7/#8) ----- */
+.tl-detail .tl-readiness {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  margin: 0 0 16px;
+  padding: 13px 16px;
+  border: 1px solid #fcd34d;
+  background: #fffbeb;
+  border-radius: 12px;
+}
+.tl-detail .tl-readiness-ico {
+  font-size: 17px;
+  line-height: 1.3;
+  color: #d97706;
+}
+.tl-detail .tl-readiness-title {
+  font-weight: 700;
+  font-size: 13px;
+  color: #92400e;
+  margin-bottom: 5px;
+}
+.tl-detail .tl-readiness-list {
+  margin: 0;
+  padding-left: 16px;
+  font-size: 12.5px;
+  color: #92400e;
+  line-height: 1.6;
+}
+.tl-detail .tl-readiness-list a {
+  color: #b45309;
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
 /* ----- SaveButton strong feedback (Sprint 1 polish) ----- */
 .tl-detail .fi-savewrap {
   display: inline-flex;

@@ -36,7 +36,7 @@ import {
 } from "@/components/dashboard/EventDiscussionPanel";
 import { formatPaymentTerms } from "@/lib/payment";
 import { formatProductionTime, fromProductionColumns } from "@/lib/logistics";
-import { countMissingMappings } from "@/lib/task-list-mapping-status";
+import { countMissingMappings, countRequiredEmpty } from "@/lib/task-list-mapping-status";
 import { isManualLine } from "@/lib/manual-items";
 import {
   revisionCategoryLabel,
@@ -500,17 +500,24 @@ export default async function TaskListDetailPage({
 
   // ---- D1/E3: required-mapping completeness (drives the Release guard) ----
   // SAME pure helper the server-side release gate uses → no logic divergence.
+  const mappingLines = ((lines ?? []) as any[]).map((l) => ({
+    productId: l.product_id,
+    categoryId: l.category_id ?? l.products?.category_id ?? null, // m133
+    config: (l.config_values ?? {}) as Record<string, string>,
+    overrides: (l.factory_overrides ?? {}) as Record<string, string>,
+  }));
   const missingMappingCount = countMissingMappings({
-    lines: ((lines ?? []) as any[]).map((l) => ({
-      productId: l.product_id,
-      categoryId: l.category_id ?? l.products?.category_id ?? null, // m133
-      config: (l.config_values ?? {}) as Record<string, string>,
-      overrides: (l.factory_overrides ?? {}) as Record<string, string>,
-    })),
+    lines: mappingLines,
     salesFieldsByCategory,
     mappingsByOption: mappingByOption,
     optionIdByFieldValue,
     clientOverridesByProduct: presetByProduct,
+  });
+  // #7 — required-for-production fields left blank (complements the mapping
+  // count, which ignores empty fields). Surfaced at the top, not only the gate.
+  const requiredEmptyCount = countRequiredEmpty({
+    lines: mappingLines,
+    salesFieldsByCategory,
   });
   const clientName =
     (Array.isArray((task as any).clients)
@@ -675,6 +682,44 @@ export default async function TaskListDetailPage({
           ))}
         </div>
       </div>
+
+      {/* RELEASE READINESS (#7/#8) — surface what blocks validation at the TOP,
+          not only inside the final Release modal. Shown to the production team
+          while reviewing / before release; per-row detail lives in Product
+          configuration below. */}
+      {technical &&
+        (status === "under_validation" || status === "validated") &&
+        (missingMappingCount > 0 || requiredEmptyCount > 0) && (
+          <div className="tl-readiness" role="status">
+            <span className="tl-readiness-ico" aria-hidden>
+              ⚠
+            </span>
+            <div className="tl-readiness-body">
+              <div className="tl-readiness-title">
+                Not ready to release — {requiredEmptyCount + missingMappingCount}{" "}
+                item{requiredEmptyCount + missingMappingCount === 1 ? "" : "s"} to
+                resolve before validation
+              </div>
+              <ul className="tl-readiness-list">
+                {requiredEmptyCount > 0 && (
+                  <li>
+                    <b>{requiredEmptyCount}</b> required field
+                    {requiredEmptyCount === 1 ? "" : "s"} still empty —{" "}
+                    <a href="#tl-product">fill in Product configuration ↓</a>
+                  </li>
+                )}
+                {missingMappingCount > 0 && (
+                  <li>
+                    <b>{missingMappingCount}</b> factory mapping
+                    {missingMappingCount === 1 ? "" : "s"} missing — resolve on the
+                    lines below or in{" "}
+                    <Link href="/factory-mapping">Admin → Factory mapping</Link>
+                  </li>
+                )}
+              </ul>
+            </div>
+          </div>
+        )}
 
       {/* Workflow next-action bar — INK bar wrapping the existing
           TaskListWorkflowActions buttons (Mark production ready / Request

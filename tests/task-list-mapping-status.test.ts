@@ -16,6 +16,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   countMissingMappings,
+  countRequiredEmpty,
   evaluateRelease,
   type MappingLine,
 } from "../lib/task-list-mapping-status.ts";
@@ -292,6 +293,76 @@ test("resolveFactoryInstruction: each duplicated family resolves to its OWN mapp
   assert.equal(b.text, "INSTR-optB"); // NOT optA — proves no cross-family bleed
   assert.equal(a.mapping_id, "m-optA");
   assert.equal(b.mapping_id, "m-optB");
+});
+
+// ---- countRequiredEmpty (#7) — required-for-production fields left blank ----
+// Complements countMissingMappings (which SKIPS empty fields). Surfaces the
+// BUG-6 class — a required dropdown blank after launch — at the top of the page.
+
+const requiredField = (field_name: string) =>
+  ({ field_name, field_type: "dropdown", required_for_production: true }) as any;
+
+test("countRequiredEmpty: a required-for-production field with no value counts", () => {
+  assert.equal(
+    countRequiredEmpty({
+      lines: [{ productId: "p1", categoryId: "cat1", config: {}, overrides: {} }],
+      salesFieldsByCategory: cat([requiredField("SolarPanel")]),
+    }),
+    1
+  );
+});
+
+test("countRequiredEmpty: a required field WITH a value is not counted", () => {
+  assert.equal(
+    countRequiredEmpty({
+      lines: [
+        { productId: "p1", categoryId: "cat1", config: { SolarPanel: "120W" }, overrides: {} },
+      ],
+      salesFieldsByCategory: cat([requiredField("SolarPanel")]),
+    }),
+    0
+  );
+});
+
+test("countRequiredEmpty: non-required fields are ignored even when empty", () => {
+  assert.equal(
+    countRequiredEmpty({
+      lines: [{ productId: "p1", categoryId: "cat1", config: {}, overrides: {} }],
+      salesFieldsByCategory: cat([dropdown("Optional")]), // no required_for_production
+    }),
+    0
+  );
+});
+
+test("countRequiredEmpty: a CUSTOM-sentinel value with free text fills the field", () => {
+  assert.equal(
+    countRequiredEmpty({
+      lines: [
+        {
+          productId: "p1",
+          categoryId: "cat1",
+          config: { SolarPanel: "__custom__", SolarPanel__custom: "Bespoke 137W" },
+          overrides: {},
+        },
+      ],
+      salesFieldsByCategory: cat([requiredField("SolarPanel")]),
+    }),
+    0
+  );
+});
+
+test("countRequiredEmpty: sums across lines + skips lines with no category", () => {
+  assert.equal(
+    countRequiredEmpty({
+      lines: [
+        { productId: "p1", categoryId: "cat1", config: {}, overrides: {} }, // SolarPanel + Optic empty → 2
+        { productId: "p2", categoryId: "cat1", config: { SolarPanel: "120W" }, overrides: {} }, // Optic empty → 1
+        { productId: "p3", categoryId: null, config: {}, overrides: {} }, // no category → skipped
+      ],
+      salesFieldsByCategory: cat([requiredField("SolarPanel"), requiredField("Optic")]),
+    }),
+    3
+  );
 });
 
 // ---- evaluateRelease — the validate / mark-production-ready gate ----

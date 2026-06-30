@@ -74,6 +74,38 @@ export function countMissingMappings(args: {
 }
 
 /**
+ * Count required-for-production fields that have NO value yet across a task
+ * list's lines. Complements countMissingMappings: that one skips empty fields
+ * ("no value → nothing to map"), so a REQUIRED field left blank is invisible to
+ * it. This surfaces those gaps (BUG-6 class: "SOLAR PANEL *, OPTIC *, CCT *"
+ * blank after launch) at the top of the page, not only at the release gate.
+ * Uses `required_for_production` only (the explicit production gate) → no false
+ * alarms from quotation-only "required" fields.
+ */
+export function countRequiredEmpty(args: {
+  lines: MappingLine[];
+  /** category_id → sales-side ConfigField[] (same map countMissingMappings uses). */
+  salesFieldsByCategory: Map<string, ConfigField[]>;
+}): number {
+  let empty = 0;
+  for (const line of args.lines) {
+    if (!line.categoryId) continue;
+    const fields = (args.salesFieldsByCategory.get(line.categoryId) ?? []).filter(
+      (f) => f.required_for_production === true
+    );
+    for (const f of fields) {
+      const raw = line.config[f.field_name];
+      const display =
+        raw === CUSTOM_OPTION_SENTINEL
+          ? line.config[customValueKey(f.field_name)] ?? ""
+          : raw ?? "";
+      if (!display.trim()) empty++;
+    }
+  }
+  return empty;
+}
+
+/**
  * Release-to-production decision (pure → testable). Order matters: status,
  * then open revision, then mapping completeness — so the surfaced reason is
  * the most blocking one.
