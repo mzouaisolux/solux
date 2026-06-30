@@ -44,10 +44,11 @@ export default async function AdminLayout({
   // see tabs they can't open — so the tab bar renders for admin-like users
   // only. Their own page (Users) carries its own heading.
   const baseTabs: AdminTab[] = [
-    // Categories merged into Products (single Product Catalog workspace).
+    // Catalog master data grouped first: Products, Categories, Components.
     { href: "/admin/products", label: "Products" },
-    { href: "/admin/pricing", label: "Pricing" },
+    { href: "/admin/categories", label: "Categories" },
     { href: "/admin/components", label: "Components" },
+    { href: "/admin/pricing", label: "Pricing" },
     { href: "/admin/sales-conditions", label: "Sales conditions" },
     { href: "/admin/banks", label: "Bank accounts" },
   ];

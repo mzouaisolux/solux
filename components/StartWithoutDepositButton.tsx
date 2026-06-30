@@ -7,7 +7,9 @@ import { startWithoutDeposit } from "@/app/(app)/production/orders/actions";
  * Deposit-override button.
  *
  * Renders a small "Start without deposit" button. When clicked, expands
- * inline to show an optional reason field + explicit Confirm action.
+ * inline to show a REQUIRED reason field + explicit Confirm action.
+ * The reason is mandatory (audit 2026-06-11 P0) — the server action
+ * rejects empty reasons too; this UI just surfaces the rule early.
  *
  * Why inline (not a modal)?
  * - Keeps the UI light — no portal/overlay machinery.
@@ -32,9 +34,16 @@ export function StartWithoutDepositButton({ orderId }: { orderId: string }) {
 
   function submit() {
     setError(null);
+    const trimmed = reason.trim();
+    if (!trimmed) {
+      setError(
+        "A reason is required — record why production starts before the deposit (e.g. trusted client, written approval)."
+      );
+      return;
+    }
     const fd = new FormData();
     fd.set("id", orderId);
-    if (reason.trim()) fd.set("reason", reason.trim());
+    fd.set("reason", trimmed);
     startActionTransition(async () => {
       try {
         await startWithoutDeposit(fd);
@@ -87,7 +96,7 @@ export function StartWithoutDepositButton({ orderId }: { orderId: string }) {
       </div>
       <label className="block">
         <span className="text-[11px] font-semibold text-neutral-700">
-          Reason <span className="font-normal text-neutral-500">(optional but recommended)</span>
+          Reason <span className="font-normal text-neutral-500">(required)</span>
         </span>
         <textarea
           value={reason}
@@ -119,7 +128,10 @@ export function StartWithoutDepositButton({ orderId }: { orderId: string }) {
         <button
           type="button"
           onClick={submit}
-          disabled={pending}
+          disabled={pending || !reason.trim()}
+          title={
+            !reason.trim() ? "Enter a reason first — it's required." : undefined
+          }
           className="rounded-md bg-amber-900 px-3 py-1 text-[11px] font-semibold text-white hover:bg-amber-800 disabled:opacity-50"
         >
           {pending ? "Confirming…" : "Confirm: start production"}

@@ -128,6 +128,8 @@ export default function TaskListWorkflowActions({
   taskListId,
   status,
   isTechnical,
+  canValidate = false,
+  canReject = false,
   revisionThread,
   missingMappingCount = 0,
   clientName = null,
@@ -137,6 +139,11 @@ export default function TaskListWorkflowActions({
   status: ProductionTaskListStatus;
   /** True if the current user is task_list_manager or admin. */
   isTechnical: boolean;
+  /** Capability task_list.validate (UI only) — enables Validate / Mark-ready /
+   *  Request-revision / Reopen. Backend re-checks via requireCapability. */
+  canValidate?: boolean;
+  /** Capability task_list.reject (UI only) — enables the Reject buttons. */
+  canReject?: boolean;
   /** Latest revision request + response (resolved server-side). */
   revisionThread?: RevisionThreadInfo;
   /** Required factory mappings still missing — blocks Release to Production. */
@@ -214,6 +221,28 @@ export default function TaskListWorkflowActions({
   const dangerClass =
     "inline-flex items-center gap-1.5 rounded-md border border-red-300 bg-white px-3.5 py-2 text-sm font-medium text-red-700 transition-colors hover:bg-red-50 disabled:opacity-50";
 
+  // Capability honesty: a technical-view user who lacks the matrix capability
+  // sees the action area disabled WITH a clear reason, instead of an active
+  // button that errors on click. Backend (requireCapability) stays the source
+  // of truth — this only keeps the UI from lying.
+  const missingCaps = [
+    !canValidate && "task_list.validate",
+    !canReject && "task_list.reject",
+  ].filter(Boolean) as string[];
+  const capNote =
+    isTechnical && missingCaps.length > 0 ? (
+      <p className="rounded-md border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-[11px] text-amber-800">
+        Read-only for your role — missing <b>{missingCaps.join(" + ")}</b>. Ask a
+        super-admin to enable it in <code>/permissions/actions</code>.
+      </p>
+    ) : null;
+  const validateTitle = canValidate
+    ? undefined
+    : "Requires the task_list.validate capability.";
+  const rejectTitle = canReject
+    ? undefined
+    : "Requires the task_list.reject capability.";
+
   // Dirty-guard modal — rendered once, outside all status branches.
   const dirtyModal = showDirtyModal ? (
     <DirtySubmitModal
@@ -271,7 +300,8 @@ export default function TaskListWorkflowActions({
           {isTechnical && (
             <button
               type="button"
-              disabled={pending}
+              disabled={pending || !canReject}
+              title={rejectTitle}
               onClick={() => fire("reject-draft", rejectTaskList)}
               className={dangerClass}
             >
@@ -279,6 +309,7 @@ export default function TaskListWorkflowActions({
             </button>
           )}
         </div>
+        {capNote}
       </>
     );
   }
@@ -309,19 +340,21 @@ export default function TaskListWorkflowActions({
               </p>
             </div>
           )}
+          {capNote}
           <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
-              disabled={pending}
+              disabled={pending || !canValidate}
               onClick={() => setModal("release")}
               className={primaryClass}
-              title="Review mapping completeness, then release to production."
+              title={validateTitle ?? "Review mapping completeness, then release to production."}
             >
               {btnLabel("validate", "Validate →", "Validating…")}
             </button>
             <button
               type="button"
-              disabled={pending}
+              disabled={pending || !canValidate}
+              title={validateTitle}
               onClick={() => setModal("revision")}
               className={secondaryClass}
             >
@@ -329,7 +362,8 @@ export default function TaskListWorkflowActions({
             </button>
             <button
               type="button"
-              disabled={pending}
+              disabled={pending || !canReject}
+              title={rejectTitle}
               onClick={() => fire("reject-uv", rejectTaskList)}
               className={dangerClass}
             >
@@ -383,12 +417,14 @@ export default function TaskListWorkflowActions({
           )}
           <button
             type="button"
-            disabled={pending}
+            disabled={pending || !canReject}
+            title={rejectTitle}
             onClick={() => fire("reject-revision", rejectTaskList)}
             className={dangerClass}
           >
             {btnLabel("reject-revision", "Reject", "Rejecting…")}
           </button>
+          {capNote}
         </div>
       </>
     );
@@ -407,10 +443,12 @@ export default function TaskListWorkflowActions({
     return (
       <>
         {workflowModals}
+        {capNote}
         <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
-            disabled={pending}
+            disabled={pending || !canValidate}
+            title={validateTitle}
             onClick={() => fire("mark-ready-from-validated", markProductionReady)}
             className={primaryClass}
           >
@@ -418,7 +456,8 @@ export default function TaskListWorkflowActions({
           </button>
           <button
             type="button"
-            disabled={pending}
+            disabled={pending || !canValidate}
+            title={validateTitle}
             onClick={() => setModal("revision")}
             className={secondaryClass}
           >
@@ -426,7 +465,8 @@ export default function TaskListWorkflowActions({
           </button>
           <button
             type="button"
-            disabled={pending}
+            disabled={pending || !canReject}
+            title={rejectTitle}
             onClick={() => fire("reject-validated", rejectTaskList)}
             className={dangerClass}
           >
@@ -455,19 +495,21 @@ export default function TaskListWorkflowActions({
             Ready for factory release. Use the <b>Factory PDF</b> button at
             the top to generate the final production document.
           </p>
+          {capNote}
           <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
-              disabled={pending}
+              disabled={pending || !canValidate}
               onClick={() => fire("reopen", reopenForRevision)}
               className={secondaryClass}
-              title="Reopen for further technical edits before factory release."
+              title={validateTitle ?? "Reopen for further technical edits before factory release."}
             >
               {btnLabel("reopen", "Reopen for revisions", "Reopening…")}
             </button>
             <button
               type="button"
-              disabled={pending}
+              disabled={pending || !canValidate}
+              title={validateTitle}
               onClick={() => setModal("revision")}
               className={secondaryClass}
             >

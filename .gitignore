@@ -10,6 +10,11 @@ node_modules */
 # env / secrets
 .env.local
 .env*.local
+.env.e2e
+
+# E2E harness artifacts (sessions, run reports, traces)
+e2e/.auth
+e2e/.runs
 
 # misc
 .DS_Store

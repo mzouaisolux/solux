@@ -7,7 +7,12 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "test": "node --experimental-strip-types --test tests/*.test.ts"
+    "test": "node --experimental-strip-types --test tests/*.test.ts",
+    "e2e:bootstrap": "node --env-file=.env.e2e --experimental-strip-types e2e/auth/bootstrap.ts",
+    "e2e:regression": "node --env-file=.env.e2e --experimental-strip-types e2e/audit/regression.ts",
+    "check:schema": "node --experimental-strip-types e2e/audit/schema-check.ts",
+    "gen:types": "npx supabase@latest gen types typescript --project-id brqhcqaagzfiozzamzon --schema public > lib/database.types.ts",
+    "db:migrate": "node --env-file=.env.local --env-file=.env.e2e --experimental-strip-types scripts/migrate.ts"
   },
   "dependencies": {
     "@react-pdf/renderer": "^3.4.4",
@@ -20,6 +25,7 @@
     "write-excel-file": "^4.0.6"
   },
   "devDependencies": {
+    "@playwright/test": "^1.61.0",
     "@types/node": "^20.14.10",
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",

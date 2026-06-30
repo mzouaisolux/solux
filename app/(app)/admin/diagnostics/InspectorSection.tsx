@@ -483,54 +483,41 @@ function InspectorShell({
   children?: React.ReactNode;
 }) {
   return (
-    <section className="panel p-5 space-y-4">
-      <div>
-        <div className="eyebrow">Inspect · why is this in this state?</div>
-        <h2 className="text-base font-semibold text-neutral-900 mt-0.5">
-          Per-entity deep dive
-        </h2>
-        <p className="text-[11px] text-neutral-500 mt-1 max-w-2xl">
-          Paste a UUID or a number (e.g.{" "}
-          <code className="font-mono">SLX-ETF-26-001</code>) and the
-          inspector resolves the entity, its related rows across docs /
-          task lists / POs / client, and the unified event timeline.
-        </p>
+    <>
+      <div className="sx-micro" style={{ margin: "22px 0 8px" }}>
+        Entity inspector
       </div>
+      <p className="ad-lead" style={{ marginBottom: 10 }}>
+        Paste an ID — a UUID or a number (e.g. <code>SLX-ETF-26-001</code>) — and the inspector resolves the
+        entity, its related rows across docs / task lists / POs / client, and the unified event timeline.
+      </p>
 
       {/* GET form — no JS, browser-native navigation. The ?q= param
           re-renders the section with the result. */}
-      <form
-        method="GET"
-        action="/admin/diagnostics"
-        className="flex items-center gap-2"
-      >
-        <input
-          type="text"
-          name="q"
-          defaultValue={q ?? ""}
-          placeholder="Paste a UUID or document/task list/PO number…"
-          className="flex-1 rounded-md border border-neutral-300 px-3 py-2 text-sm font-mono"
-          autoComplete="off"
-          spellCheck={false}
-        />
-        <button
-          type="submit"
-          className="rounded-md border border-neutral-900 bg-neutral-900 text-white px-3 py-2 text-xs font-semibold hover:bg-neutral-800 transition-colors"
-        >
-          Inspect
-        </button>
-        {q && (
-          <Link
-            href="/admin/diagnostics"
-            className="rounded-md border border-neutral-200 bg-white px-3 py-2 text-xs text-neutral-700 hover:bg-neutral-50 transition-colors"
-          >
-            Clear
-          </Link>
-        )}
-      </form>
+      <div className="card ad-sub-block">
+        <form method="GET" action="/admin/diagnostics" className="ad-insp-row">
+          <input
+            type="text"
+            name="q"
+            defaultValue={q ?? ""}
+            placeholder="Paste an entity ID (UUID or reference, e.g. SLX-ETF-26-001)"
+            className="ad-mono"
+            autoComplete="off"
+            spellCheck={false}
+          />
+          <button type="submit" className="sx-btn sx-btn-ink">
+            Inspect
+          </button>
+          {q && (
+            <Link href="/admin/diagnostics" className="sx-btn">
+              Clear
+            </Link>
+          )}
+        </form>
+      </div>
 
-      {children}
-    </section>
+      <div style={{ marginTop: 14 }}>{children}</div>
+    </>
   );
 }
 

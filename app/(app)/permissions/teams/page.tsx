@@ -3,9 +3,7 @@ import { listAssignableOwners } from "@/lib/owner";
 import {
   ACCESS_TYPES,
   LENS_INFO,
-  TONE_BADGE,
   grantChipLabel,
-  grantTone,
   visibilitySummary,
   type AccessTypeKey,
 } from "@/lib/access-labels";
@@ -18,6 +16,23 @@ import {
   addGrant,
   removeGrant,
 } from "./actions";
+
+/** Map a grant's scope_type → the mockup's grant-chip variant. */
+function chipVariant(scopeType: string): string {
+  return scopeType === "all"
+    ? "everyone"
+    : scopeType === "region"
+      ? "region"
+      : scopeType === "team"
+        ? "team"
+        : "";
+}
+
+const CHECK_SVG = (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round">
+    <polyline points="20 6 9 17 4 12" />
+  </svg>
+);
 
 /**
  * Teams & Access — the visibility (who-can-SEE-what) admin (m067, Phase 2a).
@@ -35,12 +50,6 @@ import {
  * is safe to use incrementally. All business wording lives in
  * lib/access-labels.ts so the page stays declarative.
  */
-
-const LABEL = "text-[10px] font-semibold uppercase tracking-wider text-neutral-500";
-const INPUT =
-  "rounded-md border border-neutral-200 px-2.5 py-1.5 text-sm focus:border-solux focus:outline-none focus:ring-1 focus:ring-solux/40";
-const BTN =
-  "rounded-md bg-neutral-900 text-white px-3 py-1.5 text-xs font-medium hover:bg-neutral-800";
 
 export default async function TeamsAccessPage() {
   const supabase = createClient();
@@ -97,301 +106,254 @@ export default async function TeamsAccessPage() {
   const typeKeys = Object.keys(ACCESS_TYPES) as AccessTypeKey[];
 
   return (
-    <div className="mx-auto max-w-screen-2xl px-6 py-8 space-y-6">
-      <div>
-        <div className="eyebrow">Permissions · Visibility</div>
-        <h1 className="doc-title mt-1">Teams &amp; access</h1>
-        <p className="text-xs text-neutral-500 mt-2 max-w-2xl leading-relaxed">
-          Decide who can <b>see</b> what (kept separate from who can <b>do</b>{" "}
-          what). Each person&apos;s visibility is the <b>sum</b> of the access
-          rules you give them. Until someone has a rule, they keep the default —
-          management sees everything, salespeople see their own — so you can roll
-          this out one person at a time.
-        </p>
-      </div>
+    <div className="solux-pro sx-page">
+      <div className="sx-wrap">
+        {/* HEADER + HOW VISIBILITY WORKS */}
+        <section className="card sec ad-section">
+          <div className="eyebrow">Permissions · Visibility</div>
+          <h2 className="ad-doc-title">Teams &amp; access</h2>
+          <p className="ad-lead">
+            Decide who can <b>see</b> what (kept separate from who can <b>do</b> what). Each person&apos;s
+            visibility is the <b>sum</b> of the access rules you give them. Until someone has a rule, they
+            keep the default — management sees everything, salespeople see their own — so you can roll this
+            out one person at a time.
+          </p>
 
-      {m067Missing && (
-        <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-          Visibility tables not found — apply migration{" "}
-          <b>m067 (067_visibility_scopes.sql)</b> in Supabase, then reload.
-        </div>
-      )}
+          {m067Missing && (
+            <div className="ad-callout warn">
+              Visibility tables not found — apply migration <b>m067 (067_visibility_scopes.sql)</b> in
+              Supabase, then reload.
+            </div>
+          )}
+          {users.length === 0 && !m067Missing && (
+            <div className="ad-callout">
+              No users returned by <code>list_assignable_owners()</code> — apply migration <b>m066</b> (and
+              ensure you&apos;re on a management role).
+            </div>
+          )}
 
-      {users.length === 0 && !m067Missing && (
-        <div className="rounded-md border border-neutral-200 bg-neutral-50 px-3 py-2 text-sm text-neutral-600">
-          No users returned by <code>list_assignable_owners()</code> — apply
-          migration <b>m066</b> (and ensure you&apos;re on a management role).
-        </div>
-      )}
-
-      {/* ---------------- HOW VISIBILITY WORKS (legend) ---------------- */}
-      <section className="panel p-5 space-y-3">
-        <div className="eyebrow">How visibility works</div>
-        <p className="text-xs text-neutral-500 -mt-1 max-w-2xl">
-          The five kinds of access, from the widest to the narrowest. Give a
-          person whichever ones match their job — you can combine several.
-        </p>
-        <div className="grid gap-2.5 sm:grid-cols-2 xl:grid-cols-3">
-          {typeKeys.map((k) => {
-            const info = ACCESS_TYPES[k];
-            return (
-              <div
-                key={k}
-                className={`rounded-md border p-3 ${TONE_BADGE[info.tone]}`}
-              >
-                <div className="text-sm font-semibold">{info.label}</div>
-                <p className="mt-1 text-[12px] leading-relaxed opacity-90">
-                  {info.help}
-                </p>
-                <p className="mt-1.5 text-[11px] italic opacity-70">
-                  e.g. {info.example}
-                </p>
-              </div>
-            );
-          })}
-        </div>
-        <div className="rounded-md border border-neutral-200 bg-neutral-50/60 p-3">
-          <div className="text-[10px] font-semibold uppercase tracking-wider text-neutral-500">
-            What each department sees
+          <div className="sx-micro" style={{ margin: "18px 0 8px" }}>
+            How visibility works
           </div>
-          <div className="mt-1.5 grid gap-1.5 sm:grid-cols-3">
-            {(Object.keys(LENS_INFO) as (keyof typeof LENS_INFO)[]).map((k) => (
-              <div key={k} className="text-[12px] text-neutral-600">
-                <b className="text-neutral-800">{LENS_INFO[k].label}</b>:{" "}
-                {LENS_INFO[k].sees.join(", ")}.
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* ---------------- TEAMS ---------------- */}
-      <section className="panel p-5 space-y-4">
-        <div className="flex items-baseline justify-between gap-3">
-          <div>
-            <div className="eyebrow">Teams &amp; regions</div>
-            <p className="text-xs text-neutral-500 mt-1 max-w-xl">
-              Group people so you can grant access to a whole team at once. A{" "}
-              <b>region</b> bundles accounts by geography; a <b>team</b> bundles
-              salespeople under a manager; a <b>department</b> is a back-office
-              function (Production, Finance, Logistics).
-            </p>
-          </div>
-          <span className="text-[11px] text-neutral-400 tabular-nums whitespace-nowrap">
-            {teams.length} total
-          </span>
-        </div>
-
-        {/* Create team */}
-        <form
-          action={createTeam}
-          className="flex flex-wrap items-end gap-2 rounded-md border border-neutral-200 bg-neutral-50/60 p-3"
-        >
-          <label className="block">
-            <span className={LABEL}>Name</span>
-            <input name="name" required placeholder="Africa / TLM-North / Finance" className={`${INPUT} mt-1 w-56`} />
-          </label>
-          <label className="block">
-            <span className={LABEL}>Kind</span>
-            <select name="kind" className={`${INPUT} mt-1`} defaultValue="team">
-              <option value="team">Team</option>
-              <option value="region">Region</option>
-              <option value="department">Department</option>
-            </select>
-          </label>
-          <label className="block">
-            <span className={LABEL}>Parent region (optional)</span>
-            <select name="parent_team_id" className={`${INPUT} mt-1`} defaultValue="__none__">
-              <option value="__none__">— none —</option>
-              {regions.map((r) => (
-                <option key={r.id} value={r.id}>
-                  {r.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <button className={BTN} disabled={m067Missing}>
-            + Create team
-          </button>
-        </form>
-
-        {/* Team list */}
-        <div className="space-y-3">
-          {teams.length === 0 ? (
-            <p className="text-xs text-neutral-400">No teams yet.</p>
-          ) : (
-            teams.map((t) => {
-              const members = membersByTeam.get(t.id) ?? [];
+          <div className="ad-lens-grid">
+            {typeKeys.map((k) => {
+              const info = ACCESS_TYPES[k];
               return (
-                <div key={t.id} className="rounded-md border border-neutral-200 p-3">
-                  <div className="flex items-center justify-between gap-3 flex-wrap">
-                    <div className="flex items-center gap-2">
-                      <span className="font-medium text-neutral-900">{t.name}</span>
-                      <span className="rounded bg-neutral-100 px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-neutral-600">
-                        {t.kind}
-                      </span>
-                      {t.parent_team_id && (
-                        <span className="text-[11px] text-neutral-400">
-                          in {teamName(t.parent_team_id)}
-                        </span>
-                      )}
-                    </div>
-                    <form action={deleteTeam}>
-                      <input type="hidden" name="id" value={t.id} />
-                      <button className="text-[11px] text-neutral-400 hover:text-rose-600">
-                        Delete team
-                      </button>
-                    </form>
-                  </div>
-
-                  {/* Members */}
-                  <div className="mt-2 flex flex-wrap gap-1.5">
-                    {members.length === 0 ? (
-                      <span className="text-[11px] text-neutral-400">No members.</span>
-                    ) : (
-                      members.map((m) => (
-                        <span
-                          key={m.user_id}
-                          className="inline-flex items-center gap-1 rounded-full border border-neutral-200 bg-white px-2 py-0.5 text-[11px]"
-                        >
-                          {userName(m.user_id)}
-                          {m.member_role === "manager" && (
-                            <span className="text-[9px] uppercase text-solux font-semibold">
-                              mgr
-                            </span>
-                          )}
-                          <form action={removeTeamMember} className="inline">
-                            <input type="hidden" name="team_id" value={t.id} />
-                            <input type="hidden" name="user_id" value={m.user_id} />
-                            <button className="text-neutral-300 hover:text-rose-600" aria-label="Remove">
-                              ✕
-                            </button>
-                          </form>
-                        </span>
-                      ))
-                    )}
-                  </div>
-
-                  {/* Add member */}
-                  <form action={addTeamMember} className="mt-2 flex flex-wrap items-end gap-2">
-                    <input type="hidden" name="team_id" value={t.id} />
-                    <select name="user_id" className={INPUT} required defaultValue="">
-                      <option value="" disabled>
-                        Add member…
-                      </option>
-                      {users.map((u) => (
-                        <option key={u.id} value={u.id}>
-                          {u.name}
-                          {u.role ? ` · ${u.role}` : ""}
-                        </option>
-                      ))}
-                    </select>
-                    <select name="member_role" className={INPUT} defaultValue="member">
-                      <option value="member">Member</option>
-                      <option value="manager">Manager</option>
-                    </select>
-                    <button className="rounded-md border border-neutral-300 bg-white px-2.5 py-1.5 text-xs font-medium hover:bg-neutral-50">
-                      Add
-                    </button>
-                  </form>
+                <div key={k} className={`ad-lens ${k === "all" ? "broad" : "mid"}`}>
+                  <div className="ll">{info.label}</div>
+                  <div className="lh">{info.help}</div>
+                  <div className="le">e.g. {info.example}</div>
                 </div>
               );
-            })
-          )}
-        </div>
-      </section>
+            })}
+          </div>
 
-      {/* ---------------- VISIBILITY ACCESS (per person) ---------------- */}
-      <section className="panel p-5 space-y-4">
-        <div className="eyebrow">Visibility access (per person)</div>
-        <p className="text-xs text-neutral-500 -mt-1 max-w-2xl">
-          For each person, the <b>Can currently see</b> line shows — in plain
-          English — exactly what their rules add up to. Add a rule below; remove
-          one with the ✕ on its chip.
-        </p>
-
-        <div className="space-y-2.5">
-          {users.map((u) => {
-            const grants = grantsByUser.get(u.id) ?? [];
-            const seeBullets = visibilitySummary(
-              grants.map((g) => ({
-                scope_type: g.scope_type,
-                team_id: g.team_id,
-                lens_key: g.lens_key,
-              })),
-              teamName
-            );
-            const isDefault = grants.length === 0;
-            return (
-              <div key={u.id} className="rounded-md border border-neutral-200 p-3">
-                {/* Person header + their access-rule chips */}
-                <div className="flex items-start justify-between gap-3 flex-wrap">
-                  <div className="min-w-0">
-                    <span className="text-sm font-medium text-neutral-900">
-                      {u.name}
-                    </span>
-                    {u.role && (
-                      <span className="ml-2 text-[11px] text-neutral-400 uppercase tracking-wider">
-                        {u.role}
-                      </span>
-                    )}
-                  </div>
-                  <div className="flex flex-wrap items-center gap-1.5 justify-end">
-                    {isDefault ? (
-                      <span className="rounded-full border border-neutral-200 bg-neutral-100 px-2 py-0.5 text-[11px] text-neutral-600">
-                        Role default
-                      </span>
-                    ) : (
-                      grants.map((g) => (
-                        <span
-                          key={g.id}
-                          className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] ${
-                            TONE_BADGE[grantTone(g.scope_type)]
-                          }`}
-                        >
-                          {grantChipLabel(g.scope_type, teamName(g.team_id), g.lens_key)}
-                          <form action={removeGrant} className="inline">
-                            <input type="hidden" name="id" value={g.id} />
-                            <button
-                              className="opacity-50 hover:opacity-100 hover:text-rose-700"
-                              aria-label="Remove access rule"
-                            >
-                              ✕
-                            </button>
-                          </form>
-                        </span>
-                      ))
-                    )}
-                  </div>
+          <div className="card ad-sub-block" style={{ marginTop: 14 }}>
+            <div className="ad-mini-h">What each department sees</div>
+            <div style={{ marginTop: 8, display: "grid", gap: 6, gridTemplateColumns: "repeat(3, minmax(0, 1fr))" }}>
+              {(Object.keys(LENS_INFO) as (keyof typeof LENS_INFO)[]).map((k) => (
+                <div key={k} style={{ fontSize: 12, color: "var(--sx-mute)" }}>
+                  <b style={{ color: "var(--sx-ink-soft)" }}>{LENS_INFO[k].label}</b>: {LENS_INFO[k].sees.join(", ")}.
                 </div>
+              ))}
+            </div>
+          </div>
+        </section>
 
-                {/* Live "can currently see" summary */}
-                <div className="mt-2 rounded-md bg-neutral-50 border border-neutral-100 px-3 py-2">
-                  <div className="text-[10px] font-semibold uppercase tracking-wider text-neutral-400">
-                    Can currently see
+        {/* TEAMS & REGIONS */}
+        <section className="card sec ad-section">
+          <div className="sechead">
+            <div>
+              <div className="sx-micro">Teams &amp; regions</div>
+              <p className="ad-lead">
+                Group people so you can grant access to a whole team at once. A <b>region</b> bundles
+                accounts by geography; a <b>team</b> bundles salespeople under a manager; a{" "}
+                <b>department</b> is a back-office function (Production, Finance, Logistics).
+              </p>
+            </div>
+            <span className="right ad-mono">{teams.length} total</span>
+          </div>
+
+          {/* Create team */}
+          <form
+            action={createTeam}
+            className="card ad-subform"
+            style={{ display: "flex", flexWrap: "wrap", alignItems: "flex-end", gap: 10, marginTop: 12 }}
+          >
+            <div className="ad-field" style={{ margin: 0 }}>
+              <label className="ad-fl">Name</label>
+              <input name="name" type="text" required placeholder="Africa / TLM-North / Finance" style={{ width: 224 }} />
+            </div>
+            <div className="ad-field" style={{ margin: 0 }}>
+              <label className="ad-fl">Kind</label>
+              <select name="kind" defaultValue="team" style={{ width: "auto" }}>
+                <option value="team">Team</option>
+                <option value="region">Region</option>
+                <option value="department">Department</option>
+              </select>
+            </div>
+            <div className="ad-field" style={{ margin: 0 }}>
+              <label className="ad-fl">Parent region (optional)</label>
+              <select name="parent_team_id" defaultValue="__none__" style={{ width: "auto" }}>
+                <option value="__none__">— none —</option>
+                {regions.map((r) => (
+                  <option key={r.id} value={r.id}>
+                    {r.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <button className="sx-btn sx-btn-ink" disabled={m067Missing}>
+              + Create team
+            </button>
+          </form>
+
+          {/* Team list */}
+          <div style={{ marginTop: 12 }}>
+            {teams.length === 0 ? (
+              <p className="ad-lead">No teams yet.</p>
+            ) : (
+              teams.map((t) => {
+                const members = membersByTeam.get(t.id) ?? [];
+                return (
+                  <div key={t.id} className="ad-cond-card">
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+                      <div className="ad-bank-top">
+                        <span style={{ fontSize: 14, fontWeight: 700 }}>{t.name}</span>
+                        <span className="ad-tag">{t.kind}</span>
+                        {t.parent_team_id && (
+                          <span style={{ fontSize: 11, color: "var(--sx-mute-2)" }}>in {teamName(t.parent_team_id)}</span>
+                        )}
+                      </div>
+                      <form action={deleteTeam}>
+                        <input type="hidden" name="id" value={t.id} />
+                        <button className="sx-btn sx-btn-danger sx-btn-sm">Delete team</button>
+                      </form>
+                    </div>
+
+                    {/* Members */}
+                    <div style={{ marginTop: 10, display: "flex", flexWrap: "wrap", gap: 6 }}>
+                      {members.length === 0 ? (
+                        <span style={{ fontSize: 11, color: "var(--sx-mute-2)" }}>No members.</span>
+                      ) : (
+                        members.map((m) => (
+                          <span key={m.user_id} className="ad-grant-chip">
+                            {userName(m.user_id)}
+                            {m.member_role === "manager" && (
+                              <span style={{ fontSize: 9, textTransform: "uppercase", color: "var(--sx-green-deep)", fontWeight: 700 }}>
+                                mgr
+                              </span>
+                            )}
+                            <form action={removeTeamMember} style={{ display: "inline" }}>
+                              <input type="hidden" name="team_id" value={t.id} />
+                              <input type="hidden" name="user_id" value={m.user_id} />
+                              <button className="x" aria-label="Remove">
+                                ✕
+                              </button>
+                            </form>
+                          </span>
+                        ))
+                      )}
+                    </div>
+
+                    {/* Add member */}
+                    <form action={addTeamMember} className="ad-inline-form" style={{ marginTop: 10 }}>
+                      <input type="hidden" name="team_id" value={t.id} />
+                      <select name="user_id" required defaultValue="">
+                        <option value="" disabled>
+                          Add member…
+                        </option>
+                        {users.map((u) => (
+                          <option key={u.id} value={u.id}>
+                            {u.name}
+                            {u.role ? ` · ${u.role}` : ""}
+                          </option>
+                        ))}
+                      </select>
+                      <select name="member_role" defaultValue="member">
+                        <option value="member">Member</option>
+                        <option value="manager">Manager</option>
+                      </select>
+                      <button className="sx-btn sx-btn-sm">Add</button>
+                    </form>
                   </div>
-                  <ul className="mt-1 space-y-0.5">
-                    {seeBullets.map((b, i) => (
-                      <li
-                        key={i}
-                        className="flex items-start gap-1.5 text-[12px] text-neutral-700"
-                      >
-                        <span className="text-emerald-600 mt-px">✓</span>
-                        <span>{b}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
+                );
+              })
+            )}
+          </div>
+        </section>
 
-                {/* Add an access rule (conditional, self-explaining form). */}
-                {!m067Missing && (
-                  <GrantForm userId={u.id} teams={teams} action={addGrant} />
-                )}
-              </div>
-            );
-          })}
-        </div>
-      </section>
+        {/* VISIBILITY ACCESS (per person) */}
+        <section className="card sec ad-section">
+          <div className="sx-micro">Per-person access rules</div>
+          <p className="ad-lead">
+            For each person, the <b>Can currently see</b> line shows — in plain English — exactly what their
+            rules add up to. Add a rule below; remove one with the ✕ on its chip.
+          </p>
+
+          <div style={{ marginTop: 12 }}>
+            {users.map((u) => {
+              const grants = grantsByUser.get(u.id) ?? [];
+              const seeBullets = visibilitySummary(
+                grants.map((g) => ({
+                  scope_type: g.scope_type,
+                  team_id: g.team_id,
+                  lens_key: g.lens_key,
+                })),
+                teamName
+              );
+              const isDefault = grants.length === 0;
+              return (
+                <div key={u.id} className="ad-access-card">
+                  <div className="ad-access-head">
+                    <div>
+                      <span className="who">{u.name}</span>
+                      {u.role && <span className="role-k">{u.role}</span>}
+                    </div>
+                    <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 6, justifyContent: "flex-end" }}>
+                      {isDefault ? (
+                        <span className="ad-grant-chip">Role default</span>
+                      ) : (
+                        grants.map((g) => (
+                          <span key={g.id} className={`ad-grant-chip ${chipVariant(g.scope_type)}`}>
+                            {grantChipLabel(g.scope_type, teamName(g.team_id), g.lens_key)}
+                            <form action={removeGrant} style={{ display: "inline" }}>
+                              <input type="hidden" name="id" value={g.id} />
+                              <button className="x" aria-label="Remove access rule">
+                                ✕
+                              </button>
+                            </form>
+                          </span>
+                        ))
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Live "can currently see" summary */}
+                  <div className="ad-cansee">
+                    <div className="lbl">Can currently see</div>
+                    <ul>
+                      {seeBullets.map((b, i) => (
+                        <li key={i}>
+                          <span className="ok">{CHECK_SVG}</span>
+                          <span>{b}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+
+                  {/* Add an access rule (conditional, self-explaining form). */}
+                  {!m067Missing && (
+                    <div style={{ marginTop: 11 }}>
+                      <GrantForm userId={u.id} teams={teams} action={addGrant} />
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      </div>
     </div>
   );
 }

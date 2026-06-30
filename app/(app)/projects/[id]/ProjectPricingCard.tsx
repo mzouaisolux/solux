@@ -1,17 +1,22 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useFormStatus } from "react-dom";
 import { computeSectionPrice, fmtMarginPct } from "@/lib/project-pricing";
 import { setProjectPricing } from "../actions";
 import { toast } from "@/components/feedback/toast-store";
 
-function PricingSubmit() {
+function PricingSubmit({ ready }: { ready: boolean }) {
   const { pending } = useFormStatus();
+  // `ready` guards the brief pre-hydration window: a <form action={fn}> with a
+  // CLIENT function isn't wired until React hydrates, so an early click would
+  // submit natively and silently do nothing (the first-click no-op bug).
+  // Disabling until mounted guarantees the first click always registers.
+  const disabled = pending || !ready;
   return (
-    <button disabled={pending} className="btn-primary disabled:opacity-60">
-      {pending ? "Approving…" : "Approve pricing →"}
+    <button disabled={disabled} className="sx-btn sx-btn-go disabled:opacity-60">
+      {pending ? "Approving…" : ready ? "Approve pricing →" : "Preparing…"}
     </button>
   );
 }
@@ -71,6 +76,10 @@ export default function ProjectPricingCard({
   const [pc, setPc] = useState(defaults.productCommission != null ? String(defaults.productCommission) : "0");
   const [polem, setPolem] = useState(defaults.poleMargin != null ? String(defaults.poleMargin) : "12");
   const [polec, setPolec] = useState(defaults.poleCommission != null ? String(defaults.poleCommission) : "0");
+  // Hydration guard for the submit button (see PricingSubmit) — prevents the
+  // first-click-does-nothing race on the client-action form.
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
 
   const num = (s: string) => Number((s || "").replace(",", ".")) || 0;
   const money = (n: number) => `$${n.toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
@@ -272,7 +281,7 @@ export default function ProjectPricingCard({
           </div>
         ) : (
           <div className="space-y-1">
-            <PricingSubmit />
+            <PricingSubmit ready={mounted} />
             {err && <p className="text-sm text-rose-600">{err}</p>}
           </div>
         ))}

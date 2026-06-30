@@ -76,7 +76,24 @@ function commercialChip(a: AffairGroup): { label: string; cls: string } {
   return { label: "Draft", cls: "on" };
 }
 
-export function ClientAffairTree({ clients }: { clients: ClientAffairs[] }) {
+/** Live commercial stages — the "no deal sleeps" golden rule applies. */
+const GOLDEN_RULE_STATUSES = new Set([
+  "lead", "tender_review", "partner_selection", "opportunity", "quotation", "negotiation",
+]);
+
+export function ClientAffairTree({
+  clients,
+  openActionAffairIds,
+}: {
+  clients: ClientAffairs[];
+  /** affairs.id set with at least one OPEN planned action (golden-rule
+   *  enforcement in lists — Phase 2). Omitted = indicator hidden. */
+  openActionAffairIds?: string[];
+}) {
+  const openActionSet = useMemo(
+    () => new Set(openActionAffairIds ?? []),
+    [openActionAffairIds]
+  );
   const [q, setQ] = useState("");
   const filtered = useMemo(() => {
     const term = q.trim().toLowerCase();
@@ -104,14 +121,20 @@ export function ClientAffairTree({ clients }: { clients: ClientAffairs[] }) {
         </p>
       ) : (
         filtered.map((c) => (
-          <ClientNode key={c.clientId ?? "unlinked"} client={c} />
+          <ClientNode key={c.clientId ?? "unlinked"} client={c} openActionSet={openActionSet} />
         ))
       )}
     </div>
   );
 }
 
-function ClientNode({ client }: { client: ClientAffairs }) {
+function ClientNode({
+  client,
+  openActionSet,
+}: {
+  client: ClientAffairs;
+  openActionSet: Set<string>;
+}) {
   const [open, setOpen] = useState(false);
   const activeAffairs = client.affairs.filter(isActiveAffair);
   const activeCount = activeAffairs.length;
@@ -180,7 +203,7 @@ function ClientNode({ client }: { client: ClientAffairs }) {
                 <span className="right h-ver">Ver.</span>
               </div>
               {client.affairs.map((a) => (
-                <AffairNode key={a.anchorId} affair={a} />
+                <AffairNode key={a.anchorId} affair={a} openActionSet={openActionSet} />
               ))}
             </>
           )}
@@ -190,7 +213,21 @@ function ClientNode({ client }: { client: ClientAffairs }) {
   );
 }
 
-function AffairNode({ affair }: { affair: AffairGroup }) {
+function AffairNode({
+  affair,
+  openActionSet,
+}: {
+  affair: AffairGroup;
+  openActionSet: Set<string>;
+}) {
+  // Golden rule (Phase 2, enforced in LISTS too): a live deal with no
+  // open planned action is flagged red right on the row.
+  const sleeping =
+    affair.isRealAffair &&
+    !!affair.affairId &&
+    !affair.isArchived &&
+    GOLDEN_RULE_STATUSES.has(affair.lifecycleStatus ?? "") &&
+    !openActionSet.has(affair.affairId);
   const [open, setOpen] = useState(false);
   const op = affairOperationalStatus(affair);
   const stage = stageOf(affair);
@@ -244,6 +281,17 @@ function AffairNode({ affair }: { affair: AffairGroup }) {
             <div className="cli-next">
               <span className="arr">→</span> Next: <b>{affair.nextAction}</b>
             </div>
+          )}
+          {sleeping && (
+            <Link
+              href={`/affairs/${affair.affairId}`}
+              onClick={(e) => e.stopPropagation()}
+              className="cli-next"
+              style={{ color: "#be123c", fontWeight: 600 }}
+              title="Every live deal needs a next action with a date — plan it."
+            >
+              ⚠ No next action — plan one →
+            </Link>
           )}
         </div>
         {/* col 4 — amount */}

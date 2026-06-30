@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { getEffectiveRole } from "@/lib/auth";
+import { CommercialAnalytics } from "./CommercialAnalytics";
 import { resolveUserLabelStrings } from "@/lib/user-display";
 import { TaskListStatusBadge } from "@/components/TaskListWorkflow";
 import {
@@ -48,6 +49,10 @@ export default async function BusinessDashboardPage() {
       "id, number, total_price, currency, created_by, client_id, status, date, clients(company_name, country)"
     )
     .eq("status", "won")
+    // Revenue = won QUOTATIONS only. A proforma is the production command
+    // (carries production via its task list), never a separate won deal —
+    // counting it would double-count the affair.
+    .eq("type", "quotation")
     .is("archived_at", null);
   if (scopedToMe && userId) docsQuery = docsQuery.eq("created_by", userId);
   const { data: wonDocs } = await docsQuery;
@@ -555,6 +560,11 @@ export default async function BusinessDashboardPage() {
           )}
         </section>
       )}
+
+      {/* ---- Commercial analytics — evicted from the dashboard (Phase 2):
+           MTD KPIs, 12-month pipeline, win rate, team, geography, critical
+           events. The dashboard keeps ZERO analytics. ---- */}
+      <CommercialAnalytics />
     </div>
   );
 }

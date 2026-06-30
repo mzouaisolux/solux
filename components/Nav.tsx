@@ -11,6 +11,8 @@ import {
 import ViewAsSwitcher from "@/components/ViewAsSwitcher";
 import { hasUiCapability, type Capability } from "@/lib/permissions";
 import { navCapabilities, buildVisibleNavigation } from "@/lib/navigation";
+import { makeT, navKeyForEnglish, type Locale } from "@/lib/i18n";
+import { LanguageSwitcher } from "@/components/i18n/LanguageSwitcher";
 import { createClient } from "@/lib/supabase/server";
 import { getProjectActions } from "@/lib/project-queue";
 import { projectActionTotal } from "@/lib/project-dashboard";
@@ -26,6 +28,7 @@ export async function Nav({
   effectiveRole,
   isSuperAdmin,
   isSimulating,
+  locale,
 }: {
   /** Auth user id — drives the notification bell summary. */
   userId: string | null;
@@ -34,6 +37,8 @@ export async function Nav({
   effectiveRole: Role | null;
   isSuperAdmin: boolean;
   isSimulating: boolean;
+  /** Active UI language (resolved server-side). */
+  locale: Locale;
 }) {
   // Nav renders based on the EFFECTIVE role so the simulator previews what
   // other users would see. Server actions / page guards gate on the REAL
@@ -65,6 +70,28 @@ export async function Nav({
     technical: isTechnicalRole(role),
     finance: role === "finance",
   });
+
+  // i18n — translate the (English-config) menu via reverse-lookup so the
+  // central nav config stays untouched. Unknown strings pass through.
+  const t = makeT(locale);
+  const tr = (sx: string | undefined): string | undefined => {
+    if (!sx) return sx;
+    const k = navKeyForEnglish(sx);
+    return k ? t(k) : sx;
+  };
+  const localizedMenu = menu.map((cat) => ({
+    ...cat,
+    label: tr(cat.label) ?? cat.label,
+    groups: cat.groups.map((g) => ({
+      ...g,
+      title: tr(g.title) ?? g.title,
+      items: g.items.map((i) => ({
+        ...i,
+        label: tr(i.label) ?? i.label,
+        description: tr(i.description),
+      })),
+    })),
+  }));
 
   // Notification summary — counts unread comments on events the user
   // can see (RLS-scoped). Soft-fails to {0, []} on missing migrations
@@ -134,7 +161,7 @@ export async function Nav({
         {/* Top mega menu — permission-filtered server-side, rendered by the
             client component for hover/click panels. Defined centrally in
             lib/navigation.ts (label · route · capability · group · category). */}
-        <MegaMenu categories={menu} badges={badges} itemBadges={itemBadges} />
+        <MegaMenu categories={localizedMenu} badges={badges} itemBadges={itemBadges} />
         <div className="ml-auto flex items-center gap-[13px] text-[13px]">
           {email && (
             <span className="text-[#C3C0CD] text-[11.5px] hidden xl:inline">
@@ -170,6 +197,8 @@ export async function Nav({
               isSimulating={isSimulating}
             />
           )}
+
+          <LanguageSwitcher current={locale} />
 
           <form action={logout}>
             <button className="rounded-md border border-[#2C2C2F] px-3 py-1.5 text-[12.5px] text-[#DFDEE4] hover:text-white hover:border-[#444] transition-colors">

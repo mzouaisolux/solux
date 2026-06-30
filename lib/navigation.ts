@@ -44,7 +44,10 @@ export type NavVisibility =
   | { kind: "capability"; capability: Capability }
   | { kind: "adminLike" }
   | { kind: "technical" }
-  | { kind: "adminLikeOrFinance" };
+  | { kind: "adminLikeOrFinance" }
+  // admin/super_admin OR any of these capabilities (+ optionally finance).
+  // Anti-lockout: admins always pass even before the matrix is seeded.
+  | { kind: "capabilityOrAdmin"; capabilities: Capability[]; includeFinance?: boolean };
 
 export type NavItem = {
   label: string;
@@ -96,66 +99,74 @@ export const NAVIGATION: NavCategory[] = [
   {
     id: "clients-projects",
     label: "Clients & Projects",
+    href: "/clients",
     groups: [
       {
-        title: "Clients",
+        // FUTURE CLIENTS — future business not yet active customers. Tender
+        // rows are RLS-scoped (m108): a sales rep sees ONLY their assigned
+        // tenders here; a director/admin sees all — same pages, different rows.
+        title: "Future Clients",
         items: [
-          { label: "Clients", href: "/clients", visibility: { kind: "always" } },
           {
-            // Deep-links to the clients page and auto-opens the creation modal
-            // (handled in NewClientPanel via the `?new=1` param). No new access
-            // rule: client creation lives on /clients, which is `always`.
-            label: "New client",
-            href: "/clients?new=1",
-            visibility: { kind: "always" },
+            label: "Prospect Companies",
+            href: "/prospects?u=prospects&p=companies",
+            visibility: { kind: "capability", capability: "prospect.access" },
+          },
+          {
+            label: "Tender Inbox",
+            href: "/prospects?u=tenders",
+            visibility: { kind: "capability", capability: "prospect.access" },
+          },
+          {
+            label: "Tender Pipeline",
+            href: "/prospects/pipeline",
+            visibility: { kind: "capability", capability: "prospect.access" },
+            description: "Work accepted tenders to opportunity",
           },
         ],
       },
       {
-        title: "Business",
+        // CLIENTS & BUSINESS — active commercial work + the daily create
+        // actions, grouped because they belong to one revenue-generating flow.
+        title: "Clients & Business",
         items: [
+          { label: "Clients", href: "/clients", visibility: { kind: "always" } },
           {
-            label: "Business overview",
-            href: "/business",
+            // ?new=1 opens the create modal (handled in NewClientPanel).
+            label: "New client",
+            href: "/clients?new=1",
             visibility: { kind: "always" },
+          },
+          {
+            // No CRM opportunities list yet (the affairs list was retired) — for
+            // now this is the salesperson's OWN project requests (?mine=1). A
+            // real "My Opportunities" comes with the affair/pipeline CRM layer.
+            label: "My service requests",
+            href: "/projects?mine=1",
+            visibility: { kind: "always" },
+          },
+          {
+            label: "New service request",
+            href: "/projects/new",
+            visibility: { kind: "capability", capability: "project.create" },
           },
           {
             label: "New quotation",
             href: "/documents/new",
             visibility: { kind: "capability", capability: "quotation.create" },
           },
-          { label: "Forecast", href: "/forecast", visibility: { kind: "always" } },
         ],
       },
       {
-        // Custom-project / tender lifecycle (m090/m091). The list is
-        // `always`-visible (RLS scopes rows); the work-queue views mirror
-        // their page guards.
-        title: "Projects",
+        // REPORTING — both pages scope their own content (global for
+        // management, personal otherwise).
+        title: "Reporting",
         items: [
+          { label: "Forecast", href: "/forecast", visibility: { kind: "always" } },
           {
-            label: "Project Requests",
-            href: "/projects",
+            label: "Business overview",
+            href: "/business",
             visibility: { kind: "always" },
-            description: "Custom projects & tenders",
-          },
-          {
-            label: "Pending Approvals",
-            href: "/projects/approvals",
-            visibility: { kind: "capability", capability: "project.approve" },
-            description: "Awaiting director decision",
-          },
-          {
-            label: "Cost Requests",
-            href: "/projects/cost-requests",
-            visibility: { kind: "capability", capability: "project.view_cost" },
-            description: "Factory cost to enter",
-          },
-          {
-            label: "Logistics Requests",
-            href: "/projects/logistics-requests",
-            visibility: { kind: "capability", capability: "project.enter_logistics" },
-            description: "Packing & freight to enter",
           },
         ],
       },
@@ -166,6 +177,7 @@ export const NAVIGATION: NavCategory[] = [
   {
     id: "task-lists",
     label: "Task Lists",
+    href: "/task-lists",
     groups: [
       {
         title: "Task lists",
@@ -196,12 +208,6 @@ export const NAVIGATION: NavCategory[] = [
             href: "/factory-mapping",
             visibility: { kind: "capability", capability: "factory_mapping.access" },
             description: "Per-option factory instructions",
-          },
-          {
-            label: "Component mappings",
-            href: "/admin/components",
-            visibility: { kind: "technical" },
-            description: "Commercial → internal references",
           },
         ],
       },
@@ -241,6 +247,11 @@ export const NAVIGATION: NavCategory[] = [
             visibility: { kind: "always" },
           },
           {
+            label: "Finance — balances & LC",
+            href: "/finance",
+            visibility: { kind: "capability", capability: "finance.view" },
+          },
+          {
             label: "Archived",
             href: "/operations?scope=archived",
             visibility: { kind: "always" },
@@ -250,26 +261,58 @@ export const NAVIGATION: NavCategory[] = [
     ],
   },
 
-  // 5) Pricing — its own top-level category, split by single responsibility:
-  //    Catalog & costs (products / categories / cost entry) and Price lists
-  //    (create vs the Library management workspace).
+  // 5) Catalog — product master data: the catalog STRUCTURE that feeds
+  //    quotations and production task lists. Pulled OUT of "Pricing" (catalog
+  //    structure is not pricing) and given a first-level home so Categories is
+  //    discoverable. Each item mirrors its route's existing guard.
+  {
+    id: "catalog",
+    label: "Catalog",
+    groups: [
+      {
+        title: "Product catalog",
+        items: [
+          {
+            label: "Products",
+            href: "/admin/products",
+            visibility: { kind: "capabilityOrAdmin", capabilities: ["admin.manage_products", "admin.manage_categories"] },
+            description: "All products & SKUs",
+          },
+          {
+            label: "Categories",
+            href: "/admin/categories",
+            visibility: { kind: "adminLike" },
+            description: "Structure & config fields",
+          },
+          {
+            label: "Component mappings",
+            href: "/admin/components",
+            visibility: { kind: "technical" },
+            description: "Commercial → internal references",
+          },
+          {
+            label: "Templates",
+            href: "/admin/categories#templates",
+            visibility: { kind: "adminLike" },
+            description: "Reusable field sets",
+          },
+        ],
+      },
+    ],
+  },
+
+  // 6) Pricing — costs + price lists (catalog structure moved to Catalog).
   {
     id: "pricing",
     label: "Pricing",
     groups: [
       {
-        title: "Catalog & costs",
+        title: "Costs",
         items: [
-          {
-            label: "Product Catalog",
-            href: "/admin/products",
-            visibility: { kind: "adminLike" },
-            description: "Categories + products in one workspace",
-          },
           {
             label: "Cost Entry",
             href: "/cost-entry",
-            visibility: { kind: "adminLikeOrFinance" },
+            visibility: { kind: "capabilityOrAdmin", capabilities: ["pricing.manage_costs"], includeFinance: true },
             description: "Finance — RMB costs & versions",
           },
         ],
@@ -280,13 +323,13 @@ export const NAVIGATION: NavCategory[] = [
           {
             label: "Price Lists",
             href: "/admin/pricing",
-            visibility: { kind: "adminLike" },
+            visibility: { kind: "capabilityOrAdmin", capabilities: ["pricing.manage"] },
             description: "Create a new price list",
           },
           {
             label: "Price List Library",
             href: "/admin/pricing/library",
-            visibility: { kind: "adminLike" },
+            visibility: { kind: "capabilityOrAdmin", capabilities: ["pricing.manage"] },
             description: "Manage, assign & publish all lists",
           },
         ],
@@ -320,6 +363,12 @@ export const NAVIGATION: NavCategory[] = [
             visibility: { kind: "capability", capability: "admin.manage_permissions" },
             description: "Teams, members & scopes",
           },
+          {
+            label: "Event Registry",
+            href: "/admin/events",
+            visibility: { kind: "adminLike" },
+            description: "Every event & its consumers (notification, dashboard, KPI, audit)",
+          },
         ],
       },
       {
@@ -328,9 +377,9 @@ export const NAVIGATION: NavCategory[] = [
           {
             label: "Sales conditions",
             href: "/admin/sales-conditions",
-            visibility: { kind: "adminLike" },
+            visibility: { kind: "capabilityOrAdmin", capabilities: ["admin.manage_sales_conditions"] },
           },
-          { label: "Bank accounts", href: "/admin/banks", visibility: { kind: "adminLike" } },
+          { label: "Bank accounts", href: "/admin/banks", visibility: { kind: "capabilityOrAdmin", capabilities: ["admin.manage_banks"] } },
         ],
       },
       {
@@ -375,7 +424,9 @@ export type NavContext = {
 export function navCapabilities(): Capability[] {
   const set = new Set<Capability>();
   const visit = (v?: NavVisibility) => {
-    if (v && v.kind === "capability") set.add(v.capability);
+    if (!v) return;
+    if (v.kind === "capability") set.add(v.capability);
+    else if (v.kind === "capabilityOrAdmin") v.capabilities.forEach((c) => set.add(c));
   };
   for (const cat of NAVIGATION) {
     visit(cat.visibility);
@@ -398,6 +449,12 @@ export function isVisible(v: NavVisibility | undefined, ctx: NavContext): boolea
       return ctx.technical;
     case "adminLikeOrFinance":
       return ctx.adminLike || ctx.finance;
+    case "capabilityOrAdmin":
+      return (
+        ctx.adminLike ||
+        (!!v.includeFinance && ctx.finance) ||
+        v.capabilities.some((c) => ctx.granted.has(c))
+      );
   }
 }
 
@@ -418,10 +475,18 @@ export function buildVisibleNavigation(ctx: NavContext): NavCategory[] {
       }))
       .filter((g) => g.items.length > 0);
 
-    const directLinkVisible = !!cat.href && isVisible(cat.visibility, ctx);
+    // A pure direct-link category (no groups, e.g. Dashboard) shows on its own
+    // href. A category WITH groups is gated by its visible items only — its
+    // href is just the click target and must never force-show an empty section.
+    const directLinkVisible =
+      cat.groups.length === 0 && !!cat.href && isVisible(cat.visibility, ctx);
 
     if (groups.length > 0 || directLinkVisible) {
-      out.push({ ...cat, groups });
+      // Click target (Option A): the section's designated landing page, or —
+      // when none is set — its first visible item, so the click always lands
+      // on a page the user can actually open.
+      const href = cat.href ?? groups[0]?.items[0]?.href;
+      out.push({ ...cat, href, groups });
     }
   }
   return out;

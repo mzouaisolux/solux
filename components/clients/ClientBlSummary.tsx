@@ -2,44 +2,107 @@ import Link from "next/link";
 import {
   normalizeBlProfile,
   blDocumentCostByCurrency,
+  blProfileStatus,
+  blProfileMissingFields,
   type BlProfile,
 } from "@/lib/bl";
+import { RequestBlInfoButton } from "@/components/clients/RequestBlInfoButton";
 
 /**
  * Read-only summary of a client's Shipping / BL profile, shown on the
- * client detail page so the profile is visible without entering edit
- * mode. Renders an empty-state prompt (with an Edit link) when no
- * profile has been configured yet.
+ * client detail page AND in the Shipping & Logistics section of a
+ * production order.
  *
- * Pure presentational server component.
+ * BL workflow step (Sales → Operations): the block leads with a COMPUTED
+ * completeness badge — Ready (green) / Incomplete (orange) / Missing
+ * (red) — so Operations sees the booking blocker before the last minute.
+ * When `requestOrderId` is provided (production-order context), an
+ * incomplete profile shows the "Request information from Sales" button,
+ * which notifies + tasks the deal's sales owner and logs the request in
+ * the affair history.
+ *
+ * Server component; the request button posts a server action.
  */
 export function ClientBlSummary({
   clientId,
   rawProfile,
+  requestOrderId,
 }: {
   clientId: string;
   rawProfile: unknown;
+  /** Production order id — enables the "Request from Sales" button. */
+  requestOrderId?: string;
 }) {
   const configured = !!rawProfile && typeof rawProfile === "object";
   const profile: BlProfile = normalizeBlProfile(rawProfile);
   const includedDocs = profile.documents.filter((d) => d.included && d.label);
   const costByCur = blDocumentCostByCurrency(profile);
+  const status = blProfileStatus(profile);
+  const missing = blProfileMissingFields(profile);
+
+  const badge = {
+    complete: {
+      label: "BL Profile Ready",
+      cls: "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200",
+      dot: "bg-emerald-500",
+      text: "Shipping profile complete and ready for booking.",
+    },
+    partial: {
+      label: "BL Profile Incomplete",
+      cls: "bg-amber-50 text-amber-800 ring-1 ring-amber-300",
+      dot: "bg-amber-500",
+      text: "Some required shipping information is still missing.",
+    },
+    missing: {
+      label: "BL Profile Missing",
+      cls: "bg-rose-50 text-rose-700 ring-1 ring-rose-200",
+      dot: "bg-rose-500",
+      text: "Shipping information must be completed before shipment booking.",
+    },
+  }[status];
 
   return (
     <section className="panel p-4">
       <div className="flex items-start justify-between gap-3 mb-3">
         <div>
-          <div className="eyebrow">Shipping / BL profile</div>
-          <p className="text-[11px] text-neutral-500 mt-0.5">
-            Reusable parties + export-document checklist for this client.
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="eyebrow">Shipping / BL profile</div>
+            <span
+              className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${badge.cls}`}
+            >
+              <span className={`h-1.5 w-1.5 rounded-full ${badge.dot}`} aria-hidden />
+              {badge.label}
+            </span>
+          </div>
+          <p
+            className={`text-[11px] mt-1 ${
+              status === "complete"
+                ? "text-emerald-700"
+                : status === "partial"
+                  ? "text-amber-700"
+                  : "text-rose-700"
+            }`}
+          >
+            {badge.text}
+            {status !== "complete" && missing.length > 0 && (
+              <span className="text-neutral-500"> Missing: {missing.join(", ")}.</span>
+            )}
           </p>
         </div>
-        <Link
-          href={`/clients/${clientId}/edit#bl`}
-          className="text-[11px] text-neutral-600 hover:text-neutral-900 underline underline-offset-2 shrink-0"
-        >
-          {configured ? "Edit" : "Set up"} →
-        </Link>
+        <div className="flex shrink-0 items-center gap-2">
+          {status !== "complete" && requestOrderId && (
+            <RequestBlInfoButton
+              orderId={requestOrderId}
+              tone={status === "missing" ? "missing" : "partial"}
+            />
+          )}
+          <Link
+            href={`/clients/${clientId}/edit#bl`}
+            className="text-[11px] text-neutral-600 hover:text-neutral-900 underline underline-offset-2 shrink-0"
+          >
+            {configured ? "Edit" : "Set up"} →
+          </Link>
+        </div>
       </div>
 
       {!configured ? (

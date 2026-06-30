@@ -83,10 +83,10 @@ export default function PricingActionsClient({
 
   return (
     <div className="flex flex-wrap items-center gap-3">
-      <button onClick={onPublish} disabled={pending || totalCount === 0} className="btn-primary disabled:opacity-50">
+      <button onClick={onPublish} disabled={pending || totalCount === 0} className="sx-btn sx-btn-go disabled:opacity-50">
         {pending ? "Publishing…" : "Publish to quotes →"}
       </button>
-      <button onClick={onExport} className="btn-secondary">
+      <button onClick={onExport} className="sx-btn">
         ↓ Export CSV
       </button>
       {msg && <span className="text-sm text-emerald-700">{msg}</span>}

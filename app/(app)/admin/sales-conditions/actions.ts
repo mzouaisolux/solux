@@ -1,7 +1,7 @@
 "use server";
 
 import { createClient } from "@/lib/supabase/server";
-import { requireAdmin } from "@/lib/auth";
+import { requireCapabilityOrAdmin } from "@/lib/permissions";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
@@ -16,7 +16,7 @@ async function clearDefaults(supabase: ReturnType<typeof createClient>) {
 }
 
 export async function createSalesCondition(formData: FormData) {
-  await requireAdmin();
+  await requireCapabilityOrAdmin("admin.manage_sales_conditions");
   const supabase = createClient();
 
   const title = str(formData, "title");
@@ -38,7 +38,7 @@ export async function createSalesCondition(formData: FormData) {
 }
 
 export async function updateSalesCondition(formData: FormData) {
-  await requireAdmin();
+  await requireCapabilityOrAdmin("admin.manage_sales_conditions");
   const id = String(formData.get("id"));
   if (!id) throw new Error("Missing id");
 
@@ -62,7 +62,7 @@ export async function updateSalesCondition(formData: FormData) {
 }
 
 export async function deleteSalesCondition(formData: FormData) {
-  await requireAdmin();
+  await requireCapabilityOrAdmin("admin.manage_sales_conditions");
   const id = String(formData.get("id"));
   if (!id) throw new Error("Missing id");
 
@@ -74,7 +74,7 @@ export async function deleteSalesCondition(formData: FormData) {
 }
 
 export async function setDefaultSalesCondition(formData: FormData) {
-  await requireAdmin();
+  await requireCapabilityOrAdmin("admin.manage_sales_conditions");
   const id = String(formData.get("id"));
   if (!id) throw new Error("Missing id");
 

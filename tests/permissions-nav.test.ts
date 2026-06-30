@@ -91,6 +91,7 @@ test("super-admin (all caps, admin-like) sees every category", () => {
     "clients-projects",
     "task-lists",
     "orders",
+    "catalog",
     "pricing",
     "admin",
   ]);
@@ -128,8 +129,19 @@ test("Task List Manager with factory_mapping.access sees Factory mapping", () =>
   assert.ok(factoryGroup, "Factory configuration group should appear for TLM");
   const labels = factoryGroup!.items.map((i) => i.label);
   assert.ok(labels.includes("Factory mapping"));
-  // Component mappings is technical-role gated; TLM is technical → visible.
-  assert.ok(labels.includes("Component mappings"));
+  // Component mappings moved to the Catalog category (still technical-gated):
+  // it must NOT remain under Factory configuration, and it MUST appear in Catalog.
+  assert.ok(
+    !labels.includes("Component mappings"),
+    "Component mappings no longer lives under Factory configuration"
+  );
+  const catalog = cats.find((c) => c.id === "catalog");
+  assert.ok(catalog, "Catalog category shows for a technical TLM (Component mappings)");
+  const catalogLabels = catalog!.groups.flatMap((g) => g.items.map((i) => i.label));
+  assert.ok(
+    catalogLabels.includes("Component mappings"),
+    "Component mappings now lives under Catalog"
+  );
 });
 
 test("finance sees Pricing only via Cost entry (mirrors the route guards)", () => {
@@ -138,4 +150,61 @@ test("finance sees Pricing only via Cost entry (mirrors the route guards)", () =
   assert.ok(pricing, "finance should see Pricing (Cost entry is finance-allowed)");
   const labels = pricing!.groups.flatMap((g) => g.items.map((i) => i.label));
   assert.deepEqual(labels, ["Cost Entry"], "finance sees only Cost Entry under Pricing");
+});
+
+/* ------------------------------------------------------------------ */
+/*  Phase 3B — capability → menu delegation (capabilityOrAdmin kind).   */
+/*  The 4 owner-required scenarios, at the resolver level.              */
+/* ------------------------------------------------------------------ */
+
+import { isVisible } from "../lib/navigation.ts";
+
+const pricingItem = () => {
+  for (const cat of NAVIGATION)
+    for (const g of cat.groups)
+      for (const i of g.items)
+        if (i.href === "/admin/pricing") return i;
+  throw new Error("pricing item not found");
+};
+const costEntryItem = () => {
+  for (const cat of NAVIGATION)
+    for (const g of cat.groups)
+      for (const i of g.items)
+        if (i.href === "/cost-entry") return i;
+  throw new Error("cost-entry item not found");
+};
+
+test("delegated role WITH pricing.manage sees Price Lists; WITHOUT does not", () => {
+  const item = pricingItem();
+  const withCap = { granted: new Set(["pricing.manage"]) as Set<any>, adminLike: false, technical: false, finance: false };
+  const without = { granted: new Set() as Set<any>, adminLike: false, technical: false, finance: false };
+  assert.equal(isVisible(item.visibility, withCap), true);
+  assert.equal(isVisible(item.visibility, without), false);
+});
+
+test("admin/super_admin see pricing even with an EMPTY matrix (anti-lockout)", () => {
+  const item = pricingItem();
+  const admin = { granted: new Set() as Set<any>, adminLike: true, technical: false, finance: false };
+  assert.equal(isVisible(item.visibility, admin), true);
+});
+
+test("finance still sees Cost Entry (includeFinance), and so does pricing.manage_costs", () => {
+  const item = costEntryItem();
+  const finance = { granted: new Set() as Set<any>, adminLike: false, technical: false, finance: true };
+  const delegated = { granted: new Set(["pricing.manage_costs"]) as Set<any>, adminLike: false, technical: false, finance: false };
+  const sales = { granted: new Set() as Set<any>, adminLike: false, technical: false, finance: false };
+  assert.equal(isVisible(item.visibility, finance), true);
+  assert.equal(isVisible(item.visibility, delegated), true);
+  assert.equal(isVisible(item.visibility, sales), false);
+});
+
+test("all 6 Phase 3B capabilities are referenced by the menu (binding intact)", () => {
+  const caps = new Set(navCapabilities());
+  for (const c of [
+    "pricing.manage", "pricing.manage_costs",
+    "admin.manage_products", "admin.manage_categories",
+    "admin.manage_banks", "admin.manage_sales_conditions",
+  ]) {
+    assert.ok(caps.has(c), `menu should reference ${c}`);
+  }
 });

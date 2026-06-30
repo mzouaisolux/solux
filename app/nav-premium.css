@@ -58,7 +58,11 @@
 /* ---- scrim behind an open mega ---- */
 .sx-scrim {
   position: fixed;
-  inset: 62px 0 0 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  /* top set inline = the nav's bottom edge, so the dim/blur starts BELOW the
+     bar and never reaches above the section titles. */
   background: rgba(15, 15, 15, 0.18);
   backdrop-filter: blur(1.5px);
   z-index: 30;
@@ -75,9 +79,9 @@
 
 /* ---- mega panel ---- */
 .sx-mega {
-  position: absolute;
-  top: 100%;
-  left: 0;
+  /* Positioned in JS (components/MegaMenu.tsx): anchored to its trigger,
+     centred under wide menus, clamped to the viewport edges. left/top inline. */
+  position: fixed;
   background: var(--card);
   border: 1px solid var(--line);
   border-top: none;
@@ -89,6 +93,13 @@
 @keyframes sx-mega-in {
   from { opacity: 0; transform: translateY(-10px); clip-path: inset(0 0 22% 0); }
   to { opacity: 1; transform: translateY(0); clip-path: inset(0 0 0 0); }
+}
+/* Panels are LEFT-ANCHORED to the nav root (.sx-mega left:0, no right → the
+   abs-positioned panel shrinks to its content width). This wrapper is layout-
+   transparent so the panel sizes to its columns: every section opens at the
+   SAME left edge, width follows content. */
+.sx-mega-inner {
+  display: contents;
 }
 .sx-mega-cols {
   display: grid;
@@ -235,9 +246,10 @@
 }
 
 /* ---- Orders single-column list variant ---- */
-.sx-mega.sx-list {
-  padding: 22px 18px 24px;
-  min-width: 268px;
+.sx-list-col {
+  width: 340px;
+  max-width: 100%;
+  padding: 22px 0 24px;
 }
 .sx-mega.sx-list .sx-colhead {
   padding: 0 12px;

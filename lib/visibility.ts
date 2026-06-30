@@ -19,8 +19,11 @@
  * scope once and pass it down; a 30s memo could be added later if needed.
  */
 
-import { createClient } from "@/lib/supabase/server";
-import { isTechnicalRole, type Role } from "@/lib/types";
+// NB: the Supabase server client is imported LAZILY inside getVisibilityScope
+// (it pulls next/headers, which can't load in the pure unit-test runner). This
+// keeps the module's PURE exports (canSeeRecord, lensExposes, LENS_STATUSES…)
+// unit-testable without a Next runtime.
+import { isTechnicalRole, canSupervise, type Role } from "./types.ts";
 
 export type Lens = "production" | "finance" | "logistics";
 
@@ -64,6 +67,7 @@ export async function getVisibilityScope(
 ): Promise<VisibilityScope> {
   if (!userId) return emptyScope(); // no session → see nothing
 
+  const { createClient } = await import("@/lib/supabase/server");
   const supabase = createClient();
 
   // Load active grants (RLS allows self-read). Soft-fail to legacy if m067
@@ -88,8 +92,12 @@ export async function getVisibilityScope(
   );
 
   // ---- Legacy fallback: no grants configured → preserve current behavior.
+  // F1: sales_director is a commercial SUPERVISOR (canSupervise grants it
+  // validation-review + owner-reassign on ANY client/affair/doc). Org-wide
+  // visibility is the consistent counterpart — without it a director with no
+  // grant + no team sees nothing. Mirrors the RLS "see all" branch (m132).
   if (grants === null || active.length === 0) {
-    if (isTechnicalRole(role)) {
+    if (isTechnicalRole(role) || canSupervise(role)) {
       return { ...emptyScope(), all: true };
     }
     return { ...emptyScope(), ownerIds: new Set([userId]) };

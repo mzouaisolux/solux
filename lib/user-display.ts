@@ -78,9 +78,13 @@ export async function resolveUserLabels(
   for (const id of ids) {
     const displayName = nameById.get(id) ?? null;
     const role = roleById.get(id) ?? null;
-    const label =
-      displayName ??
-      (role ? `${role} · ${id.slice(0, 8)}` : `${id.slice(0, 8)}…`);
+    // F7: when no display_name is set, show a human label ("Sales Director · a5e9")
+    // instead of a raw UID prefix ("sales · a5e93040"). Keep a short id suffix so
+    // two unnamed users of the same role stay distinguishable in audit trails.
+    const humanRole = role
+      ? role.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())
+      : "User";
+    const label = displayName ?? `${humanRole} · ${id.slice(0, 4)}`;
     out.set(id, { label, displayName, role });
   }
   return out;

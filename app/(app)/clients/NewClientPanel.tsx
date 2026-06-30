@@ -23,7 +23,18 @@ import { dialForCountry } from "@/lib/countries";
  * and a sticky footer. Field names are unchanged, so the server action and DB
  * mapping are identical to before.
  */
-export default function NewClientPanel() {
+export default function NewClientPanel({
+  trigger,
+  deepLink = true,
+}: {
+  /** Optional custom trigger (CRM cards skin) — receives the open() callback.
+   *  Defaults to the classic "+ New client" secondary button. */
+  trigger?: (open: () => void) => React.ReactNode;
+  /** Only ONE instance per page should react to ?new=1 — when the panel is
+   *  mounted twice (header + "add" card) the second sets this to false so
+   *  the deep link doesn't open two stacked modals. */
+  deepLink?: boolean;
+} = {}) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -31,16 +42,20 @@ export default function NewClientPanel() {
   const [open, setOpen] = useState(false);
   // Phone prefix is mirrored here so picking a country can prefill it.
   const [phoneCode, setPhoneCode] = useState("");
+  // Inline validation error returned by createClientAction (e.g. duplicate
+  // client code) — shown in the footer; the form + its data are preserved.
+  const [formError, setFormError] = useState<string | null>(null);
   const modalRef = useRef<HTMLDivElement>(null);
 
   // Open when arriving via the mega-menu deep link (?new=1).
   useEffect(() => {
-    if (searchParams.get("new")) setOpen(true);
+    if (deepLink && searchParams.get("new")) setOpen(true);
   }, [searchParams]);
 
   const close = () => {
     setOpen(false);
     setPhoneCode("");
+    setFormError(null);
     // Drop the ?new=1 param (preserving any others) so the modal doesn't
     // re-open on refresh and the URL stays clean.
     if (searchParams.get("new")) {
@@ -104,9 +119,13 @@ export default function NewClientPanel() {
 
   return (
     <>
-      <button type="button" onClick={() => setOpen(true)} className="btn-secondary">
-        + New client
-      </button>
+      {trigger ? (
+        trigger(() => setOpen(true))
+      ) : (
+        <button type="button" onClick={() => setOpen(true)} className="btn-secondary">
+          + New client
+        </button>
+      )}
 
       {open &&
         typeof document !== "undefined" &&
@@ -146,8 +165,15 @@ export default function NewClientPanel() {
 
               <form
                 action={async (fd) => {
-                  await createClientAction(fd);
-                  close();
+                  // On SUCCESS createClientAction redirects SERVER-SIDE (throws
+                  // NEXT_REDIRECT, which we must let propagate so Next navigates;
+                  // the modal unmounts on navigate). On a VALIDATION failure
+                  // (e.g. a duplicate client code) it RETURNS { error } instead
+                  // of throwing — show it inline and keep the form so the user
+                  // never loses what they typed.
+                  setFormError(null);
+                  const res = await createClientAction(fd);
+                  if (res && "error" in res && res.error) setFormError(res.error);
                 }}
                 className="flex min-h-0 flex-1 flex-col"
               >
@@ -168,17 +194,21 @@ export default function NewClientPanel() {
                         />
                       </label>
                       <label className="block sm:col-span-1">
-                        <span className={fieldLabel}>Client code</span>
+                        <span className={fieldLabel}>Client code *</span>
                         <input
                           name="client_code"
                           placeholder="ARL"
                           maxLength={3}
+                          required
+                          pattern="[A-Za-z]{3}"
+                          title="Exactly 3 letters (e.g. ARL)"
                           className={`${fieldInput} font-mono uppercase`}
                           style={{ textTransform: "uppercase" }}
                         />
                         <span className={hint}>
-                          3 letters — shown in document numbers, e.g.{" "}
-                          <code>SLX-ARL-26-001</code>.
+                          Required — 3 letters, shown in every document number,
+                          e.g. <code>SLX-ARL-26-001</code>. A client without it
+                          can&apos;t have quotations saved.
                         </span>
                       </label>
                       <label className="block sm:col-span-1">
@@ -276,6 +306,16 @@ export default function NewClientPanel() {
                     </div>
                   </section>
                 </div>
+
+                {/* Inline error (e.g. duplicate client code) — preserves the form */}
+                {formError && (
+                  <div
+                    role="alert"
+                    className="shrink-0 border-t border-rose-200 bg-rose-50 px-6 py-2.5 text-sm text-rose-700"
+                  >
+                    {formError}
+                  </div>
+                )}
 
                 {/* Footer — sticky actions */}
                 <div className="flex shrink-0 items-center justify-between gap-3 border-t border-neutral-100 bg-neutral-50/70 px-6 py-3.5">

@@ -423,10 +423,21 @@ export default function FactoryPDF({ data }: { data: ExportData }) {
               </View>
             </View>
 
+            {/* m135 — manual item (pole/mast/non-catalog): free-text specs in
+                place of the catalog configurator. */}
+            {l.is_manual && l.manual_specs && (
+              <View style={s.fieldCard} wrap={false}>
+                <Text style={s.notesLabel}>Specifications</Text>
+                <Text style={s.notesText}>{l.manual_specs}</Text>
+              </View>
+            )}
+
             {l.rows.length === 0 ? (
               <View style={s.fieldCard} wrap={false}>
                 <Text style={s.emptyNote}>
-                  No sales fields recorded for this line.
+                  {l.is_manual
+                    ? "Manual item — no catalog configuration."
+                    : "No sales fields recorded for this line."}
                 </Text>
               </View>
             ) : (

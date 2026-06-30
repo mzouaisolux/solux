@@ -17,7 +17,8 @@
  */
 
 import { createClient } from "@/lib/supabase/server";
-import { requireAdmin, getCurrentUserRole } from "@/lib/auth";
+import { getCurrentUserRole } from "@/lib/auth";
+import { requireCapabilityOrAdmin } from "@/lib/permissions";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import {
@@ -28,17 +29,10 @@ import {
   type TargetMargins,
 } from "@/lib/pricing-engine";
 import { naturalProductSort } from "@/lib/product-sort";
+import { resolveUserLabelStrings } from "@/lib/user-display";
 import type { PriceList, PriceListAssignment, PriceListAssigneeType, PriceListStatus } from "@/lib/types";
 
 // ---------------------------- helpers ----------------------------
-
-async function requireAdminOrFinance() {
-  const { role, userId } = await getCurrentUserRole();
-  if (role !== "admin" && role !== "super_admin" && role !== "finance") {
-    throw new Error("Insufficient permissions — admin or finance required.");
-  }
-  return { role, userId };
-}
 
 function num(fd: FormData, key: string, fallback = 0): number {
   const v = fd.get(key);
@@ -117,7 +111,7 @@ const TIERS: Array<{ ptier: "high" | "medium" | "low"; key: "tier1" | "tier2" | 
 // ---------------------------- settings ----------------------------
 
 export async function updateSettings(formData: FormData) {
-  await requireAdmin();
+  await requireCapabilityOrAdmin("pricing.manage");
   const { userId } = await getCurrentUserRole();
   const supabase = createClient();
   const { data: row } = await supabase.from("pricing_settings").select("id").limit(1).single();
@@ -138,7 +132,7 @@ export async function updateSettings(formData: FormData) {
 // ---------------------------- price list CRUD (v5) ----------------------------
 
 export async function createPriceList(formData: FormData): Promise<void> {
-  await requireAdmin();
+  await requireCapabilityOrAdmin("pricing.manage");
   const { userId } = await getCurrentUserRole();
   const supabase = createClient();
   const name = str(formData, "name");
@@ -170,7 +164,7 @@ export async function createPriceList(formData: FormData): Promise<void> {
 }
 
 export async function updatePriceList(formData: FormData) {
-  await requireAdmin();
+  await requireCapabilityOrAdmin("pricing.manage");
   const { userId } = await getCurrentUserRole();
   const supabase = createClient();
   const id = str(formData, "id");
@@ -198,7 +192,7 @@ async function setStatus(id: string, status: PriceListStatus) {
 }
 
 export async function archivePriceList(formData: FormData) {
-  await requireAdmin();
+  await requireCapabilityOrAdmin("pricing.manage");
   const id = str(formData, "id");
   if (!id) throw new Error("Missing price list id");
   await setStatus(id, "archived");
@@ -206,7 +200,7 @@ export async function archivePriceList(formData: FormData) {
 }
 
 export async function unpublishPriceList(formData: FormData) {
-  await requireAdmin();
+  await requireCapabilityOrAdmin("pricing.manage");
   const id = str(formData, "id");
   if (!id) throw new Error("Missing price list id");
   await setStatus(id, "draft");
@@ -214,7 +208,7 @@ export async function unpublishPriceList(formData: FormData) {
 }
 
 export async function deletePriceList(formData: FormData) {
-  await requireAdmin();
+  await requireCapabilityOrAdmin("pricing.manage");
   const supabase = createClient();
   const id = str(formData, "id");
   if (!id) throw new Error("Missing price list id");
@@ -226,7 +220,7 @@ export async function deletePriceList(formData: FormData) {
 }
 
 export async function duplicatePriceList(formData: FormData) {
-  await requireAdmin();
+  await requireCapabilityOrAdmin("pricing.manage");
   const { userId } = await getCurrentUserRole();
   const supabase = createClient();
   const id = str(formData, "id");
@@ -259,7 +253,7 @@ export async function duplicatePriceList(formData: FormData) {
 // ---------------------------- assignments ----------------------------
 
 export async function addAssignment(formData: FormData) {
-  await requireAdmin();
+  await requireCapabilityOrAdmin("pricing.manage");
   const supabase = createClient();
   const priceListId = str(formData, "priceListId");
   const assigneeType = str(formData, "assigneeType") as PriceListAssigneeType | null;
@@ -276,7 +270,7 @@ export async function addAssignment(formData: FormData) {
 }
 
 export async function removeAssignment(formData: FormData) {
-  await requireAdmin();
+  await requireCapabilityOrAdmin("pricing.manage");
   const supabase = createClient();
   const id = str(formData, "id");
   if (!id) throw new Error("Missing assignment id");
@@ -291,7 +285,8 @@ export type CostEntry = { productId: string; costRmb: number };
 export type CostBatchOpts = { categoryId?: string | null; effectiveDate?: string | null; note?: string | null };
 
 export async function saveCostBatch(entries: CostEntry[], opts: CostBatchOpts = {}) {
-  const { userId } = await requireAdminOrFinance();
+  await requireCapabilityOrAdmin("pricing.manage_costs");
+  const { userId } = await getCurrentUserRole();
   if (!entries.length) return { changed: 0 };
   const supabase = createClient();
   const now = new Date().toISOString();
@@ -369,7 +364,7 @@ async function listProducts(
 export async function publishPrices(
   priceListId: string
 ): Promise<{ published: number; skipped: number; skippedNames: string[] }> {
-  await requireAdmin();
+  await requireCapabilityOrAdmin("pricing.manage");
   const supabase = createClient();
   const { settings } = await loadSettings(supabase);
   const { data: list } = await supabase.from("price_lists").select("*").eq("id", priceListId).maybeSingle();
@@ -423,7 +418,7 @@ export async function publishPrices(
 }
 
 export async function getPriceCsv(priceListId: string): Promise<string> {
-  await requireAdminOrFinance();
+  await requireCapabilityOrAdmin("pricing.manage_costs");
   const supabase = createClient();
   const { settings } = await loadSettings(supabase);
   const { data: list } = await supabase.from("price_lists").select("*").eq("id", priceListId).maybeSingle();
@@ -446,7 +441,7 @@ export async function getPriceCsv(priceListId: string): Promise<string> {
 // Called from the Price List Library selection toolbar (client → JS args).
 
 export async function bulkArchivePriceLists(ids: string[]): Promise<void> {
-  await requireAdmin();
+  await requireCapabilityOrAdmin("pricing.manage");
   if (!ids.length) return;
   const supabase = createClient();
   const { error } = await supabase
@@ -458,7 +453,7 @@ export async function bulkArchivePriceLists(ids: string[]): Promise<void> {
 }
 
 export async function bulkDeletePriceLists(ids: string[]): Promise<void> {
-  await requireAdmin();
+  await requireCapabilityOrAdmin("pricing.manage");
   if (!ids.length) return;
   const supabase = createClient();
   const { error } = await supabase.from("price_lists").delete().in("id", ids);
@@ -469,7 +464,7 @@ export async function bulkDeletePriceLists(ids: string[]): Promise<void> {
 export async function bulkPublishPriceLists(
   ids: string[]
 ): Promise<{ published: number }> {
-  await requireAdmin();
+  await requireCapabilityOrAdmin("pricing.manage");
   let published = 0;
   for (const id of ids) {
     const r = await publishPrices(id); // recomputes + writes prices_version per list
@@ -484,7 +479,7 @@ export async function bulkAssignSeller(
   sellerId: string,
   sellerName: string
 ): Promise<void> {
-  await requireAdmin();
+  await requireCapabilityOrAdmin("pricing.manage");
   if (!ids.length || !sellerId) return;
   const supabase = createClient();
   const rows = ids.map((price_list_id) => ({
@@ -499,7 +494,7 @@ export async function bulkAssignSeller(
 }
 
 export async function bulkDuplicatePriceLists(ids: string[]): Promise<void> {
-  await requireAdmin();
+  await requireCapabilityOrAdmin("pricing.manage");
   if (!ids.length) return;
   const { userId } = await getCurrentUserRole();
   const supabase = createClient();
@@ -543,7 +538,7 @@ export async function getPricingPageData(): Promise<{
   products: CreateProduct[];
   lists: PriceListRow[];
 }> {
-  await requireAdmin();
+  await requireCapabilityOrAdmin("pricing.manage");
   const supabase = createClient();
   const { settings, thinThreshold } = await loadSettings(supabase);
 
@@ -613,7 +608,7 @@ export async function getPriceListDetail(priceListId: string): Promise<{
   list: PriceListRow | null;
   rows: DetailRow[];
 } | null> {
-  await requireAdmin();
+  await requireCapabilityOrAdmin("pricing.manage");
   const supabase = createClient();
   const { settings, thinThreshold } = await loadSettings(supabase);
   const { data: list } = await supabase.from("price_lists").select("*").eq("id", priceListId).maybeSingle();
@@ -679,7 +674,7 @@ export async function getCostEntryData(): Promise<{
   products: CostEntryProduct[];
   latestBatch: { effective_date: string; note: string | null; created_at: string } | null;
 }> {
-  await requireAdminOrFinance();
+  await requireCapabilityOrAdmin("pricing.manage_costs");
   const supabase = createClient();
   const [{ data: cats }, products, { data: costRows }] = await Promise.all([
     supabase.from("product_categories").select("id, name").eq("is_template", false).order("position").order("name"),
@@ -718,4 +713,81 @@ export async function getCostEntryData(): Promise<{
     })),
     latestBatch,
   };
+}
+
+// ---------------------------- cost versions (audit history) ----------------------------
+
+export type CostVersionEntry = {
+  id: string;
+  /** 1-based, oldest version = 1 (display newest-first). */
+  versionNo: number;
+  note: string | null;
+  categoryId: string | null;
+  /** Resolved category name, or null when the batch spanned all categories. */
+  categoryName: string | null;
+  /** Number of cost changes recorded for the batch. */
+  changeCount: number;
+  /** Resolved label of whoever saved it. */
+  savedBy: string;
+  createdAt: string;
+  effectiveDate: string;
+};
+
+/**
+ * Every saved cost batch, newest first, enriched for the cost-entry version
+ * banner + history. Soft-fails to an empty list when the cost-versioning
+ * tables (m086) aren't applied yet.
+ */
+export async function getCostVersions(): Promise<CostVersionEntry[]> {
+  await requireCapabilityOrAdmin("pricing.manage_costs");
+  const supabase = createClient();
+
+  let batches: any[] = [];
+  try {
+    const { data } = await supabase
+      .from("cost_batches")
+      .select("id, category_id, effective_date, note, created_by, created_at")
+      .order("created_at", { ascending: true }); // oldest first for stable numbering
+    batches = (data ?? []) as any[];
+  } catch {
+    return [];
+  }
+  if (batches.length === 0) return [];
+
+  const ids = batches.map((b) => b.id);
+
+  // Change counts per batch (from the cost history rows linked to each batch).
+  const countByBatch = new Map<string, number>();
+  try {
+    const { data: hist } = await supabase.from("cost_rmb_history").select("batch_id").in("batch_id", ids);
+    for (const h of (hist ?? []) as any[]) {
+      if (h.batch_id) countByBatch.set(h.batch_id, (countByBatch.get(h.batch_id) ?? 0) + 1);
+    }
+  } catch {
+    /* counts are best-effort */
+  }
+
+  // Category names for scoped batches.
+  const catIds = Array.from(new Set(batches.map((b) => b.category_id).filter(Boolean))) as string[];
+  const catName = new Map<string, string>();
+  if (catIds.length) {
+    const { data: cats } = await supabase.from("product_categories").select("id, name").in("id", catIds);
+    for (const c of (cats ?? []) as any[]) catName.set(c.id, c.name);
+  }
+
+  const labels = await resolveUserLabelStrings(batches.map((b) => b.created_by));
+
+  return batches
+    .map((b, i) => ({
+      id: b.id as string,
+      versionNo: i + 1,
+      note: (b.note ?? null) as string | null,
+      categoryId: (b.category_id ?? null) as string | null,
+      categoryName: b.category_id ? catName.get(b.category_id) ?? null : null,
+      changeCount: countByBatch.get(b.id) ?? 0,
+      savedBy: b.created_by ? labels.get(b.created_by) ?? "—" : "—",
+      createdAt: b.created_at as string,
+      effectiveDate: b.effective_date as string,
+    }))
+    .reverse(); // newest first for display
 }

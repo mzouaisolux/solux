@@ -1,7 +1,7 @@
 "use server";
 
 import { createClient } from "@/lib/supabase/server";
-import { requireAdmin } from "@/lib/auth";
+import { requireCapabilityOrAdmin } from "@/lib/permissions";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
@@ -40,7 +40,7 @@ async function resolveCategory(
 // ---------- products ----------
 
 export async function createProduct(formData: FormData) {
-  await requireAdmin();
+  await requireCapabilityOrAdmin("admin.manage_products");
   const supabase = createClient();
 
   const name = str(formData, "name");
@@ -103,7 +103,7 @@ export async function createProduct(formData: FormData) {
 }
 
 export async function updateProduct(formData: FormData) {
-  await requireAdmin();
+  await requireCapabilityOrAdmin("admin.manage_products");
   const id = String(formData.get("id"));
   if (!id) throw new Error("Missing product id");
 
@@ -136,7 +136,7 @@ export async function updateProduct(formData: FormData) {
 }
 
 export async function deleteProduct(formData: FormData) {
-  await requireAdmin();
+  await requireCapabilityOrAdmin("admin.manage_products");
   const id = String(formData.get("id"));
   if (!id) throw new Error("Missing product id");
 
@@ -174,7 +174,7 @@ export async function saveProductsBatch(
   rows: ProductGridRow[],
   deletedIds: string[]
 ): Promise<ProductGridResult> {
-  await requireAdmin();
+  await requireCapabilityOrAdmin("admin.manage_products");
   const supabase = createClient();
   const errors: string[] = [];
 
@@ -282,7 +282,7 @@ export async function saveProductsBatch(
 // ---------- options ----------
 
 export async function addOption(formData: FormData) {
-  await requireAdmin();
+  await requireCapabilityOrAdmin("admin.manage_products");
   const product_id = String(formData.get("product_id"));
   if (!product_id) throw new Error("Missing product id");
 
@@ -304,7 +304,7 @@ export async function addOption(formData: FormData) {
 }
 
 export async function deleteOption(formData: FormData) {
-  await requireAdmin();
+  await requireCapabilityOrAdmin("admin.manage_products");
   const id = String(formData.get("id"));
   const product_id = String(formData.get("product_id"));
   if (!id) throw new Error("Missing option id");
@@ -319,7 +319,7 @@ export async function deleteOption(formData: FormData) {
 // ---------- prices ----------
 
 export async function addPriceVersion(formData: FormData) {
-  await requireAdmin();
+  await requireCapabilityOrAdmin("admin.manage_products");
   const product_id = String(formData.get("product_id"));
   if (!product_id) throw new Error("Missing product id");
 
@@ -397,7 +397,7 @@ async function fetchSkuMap(supabase: ReturnType<typeof createClient>) {
 export async function importProducts(
   rows: ProductImportRow[]
 ): Promise<ImportResult> {
-  await requireAdmin();
+  await requireCapabilityOrAdmin("admin.manage_products");
   const supabase = createClient();
 
   const valid: ProductImportRow[] = [];
@@ -505,7 +505,7 @@ export async function importProducts(
 export async function importPrices(
   rows: PriceImportRow[]
 ): Promise<ImportResult> {
-  await requireAdmin();
+  await requireCapabilityOrAdmin("admin.manage_products");
   const supabase = createClient();
 
   const valid: PriceImportRow[] = [];
@@ -614,7 +614,7 @@ export async function importPrices(
 export async function importOptions(
   rows: OptionImportRow[]
 ): Promise<ImportResult> {
-  await requireAdmin();
+  await requireCapabilityOrAdmin("admin.manage_products");
   const supabase = createClient();
 
   const valid: OptionImportRow[] = [];
@@ -715,7 +715,7 @@ export async function importOptions(
 }
 
 export async function deletePriceVersion(formData: FormData) {
-  await requireAdmin();
+  await requireCapabilityOrAdmin("admin.manage_products");
   const id = String(formData.get("id"));
   const product_id = String(formData.get("product_id"));
   if (!id) throw new Error("Missing price id");

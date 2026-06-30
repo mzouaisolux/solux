@@ -3,11 +3,16 @@ import {
   requireCapability,
 } from "@/lib/permissions";
 import Link from "next/link";
+import { readdirSync } from "node:fs";
+import { join } from "node:path";
 import { createClient } from "@/lib/supabase/server";
 import AccessDenied from "@/components/AccessDenied";
 import { HealthSection } from "./HealthSection";
+import { MigrationsSection } from "./MigrationsSection";
 import { LifecycleSection } from "./LifecycleSection";
 import { InspectorSection } from "./InspectorSection";
+import { SettingsSection } from "./SettingsSection";
+import { PREVENTIVE_DAYS_KEY, PREVENTIVE_DAYS_DEFAULT } from "@/lib/app-settings";
 
 /**
  * Super-admin diagnostics page.
@@ -66,7 +71,27 @@ export default async function DiagnosticsPage({
   // RPC errors and we surface a clean fallback instead of crashing
   // the whole diagnostics page.
   const supabase = createClient();
-  const healthRpc = await supabase.rpc("admin_diagnostics_health");
+  // Perf (2026-06-12): the three data sources (health counters, migration
+  // probes, ledger) are independent — ONE parallel wave instead of three
+  // stacked ~110 ms cloud round trips.
+  const [healthRpc, probesRpc, ledgerRes, settingsProbe] = await Promise.all([
+    supabase.rpc("admin_diagnostics_health"),
+    supabase.rpc("admin_migration_probes"),
+    supabase
+      .from("schema_migrations")
+      .select("filename, applied_at")
+      .order("filename", { ascending: true }),
+    // m120 — product settings (defensive: section shows an apply hint pre-m120)
+    supabase.from("app_settings").select("key, value").eq("key", PREVENTIVE_DAYS_KEY).maybeSingle(),
+  ]);
+  const settingsAvailable = !settingsProbe.error;
+  const preventiveDays = settingsProbe.error
+    ? PREVENTIVE_DAYS_DEFAULT
+    : (() => {
+        const v = (settingsProbe.data?.value as any)?.value ?? settingsProbe.data?.value;
+        const n = Number(v);
+        return Number.isFinite(n) && n > 0 ? n : PREVENTIVE_DAYS_DEFAULT;
+      })();
   const healthPayload = (healthRpc.data as any) ?? null;
   const healthError = healthRpc.error
     ? healthRpc.error.code === "42883"
@@ -74,46 +99,86 @@ export default async function DiagnosticsPage({
       : healthRpc.error.message
     : null;
 
+  // ----- Migrations registry (m113, audit P0) -----
+  // Probes answer "is this migration's artifact live in THIS database?"
+  // Ledger tracks applications from m113 onward. Both defensive: if
+  // m113 isn't applied yet the section renders an instruction callout.
+  const probes = Array.isArray(probesRpc.data) ? (probesRpc.data as any[]) : null;
+  const probesError = probesRpc.error
+    ? probesRpc.error.code === "42883"
+      ? "RPC admin_migration_probes() is not deployed. Apply migration 113_schema_migrations_ledger.sql in Supabase and reload."
+      : probesRpc.error.message
+    : null;
+
+  const ledger = ledgerRes.error ? null : ((ledgerRes.data as any[]) ?? []);
+  const ledgerError = ledgerRes.error
+    ? /schema_migrations/.test(ledgerRes.error.message ?? "")
+      ? "schema_migrations table missing — apply migration 113 in Supabase."
+      : ledgerRes.error.message
+    : null;
+
+  // Migration files shipped with THIS build of the code (dev: the repo's
+  // supabase/migrations folder). Best-effort — serverless bundles may not
+  // include the folder, in which case the disk comparison is simply
+  // omitted and probes + ledger still render.
+  let diskFiles: string[] | null = null;
+  try {
+    diskFiles = readdirSync(join(process.cwd(), "supabase", "migrations"))
+      .filter((f) => /^\d{3}_.+\.sql$/.test(f))
+      .sort();
+  } catch {
+    diskFiles = null;
+  }
+
   return (
-    <div className="mx-auto max-w-screen-2xl px-6 py-8 space-y-6">
-      <div className="flex items-start justify-between gap-4 flex-wrap">
-        <div>
-          <div className="eyebrow">Admin · Diagnostics</div>
-          <h1 className="doc-title mt-1">System health &amp; entity inspector</h1>
-          <p className="text-xs text-neutral-500 mt-2 max-w-2xl">
-            Cross-table sanity checks, the canonical lifecycle diagram, and
-            a per-entity inspector for debugging operational issues
-            without writing SQL. Super-admin only by default — adjust in
-            the permissions matrix if other roles need access.
-          </p>
-        </div>
-        {/* Dev reset entry point — discoverable but discreet. The
-            destructive page lives at a sub-route so a misnavigation
-            here doesn't even get the user near the wipe button. */}
-        <Link
-          href="/admin/diagnostics/reset"
-          className="inline-flex items-center gap-1.5 rounded-md border border-rose-200 bg-rose-50/40 text-rose-700 hover:bg-rose-50 hover:border-rose-300 px-2.5 py-1 text-[11px] font-medium transition-colors"
-        >
-          <svg
-            className="h-3 w-3"
-            viewBox="0 0 20 20"
-            fill="currentColor"
-            aria-hidden
-          >
-            <path d="M10 2a8 8 0 1 0 0 16 8 8 0 0 0 0-16Zm-1 4h2v6H9V6Zm0 8h2v2H9v-2Z" />
-          </svg>
-          Dev reset
-        </Link>
+    <div className="solux-pro sx-page">
+      <div className="sx-wrap">
+        <section className="card sec ad-section">
+          <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 14, flexWrap: "wrap" }}>
+            <div>
+              <div className="eyebrow">Admin · Diagnostics</div>
+              <h2 className="ad-doc-title">System health &amp; entity inspector</h2>
+              <p className="ad-lead">
+                Cross-table sanity checks, the canonical lifecycle diagram, and a per-entity inspector for
+                debugging operational issues without writing SQL. Super-admin only by default — adjust in the
+                permissions matrix if other roles need access.
+              </p>
+            </div>
+            {/* Dev reset entry point — discoverable but discreet. The destructive
+                page lives at a sub-route so a misnavigation here doesn't even get
+                the user near the wipe button. */}
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <Link href="/admin/diagnostics/tender-merge" className="sx-btn sx-btn-sm">
+                Tender duplicates (dry-run)
+              </Link>
+              <Link href="/admin/diagnostics/reset" className="sx-btn sx-btn-danger sx-btn-sm">
+                ⚠ Dev reset
+              </Link>
+            </div>
+          </div>
+
+          {/* SECTION 1 — Health counters (étape 5.B) — LIVE */}
+          <HealthSection payload={healthPayload} error={healthError} />
+
+          {/* SECTION 1b — Migrations registry (m113, audit P0) — LIVE */}
+          <MigrationsSection
+            probes={probes as any}
+            probesError={probesError}
+            ledger={ledger as any}
+            ledgerError={ledgerError}
+            diskFiles={diskFiles}
+          />
+
+          {/* SECTION 1c — Product settings (m120, Phase 2 dashboard) */}
+          <SettingsSection preventiveDays={preventiveDays} available={settingsAvailable} />
+
+          {/* SECTION 2 — Lifecycle diagram (étape 5.C) — LIVE */}
+          <LifecycleSection />
+
+          {/* SECTION 3 — Entity inspector (étape 5.D) — LIVE */}
+          <InspectorSection q={searchParams?.q ?? null} />
+        </section>
       </div>
-
-      {/* SECTION 1 — Health counters (étape 5.B) — LIVE */}
-      <HealthSection payload={healthPayload} error={healthError} />
-
-      {/* SECTION 2 — Lifecycle diagram (étape 5.C) — LIVE */}
-      <LifecycleSection />
-
-      {/* SECTION 3 — Entity inspector (étape 5.D) — LIVE */}
-      <InspectorSection q={searchParams?.q ?? null} />
     </div>
   );
 }

@@ -28,6 +28,7 @@ export function ProductSummaryCard({
   quantity,
   config,
   factoryOverrides,
+  isManual = false,
 }: {
   productName: string;
   sku?: string | null;
@@ -35,6 +36,8 @@ export function ProductSummaryCard({
   quantity: number;
   config: Record<string, string>;
   factoryOverrides?: Record<string, string>;
+  /** m135 — manual item (pole/mast/non-catalog): tagged, no SKU expected. */
+  isManual?: boolean;
 }) {
   // Keep only entries with a real value, preserving insertion order.
   const entries = Object.entries(config ?? {}).filter(
@@ -62,6 +65,14 @@ export function ProductSummaryCard({
             <span className="text-sm font-semibold text-neutral-900">
               {productName}
             </span>
+            {isManual && (
+              <span
+                className="inline-flex items-center rounded-full bg-violet-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-violet-700"
+                title="Non-catalog manual item (e.g. pole/mast) — no Product reference."
+              >
+                Manual
+              </span>
+            )}
             {sku && (
               <span className="font-mono text-[11px] text-neutral-500">
                 {sku}
@@ -74,7 +85,9 @@ export function ProductSummaryCard({
 
           {entries.length === 0 ? (
             <p className="text-[11px] text-neutral-400 mt-1.5">
-              No configuration captured yet.
+              {isManual
+                ? "Manual item — see specifications below."
+                : "No configuration captured yet."}
             </p>
           ) : (
             <div className="mt-2 flex flex-wrap gap-1.5">

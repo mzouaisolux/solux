@@ -35,19 +35,13 @@ export async function QuotationRemindersSection({
     .eq("document_id", documentId)
     .order("remind_at", { ascending: true });
 
-  // If the table doesn't exist (m043 not applied), surface a clear
-  // notice rather than crashing the entire doc detail page.
+  // If the table doesn't exist yet (m043 not applied), the personal
+  // reminders feature simply isn't available — hide the section
+  // entirely rather than leaking an internal migration instruction to
+  // the end user. (Reminders are an optional personal tickler; their
+  // absence is silent, not an error the customer-facing user must act on.)
   if (error && /quotation_reminders/.test(error.message ?? "")) {
-    return (
-      <section className="panel p-5 space-y-2">
-        <div className="eyebrow">Reminders</div>
-        <p className="text-xs text-amber-700 italic">
-          The reminders table isn&apos;t available yet — run migration{" "}
-          <code className="font-mono">043_quotation_reminders.sql</code>{" "}
-          to enable this feature.
-        </p>
-      </section>
-    );
+    return null;
   }
 
   const all = (data ?? []) as ReminderWithDoc[];

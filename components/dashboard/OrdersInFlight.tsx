@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { getT } from "@/lib/i18n/server";
 import type { ProductionTaskListStatus } from "@/lib/types";
 import { ORDER_PILL_TONES, type OrderPill } from "@/lib/order-pills";
 import {
@@ -124,13 +125,11 @@ function resolveOrderRowHref(o: OrderInFlight): string {
 }
 
 export default function OrdersInFlight({ orders }: { orders: OrderInFlight[] }) {
+  const t = getT();
   if (orders.length === 0) {
     return (
       <div className="rounded-xl border border-neutral-200/80 bg-white shadow-soft p-10 text-center">
-        <p className="text-sm text-neutral-500">
-          No orders in flight yet. Once a quotation is marked <b>Won</b>, it'll
-          show up here.
-        </p>
+        <p className="text-sm text-neutral-500">{t("oif.empty")}</p>
       </div>
     );
   }
@@ -140,17 +139,17 @@ export default function OrdersInFlight({ orders }: { orders: OrderInFlight[] }) 
       <div className="flex items-center justify-between px-5 py-3 border-b border-neutral-100">
         <div>
           <div className="text-[11px] font-semibold uppercase tracking-widerx text-neutral-500">
-            Orders in flight
+            {t("oif.title")}
           </div>
           <div className="text-xs text-neutral-500 mt-0.5">
-            {orders.length} active · live operational stage
+            {t("oif.subtitle", { n: orders.length })}
           </div>
         </div>
         <Link
           href="/operations"
           className="text-xs text-neutral-500 hover:text-neutral-900 hover:underline"
         >
-          View all →
+          {t("common.view_all_arrow")}
         </Link>
       </div>
       <ul className="divide-y divide-neutral-100">

@@ -132,6 +132,8 @@ export function pickGlyph(label: string): string {
   if (/library/.test(s)) return "book";
   if (/factory|mapping|tool/.test(s)) return "tool";
   if (/component|reference/.test(s)) return "grid";
+  if (/categor/.test(s)) return "grid";
+  if (/template/.test(s)) return "file";
   if (/revision|edit/.test(s)) return "edit";
   if (/task list|task/.test(s)) return "list";
   if (/logistics|packing|freight|catalog|product|order|production|shipping|delivered|archived|package/.test(s))

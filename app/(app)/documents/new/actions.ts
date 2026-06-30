@@ -47,6 +47,9 @@ export type SaveDocumentInput = {
   /** Link this document to a real project/affair (m076). Set when creating
    *  a quotation inside a project. Only applied on a fresh insert. */
   affair_id?: string | null;
+  /** m134 — the client's original free-text need (read-only reminder), carried
+   *  SR→quotation→proforma→task list. Never auto-parsed into config. */
+  original_sales_request?: string | null;
   /** When set, this save is a REVISION of an existing quotation (m059):
    *  a new version within the same affair, not a fresh quotation. */
   revise_of?: string | null;
@@ -191,6 +194,7 @@ export async function saveDocument(
       discount_type: l.discount_type,
       discount_value: l.discount_value,
       client_product_name: l.client_product_name || null,
+      category_id: l.category_id ?? null, // m133 — line-level product family
       config_values: l.config_values ?? {},
     }));
 
@@ -451,6 +455,9 @@ export async function saveDocument(
     // m076 — real project link (set when creating inside a project). On a
     // revision this stays null and the m076 trigger inherits the root's affair.
     affair_id: input.affair_id ?? null,
+    // m134 — original sales request reminder (newer-columns bucket → shares the
+    // retry-without fallback below if the column is missing on this env).
+    original_sales_request: input.original_sales_request ?? null,
     // m059 — versioning. Only meaningful on a revision; a fresh quote
     // is version 1 with no root. The -V{n} suffix already lives in the
     // number, so even if these columns are missing the version is
@@ -469,7 +476,7 @@ export async function saveDocument(
       .single();
     if (
       attempt.error &&
-      /(warranty_years|offer_validity|affair_name|affair_id|version|root_document_id)/.test(
+      /(warranty_years|offer_validity|affair_name|affair_id|version|root_document_id|original_sales_request)/.test(
         attempt.error.message ?? ""
       )
     ) {
@@ -500,6 +507,7 @@ export async function saveDocument(
     discount_type: l.discount_type,
     discount_value: l.discount_value,
     client_product_name: l.client_product_name || null,
+    category_id: l.category_id ?? null, // m133 — line-level product family
     config_values: l.config_values ?? {},
   }));
   const { error: linesErr } = await supabase.from("document_lines").insert(lines);

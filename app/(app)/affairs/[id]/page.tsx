@@ -50,15 +50,27 @@ export default async function AffairDetailPage({ params }: { params: { id: strin
   const id = params.id;
   const supabase = createClient();
 
+  // select * so the page works whether or not m102 (source) is applied —
+  // explicit column lists would 400 on a missing column.
   const { data: affairRec } = await supabase
     .from("affairs")
-    .select("id, client_id, name, status, owner_id, archived_at")
+    .select("*")
     .eq("id", id)
     .maybeSingle();
   if (!affairRec) notFound();
-  const affair = affairRec as AffairRecord;
+  const affair = affairRec as AffairRecord & { source?: string | null };
 
-  const [{ role }, ownerOptionsRaw, documentsRes, clientRes] = await Promise.all([
+  // CRM step 4 (m103): the deal's planned actions. Defensive pre-migration:
+  // an error (table missing) → null → the card simply doesn't render.
+  const { data: paRows, error: paError } = await supabase
+    .from("planned_actions")
+    .select("id, affair_id, action_type, title, due_date, done_at, notes, created_at")
+    .eq("affair_id", id)
+    .order("due_date", { ascending: true });
+  const plannedActions = paError ? null : ((paRows ?? []) as any[]);
+
+  const sourceTenderId = (affair as any).source_tender_id as string | null;
+  const [{ role }, ownerOptionsRaw, documentsRes, clientRes, tenderRes] = await Promise.all([
     getCurrentUserRole(),
     listAssignableOwners(),
     supabase.from("documents").select(DOC_COLS).eq("affair_id", id),
@@ -67,6 +79,15 @@ export default async function AffairDetailPage({ params }: { params: { id: strin
           .from("clients")
           .select("id, company_name, client_code, country, contact_name, sales_owner_id")
           .eq("id", affair.client_id)
+          .maybeSingle()
+      : Promise.resolve({ data: null }),
+    // m109 — tender origin for the SOURCE: TENDER banner (buyer, closing,
+    // reference, documents — read at the source, never duplicated).
+    sourceTenderId
+      ? supabase
+          .from("tenders")
+          .select("id, buyer, country, deadline, reference, platform, source_url, documents")
+          .eq("id", sourceTenderId)
           .maybeSingle()
       : Promise.resolve({ data: null }),
   ]);
@@ -253,7 +274,13 @@ export default async function AffairDetailPage({ params }: { params: { id: strin
     }
   }
 
-  const clientName = clientInfo?.company_name ?? "Unknown / unlinked client";
+  // Tender-sourced opportunities legitimately start clientless (m108/m109):
+  // the label reflects the real state instead of looking like an error.
+  const clientName =
+    clientInfo?.company_name ??
+    ((affair as any).source === "tender"
+      ? "Partner not assigned yet"
+      : "Unknown / unlinked client");
   const owners = ownerOptionsRaw.map((o) => ({ id: o.id, name: o.name }));
 
   return (
@@ -264,6 +291,24 @@ export default async function AffairDetailPage({ params }: { params: { id: strin
       owners={owners}
       canAssignOwner={canAssignOwner}
       assignableDocs={assignableDocs}
+      source={affair.source ?? null}
+      plannedActions={plannedActions}
+      tenderOrigin={
+        tenderRes.data
+          ? {
+              id: (tenderRes.data as any).id,
+              buyer: (tenderRes.data as any).buyer ?? null,
+              country: (tenderRes.data as any).country ?? null,
+              deadline: (tenderRes.data as any).deadline ?? null,
+              reference: (tenderRes.data as any).reference ?? null,
+              platform: (tenderRes.data as any).platform ?? null,
+              source_url: (tenderRes.data as any).source_url ?? null,
+              documents: Array.isArray((tenderRes.data as any).documents)
+                ? (tenderRes.data as any).documents
+                : [],
+            }
+          : null
+      }
     />
   );
 }

@@ -67,11 +67,30 @@ export function registerPdfFonts() {
   Font.register({
     family: PDF_FONT_FAMILIES.body,
     fonts: [
-      { src: fontUrl("ArminGrotesk-Thin.otf"), fontWeight: 100 },
-      { src: fontUrl("ArminGrotesk-UltraLight.otf"), fontWeight: 200 },
+      // ⚠ Each (family, weight) MUST use a UNIQUE file URL. @react-pdf keys its
+      // font cache by `src`, so two weights pointing at the SAME file collapse
+      // and one weight becomes unresolvable ("Could not resolve font … fontWeight
+      // 200"). Two problems were fixed here (2026-06-30):
+      //   1. ArminGrotesk-UltraLight.otf cannot be parsed by the browser's
+      //      @react-pdf/fontkit (Node parses it fine) → it's excluded entirely.
+      //   2. Weight 200 (the body default, used on EVERY PDF) must keep a
+      //      distinct, parseable file. Weight 100 is unused by any PDF, so the
+      //      ultralight body (200) is backed by Thin.otf — the lightest parseable
+      //      face, a close match to the intended UltraLight.
+      // ⚠ Owner: once the REAL licensed UltraLight + Akzidenz files are dropped
+      // in public/fonts (distinct, valid), restore 200→UltraLight and the title.
+      { src: fontUrl("ArminGrotesk-Thin.otf"), fontWeight: 200 },
       { src: fontUrl("ArminGrotesk-Regular.otf"), fontWeight: 400 },
       { src: fontUrl("ArminGrotesk-SemiBold.otf"), fontWeight: 600 },
       { src: fontUrl("ArminGrotesk-Black.otf"), fontWeight: 900 },
+      // ⚠ Italic variants are REQUIRED, not optional. @react-pdf/font resolves
+      // strictly by fontStyle with NO italic→normal fallback: any text with
+      // `fontStyle: "italic"` and no matching italic face throws "Could not
+      // resolve font … fontWeight N" and aborts the ENTIRE PDF. The Factory PDF
+      // uses italic for warnings + factory-mapping hints (weight 200), so the
+      // lighter weights nearest-match down to the regular italic below.
+      { src: fontUrl("ArminGrotesk-Italic.otf"), fontWeight: 400, fontStyle: "italic" },
+      { src: fontUrl("ArminGrotesk-BlackItalic.otf"), fontWeight: 900, fontStyle: "italic" },
     ],
   });
 
@@ -83,7 +102,14 @@ export function registerPdfFonts() {
     family: PDF_FONT_FAMILIES.title,
     fonts: [
       {
-        src: fontUrl("AkzidenzGrotesk-LightExtended.otf"),
+        // AkzidenzGrotesk-LightExtended.otf is a byte-identical DUPLICATE of
+        // the unparseable ArminGrotesk-UltraLight.otf, so it can't back the
+        // title. Use the distinct, otherwise-unused Armin_Grotesk_Normal.otf —
+        // a UNIQUE src that collides with none of the body weights above (a
+        // shared src would collapse and drop a weight). Until the real
+        // Akzidenz-Grotesk BQ Light Extended file is supplied, this keeps the
+        // title rendering.
+        src: fontUrl("Armin_Grotesk_Normal.otf"),
         fontWeight: 300,
       },
     ],

@@ -8,6 +8,7 @@ import { DOC_STATUSES, isTechnicalRole, isAdminLike, canSupervise } from "@/lib/
 import { getCurrentUserRole } from "@/lib/auth";
 import { emitEvent } from "@/lib/events";
 import { requireCapability } from "@/lib/permissions";
+import { buildTaskListLineFromQuotationLine } from "@/lib/manual-items";
 import {
   PROBABILITY_STAGES,
   FORECAST_CATEGORIES,
@@ -218,7 +219,7 @@ export async function generateProductionTaskList(formData: FormData) {
   //   Quote   SLX-SUK-26-034  →  PTL  PTL-SLX-SUK-26-034
   const { data: doc, error: docErr } = await supabase
     .from("documents")
-    .select("id, number, type, client_id, affair_id, freight_type")
+    .select("id, number, type, client_id, affair_id, freight_type, original_sales_request")
     .eq("id", quotation_id)
     .single();
   if (docErr || !doc) throw new Error(docErr?.message ?? "Quotation not found");
@@ -239,7 +240,10 @@ export async function generateProductionTaskList(formData: FormData) {
   const { data: srcLines, error: linesErr } = await supabase
     .from("document_lines")
     .select(
-      "id, product_id, quantity, config_values, selected_options, client_product_name"
+      // unit_price comes across for MANUAL items only — a read-only reference
+      // price (poles are bought per-project). The commercial source of truth
+      // stays the proforma; we never edit this on the task list (m135).
+      "id, product_id, category_id, quantity, config_values, selected_options, client_product_name, unit_price"
     )
     .eq("document_id", quotation_id);
   if (linesErr) throw new Error(linesErr.message);
@@ -275,6 +279,7 @@ export async function generateProductionTaskList(formData: FormData) {
       // F4: inherit the affair link from the source doc so the task list stays
       // grouped under its affaire (docs-by-affaire views + affair-scoped RLS).
       affair_id: (doc as any).affair_id ?? null,
+      original_sales_request: (doc as any).original_sales_request ?? null, // m134
       shipping_method: doc.freight_type,
       created_by: user.id,
       // New workflow starts in draft — sales still has work to do before
@@ -286,23 +291,33 @@ export async function generateProductionTaskList(formData: FormData) {
     .single();
   if (insErr) throw new Error(insErr.message);
 
-  // Copy each quotation line into a task list line. Merge legacy
-  // selected_options into config_values so factory teams see everything.
-  const rows = (srcLines ?? []).map((l: any, i: number) => ({
-    task_list_id: inserted!.id,
-    product_id: l.product_id,
-    quantity: l.quantity,
-    config_values: {
-      ...(l.selected_options ?? {}),
-      ...(l.config_values ?? {}),
-    },
-    internal_notes: null,
-    position: i,
-  }));
+  // Copy each quotation line into a task list line. The shared pure builder
+  // (lib/manual-items) applies the m135 MANUAL-item rule: a line with no
+  // product AND no category (poles/masts and any future custom line) becomes a
+  // manual item — its free-text name is snapshotted into product_name (the
+  // column the page + factory exports already read) and the quoted unit price
+  // is copied as a read-only reference. Catalog + Service-Request lines (with a
+  // category) are untouched. It also merges legacy selected_options into
+  // config_values so factory teams see everything.
+  const rows = (srcLines ?? []).map((l: any, i: number) =>
+    buildTaskListLineFromQuotationLine(l, inserted!.id, i)
+  );
   if (rows.length) {
-    const { error: tlErr } = await supabase
+    let { error: tlErr } = await supabase
       .from("production_task_list_lines")
       .insert(rows);
+    // Resilience: if the m135 columns aren't migrated yet, retry WITHOUT them so
+    // Launch Production keeps working for catalog quotations. product_name (the
+    // manual item's name) is an m089 column that already exists, so poles still
+    // get their name; only the is_manual flag + reference price wait for m135.
+    if (tlErr && /is_manual|unit_price/i.test(tlErr.message)) {
+      const legacyRows = rows.map(
+        ({ is_manual, unit_price, ...rest }) => rest
+      );
+      ({ error: tlErr } = await supabase
+        .from("production_task_list_lines")
+        .insert(legacyRows));
+    }
     if (tlErr) throw new Error(tlErr.message);
   }
 
@@ -395,6 +410,7 @@ export async function launchProduction(formData: FormData) {
         number: numberRow,
         client_id: src.client_id,
         affair_id: src.affair_id,
+        original_sales_request: src.original_sales_request ?? null, // m134
         type: "proforma",
         status: "draft",
         incoterm: src.incoterm,
@@ -429,6 +445,7 @@ export async function launchProduction(formData: FormData) {
     const lines = (src.document_lines ?? []).map((l: any) => ({
       document_id: proformaId,
       product_id: l.product_id,
+      category_id: l.category_id ?? null, // m133 — keep the family across the copy
       quantity: l.quantity,
       selected_options: l.selected_options,
       unit_price: l.unit_price,

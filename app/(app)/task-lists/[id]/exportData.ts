@@ -54,6 +54,9 @@ export type ExportLine = {
   /** Technical-only fields filled by the task list manager (read-only refs). */
   technical_entries: Array<{ label: string; value: string }>;
   internal_notes: string | null;
+  /** m135 — manual item (pole/mast/non-catalog): tag + free-text specs. */
+  is_manual: boolean;
+  manual_specs: string | null;
 };
 
 export type ExportData = {
@@ -106,7 +109,9 @@ export async function fetchExportData(taskListId: string): Promise<ExportData> {
     supabase
       .from("production_task_list_lines")
       .select(
-        "quantity, config_values, technical_values, factory_overrides, internal_notes, position, product_name, product_sku, product_category, products(name, sku, category, category_id)"
+        // m135 manual-item columns (is_manual, manual_specs) are fetched
+        // separately + defensively below so exports work before the migration.
+        "id, quantity, config_values, technical_values, factory_overrides, internal_notes, position, product_name, product_sku, product_category, products(name, sku, category, category_id)"
       )
       .eq("task_list_id", taskListId)
       .order("position"),
@@ -130,6 +135,27 @@ export async function fetchExportData(taskListId: string): Promise<ExportData> {
   ]);
 
   if (!task) throw new Error("Task list not found");
+
+  // m135 — manual-item columns, fetched defensively (empty map if the migration
+  // isn't applied yet) so the factory export never 500s on a missing column.
+  const manualByLine = new Map<
+    string,
+    { is_manual: boolean; manual_specs: string | null }
+  >();
+  {
+    const { data, error } = await supabase
+      .from("production_task_list_lines")
+      .select("id, is_manual, manual_specs")
+      .eq("task_list_id", taskListId);
+    if (!error) {
+      for (const r of (data ?? []) as any[]) {
+        manualByLine.set(r.id, {
+          is_manual: r.is_manual === true,
+          manual_specs: r.manual_specs ?? null,
+        });
+      }
+    }
+  }
 
   // User labels = canonical Display Names (Admin → User roles, via
   // user_profiles m052), so the exported factory PDF reads "Maurice", not
@@ -338,7 +364,8 @@ export async function fetchExportData(taskListId: string): Promise<ExportData> {
 
     return {
       // Fall back to the line's SNAPSHOT (m089) when the catalog product was
-      // deleted, so the factory PDF / task list stays readable.
+      // deleted, so the factory PDF / task list stays readable. For a MANUAL
+      // item (m135) the snapshot IS the name (there is no catalog product).
       product_name: l.products?.name ?? l.product_name ?? "—",
       product_sku: l.products?.sku ?? l.product_sku ?? null,
       product_category: l.products?.category ?? l.product_category ?? null,
@@ -347,6 +374,8 @@ export async function fetchExportData(taskListId: string): Promise<ExportData> {
       rows,
       technical_entries,
       internal_notes: l.internal_notes ?? null,
+      is_manual: manualByLine.get(l.id)?.is_manual ?? false,
+      manual_specs: manualByLine.get(l.id)?.manual_specs ?? null,
     };
   });
 

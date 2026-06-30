@@ -5,9 +5,9 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { emitEvent } from "@/lib/events";
 import { requireCapability } from "@/lib/permissions";
-import { normalizeBlProfile } from "@/lib/bl";
-import { getCurrentUserRole } from "@/lib/auth";
-import { isTechnicalRole } from "@/lib/types";
+import { normalizeBlProfile, blProfileStatus } from "@/lib/bl";
+import { getCurrentUserRole, requireSuperAdmin } from "@/lib/auth";
+import { canSupervise } from "@/lib/types";
 
 /**
  * Reassign a client's SALES OWNER (account manager) — m066.
@@ -24,7 +24,7 @@ export async function assignClientOwner(formData: FormData) {
   const owner_id = raw && raw !== "__unassign__" ? raw : null;
 
   const { role } = await getCurrentUserRole();
-  if (!isTechnicalRole(role)) {
+  if (!canSupervise(role)) {
     throw new Error("Only management roles can reassign account ownership.");
   }
 
@@ -127,6 +127,7 @@ export async function duplicateDocument(formData: FormData) {
   const lines = (src.document_lines ?? []).map((l: any) => ({
     document_id: inserted!.id,
     product_id: l.product_id,
+    category_id: l.category_id ?? null, // m133 — keep the family across the copy
     quantity: l.quantity,
     selected_options: l.selected_options,
     unit_price: l.unit_price,
@@ -246,7 +247,23 @@ export async function createClientAction(formData: FormData) {
     starting_sequence_number: num(formData, "starting_sequence_number", 0),
     custom_fields: customFields(formData),
   };
-  if (!basePayload.company_name) throw new Error("Company name is required");
+  // Validation errors are RETURNED (not thrown) so the modal can show them
+  // inline and keep everything the user typed — throwing bubbles to the
+  // generic "We couldn't complete that action" boundary and discards the form.
+  if (!basePayload.company_name) return { error: "Company name is required." };
+  // A client without a 3-letter code silently breaks every quotation save
+  // later (buildPayload in the document form rejects it). Enforce it here at
+  // creation — the single source of truth — so the broken state can never be
+  // created. The inline new-client flow on the quotation form already
+  // requires it; this brings the dedicated form in line. (clientCode() above
+  // validates the 3-letter format; this guards the empty case with a clear,
+  // actionable message.)
+  if (!basePayload.client_code) {
+    return {
+      error:
+        "A 3-letter client code is required (e.g. ARL). It is used in every quotation, proforma and production-order number — a client without it can't have documents saved.",
+    };
+  }
 
   // Newer columns (m036 export fields + m051 phone code + m058 owner).
   // We attempt the insert with them included; if the DB rejects because
@@ -281,7 +298,18 @@ export async function createClientAction(formData: FormData) {
       .select("id, company_name, client_code")
       .single());
   }
-  if (error) throw new Error(error.message);
+  if (error) {
+    // Surface a friendly, inline error instead of crashing the page. The most
+    // common case by far is a duplicate 3-letter code (the space is tiny) —
+    // catch the unique-violation explicitly so the user can just pick another.
+    const msg = error.message ?? "";
+    if ((error as { code?: string }).code === "23505" || /client_code|unique/i.test(msg)) {
+      return {
+        error: `Client code "${basePayload.client_code}" is already used by another client. Please choose a different 3-letter code.`,
+      };
+    }
+    return { error: msg || "Could not create the client. Please try again." };
+  }
 
   if (inserted?.id) {
     await emitEvent({
@@ -301,6 +329,16 @@ export async function createClientAction(formData: FormData) {
   }
 
   revalidatePath("/clients");
+  // F6 fix — redirect SERVER-SIDE (deterministic, handled at the server-action
+  // boundary by Next) to the created client, carrying a one-shot ?flash success
+  // toast. The previous pattern returned the id and let the modal's CLIENT-side
+  // router.push() navigate, which did NOT fire reliably (no redirect, no toast,
+  // user stranded on /clients). redirect() throws NEXT_REDIRECT and never returns.
+  redirect(
+    inserted?.id
+      ? `/clients/${inserted.id}?flash=${encodeURIComponent("✓ Client created")}`
+      : `/clients?flash=${encodeURIComponent("✓ Client created")}`,
+  );
 }
 
 /**
@@ -349,6 +387,72 @@ export async function updateClientBlProfile(formData: FormData) {
     payload: { section: "bl_profile" },
     bestEffort: true,
   });
+
+  // --- BL request resolution loop (Operations ↔ Sales) -------------------
+  // If the profile is NOW complete, close every pending "Operations
+  // requested BL info" request on this client's orders:
+  //   1. emit po.bl_info_resolved on each order (timeline: "blocker
+  //      lifted") — this is also what re-arms the anti-duplicate gate in
+  //      requestBlInfoFromSales;
+  //   2. auto-complete the "Complete Shipping / BL Profile" planned
+  //      action the request created (the sales to-do resolves on FACTS —
+  //      required fields filled — not on a manual dismiss).
+  // Best-effort by design: a failure here must never block saving the
+  // profile itself.
+  try {
+    if (blProfileStatus(profile) === "complete") {
+      const { data: reqEvents } = await supabase
+        .from("events")
+        .select("entity_id, created_at, payload")
+        .eq("event_type", "po.bl_info_requested")
+        .contains("payload", { client_id: id })
+        .order("created_at", { ascending: false })
+        .limit(25);
+      const seenOrders = new Set<string>();
+      for (const ev of (reqEvents ?? []) as any[]) {
+        const orderId = ev.entity_id as string;
+        if (seenOrders.has(orderId)) continue;
+        seenOrders.add(orderId);
+        // Pending = no resolution newer than the latest request.
+        const { data: lastRes } = await supabase
+          .from("events")
+          .select("created_at")
+          .eq("entity_type", "production_order")
+          .eq("entity_id", orderId)
+          .eq("event_type", "po.bl_info_resolved")
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        if (lastRes && Date.parse(lastRes.created_at) >= Date.parse(ev.created_at)) {
+          continue; // already resolved
+        }
+        await emitEvent({
+          entity_type: "production_order",
+          entity_id: orderId,
+          event_type: "po.bl_info_resolved",
+          message:
+            "Sales completed the Shipping / BL profile — shipment booking blocker resolved.",
+          payload: { client_id: id, section: "bl_profile" },
+          bestEffort: true,
+        });
+        // Tick the sales to-do created by the request (m103). Matched on
+        // the exact title the request used; only open actions are closed.
+        const affairId = (ev.payload?.affair_id as string | null) ?? null;
+        if (affairId) {
+          await supabase
+            .from("planned_actions")
+            .update({ done_at: new Date().toISOString() })
+            .eq("affair_id", affairId)
+            .eq("title", "Complete Shipping / BL Profile")
+            .is("done_at", null);
+        }
+        revalidatePath(`/production/orders/${orderId}`);
+      }
+      if (seenOrders.size > 0) revalidatePath("/dashboard");
+    }
+  } catch {
+    /* resolution is best-effort — saving the profile already succeeded */
+  }
 
   revalidatePath(`/clients/${id}`);
   revalidatePath(`/clients/${id}/edit`);
@@ -520,6 +624,47 @@ export async function deleteClientAction(formData: FormData) {
 }
 
 /**
+ * Permanent (physical) delete of a client — SUPER-ADMIN ONLY (m128).
+ *
+ * Backed by admin_delete_client() (SECURITY DEFINER): re-checks super-admin,
+ * REFUSES if the client has any quotation / task list / production order
+ * (archive instead — history is preserved), else cascades the safe children
+ * (affairs, project requests + children, planned actions, contacts) and
+ * deletes the client, atomically.
+ */
+export async function deleteClientPermanently(formData: FormData) {
+  await requireSuperAdmin();
+  const id = String(formData.get("id"));
+  if (!id) throw new Error("Missing client id");
+  const supabase = createClient();
+  const { data: snapshot } = await supabase
+    .from("clients")
+    .select("company_name, client_code")
+    .eq("id", id)
+    .maybeSingle();
+  const { error } = await supabase.rpc("admin_delete_client", { p_client: id });
+  if (error) {
+    if (error.code === "42883") {
+      throw new Error(
+        "admin_delete_client RPC not deployed yet — apply migration 128_admin_delete_client.sql in Supabase."
+      );
+    }
+    throw new Error(error.message);
+  }
+  await emitEvent({
+    entity_type: "client",
+    entity_id: id,
+    event_type: "client.deleted",
+    message: `Client permanently deleted: ${snapshot?.company_name ?? "(unknown)"}${
+      snapshot?.client_code ? ` (${snapshot.client_code})` : ""
+    }`,
+    bestEffort: true,
+  });
+  revalidatePath("/clients");
+  redirect("/clients");
+}
+
+/**
  * Soft-archive a client.
  *
  * Sets `archived_at = now()` so the client disappears from active
@@ -598,4 +743,112 @@ export async function unarchiveClientAction(formData: FormData) {
 
   revalidatePath("/clients");
   revalidatePath(`/clients/${id}`);
+}
+
+// =====================================================================
+// CRM step 2 (m101) — contacts: multiple contact persons per client.
+// The embedded clients.contact_name/email/phone_number stay untouched
+// (they remain the company contact printed on documents); these actions
+// manage the address book. RLS gates writes (client owner/creator or
+// management).
+// =====================================================================
+
+function contactFields(formData: FormData) {
+  const s = (k: string) => {
+    const v = formData.get(k);
+    return v == null ? null : String(v).trim() || null;
+  };
+  return {
+    name: String(formData.get("name") ?? "").trim(),
+    title: s("title"),
+    email: s("email"),
+    phone: s("phone"),
+    notes: s("notes"),
+    is_primary: formData.get("is_primary") === "on",
+  };
+}
+
+export async function createContactAction(formData: FormData) {
+  const clientId = String(formData.get("client_id") ?? "");
+  if (!clientId) throw new Error("Missing client id");
+  const f = contactFields(formData);
+  if (!f.name) throw new Error("Contact name is required");
+
+  const supabase = createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  // Only one primary per client — demote others first.
+  if (f.is_primary) {
+    await supabase.from("contacts").update({ is_primary: false }).eq("client_id", clientId);
+  }
+  const { error } = await supabase.from("contacts").insert({
+    client_id: clientId,
+    ...f,
+    created_by: user?.id ?? null,
+  });
+  if (error) throw new Error(error.message);
+
+  await emitEvent({
+    entity_type: "client",
+    entity_id: clientId,
+    event_type: "client.contact_added",
+    message: `Contact added: ${f.name}`,
+    payload: { name: f.name, title: f.title },
+    bestEffort: true,
+  });
+  revalidatePath(`/clients/${clientId}`);
+}
+
+export async function updateContactAction(formData: FormData) {
+  const id = String(formData.get("id") ?? "");
+  const clientId = String(formData.get("client_id") ?? "");
+  if (!id || !clientId) throw new Error("Missing contact id");
+  const f = contactFields(formData);
+  if (!f.name) throw new Error("Contact name is required");
+
+  const supabase = createClient();
+  if (f.is_primary) {
+    await supabase.from("contacts").update({ is_primary: false }).eq("client_id", clientId);
+  }
+  const { error } = await supabase
+    .from("contacts")
+    .update({ ...f, updated_at: new Date().toISOString() })
+    .eq("id", id);
+  if (error) throw new Error(error.message);
+
+  await emitEvent({
+    entity_type: "client",
+    entity_id: clientId,
+    event_type: "client.contact_updated",
+    message: `Contact updated: ${f.name}`,
+    payload: { name: f.name, title: f.title },
+    bestEffort: true,
+  });
+  revalidatePath(`/clients/${clientId}`);
+}
+
+export async function deleteContactAction(formData: FormData) {
+  const id = String(formData.get("id") ?? "");
+  const clientId = String(formData.get("client_id") ?? "");
+  if (!id || !clientId) throw new Error("Missing contact id");
+
+  const supabase = createClient();
+  const { data: snapshot } = await supabase
+    .from("contacts")
+    .select("name")
+    .eq("id", id)
+    .maybeSingle();
+  const { error } = await supabase.from("contacts").delete().eq("id", id);
+  if (error) throw new Error(error.message);
+
+  await emitEvent({
+    entity_type: "client",
+    entity_id: clientId,
+    event_type: "client.contact_deleted",
+    message: `Contact removed: ${snapshot?.name ?? "(unknown)"}`,
+    bestEffort: true,
+  });
+  revalidatePath(`/clients/${clientId}`);
 }

@@ -20,17 +20,7 @@ export const dynamic = "force-dynamic";
 
 function StatusBadge({ status }: { status?: PriceListStatus }) {
   const s = status ?? "draft";
-  const cls =
-    s === "published"
-      ? "bg-emerald-100 text-emerald-800"
-      : s === "archived"
-        ? "bg-neutral-200 text-neutral-500"
-        : "bg-amber-100 text-amber-800";
-  return (
-    <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase ${cls}`}>
-      {s}
-    </span>
-  );
+  return <span className={`px-sbadge ${s}`}>{s}</span>;
 }
 
 /**
@@ -81,21 +71,18 @@ export default async function PriceListDetailPage({
   const nameOf = (id: string | null | undefined) => (id ? ownerName.get(id) ?? "—" : "—");
 
   return (
-    <div className="mx-auto max-w-screen-2xl px-6 py-8 space-y-6">
-      <Link
-        href="/admin/pricing/library"
-        className="text-sm text-neutral-500 hover:text-neutral-900"
-      >
+    <div className="solux-pro mx-auto max-w-screen-2xl px-6 py-8 space-y-6">
+      <Link className="sx-backlink" href="/admin/pricing/library">
         ← Price List Library
       </Link>
 
       {/* HEADER */}
-      <div className="rounded-lg border border-neutral-200 bg-white p-4 space-y-3">
-        <div className="flex flex-wrap items-center gap-2">
-          <h1 className="doc-title">{list.name}</h1>
+      <div className="card sec">
+        <div className="flex flex-wrap items-center gap-3">
+          <h1 style={{ fontSize: 24, fontWeight: 700, letterSpacing: "-0.01em", margin: 0 }}>{list.name}</h1>
           <StatusBadge status={list.status} />
         </div>
-        <div className="grid grid-cols-2 gap-x-6 gap-y-1.5 text-sm sm:grid-cols-3 lg:grid-cols-4">
+        <div className="px-meta-grid">
           <Meta label="Category" value={list.categoryName ?? "All"} />
           <Meta
             label="Margins T1/T2/T3"
@@ -103,237 +90,176 @@ export default async function PriceListDetailPage({
           />
           <Meta label="Cost version" value={list.costVersionLabel ?? "Latest active"} />
           <Meta label="Effective date" value={list.effective_date ?? "—"} />
-          <Meta
-            label="Created"
-            value={`${list.created_at ? list.created_at.slice(0, 10) : "—"} · ${nameOf(list.created_by)}`}
-          />
-          <Meta
-            label="Last updated"
-            value={`${list.updated_at ? list.updated_at.slice(0, 10) : "—"} · ${nameOf(list.updated_by)}`}
-          />
+          <Meta label="Created" value={`${list.created_at ? list.created_at.slice(0, 10) : "—"} · ${nameOf(list.created_by)}`} />
+          <Meta label="Last updated" value={`${list.updated_at ? list.updated_at.slice(0, 10) : "—"} · ${nameOf(list.updated_by)}`} />
           <Meta label="Products" value={String(list.productCount)} />
           <Meta
             label="Assigned to"
             value={
               list.assignments.length === 0
                 ? "—"
-                : list.assignments
-                    .map((a) => a.assignee_name ?? a.assignee_id ?? a.assignee_type)
-                    .join(", ")
+                : list.assignments.map((a) => a.assignee_name ?? a.assignee_id ?? a.assignee_type).join(", ")
             }
           />
         </div>
-        {list.notes && <p className="text-sm italic text-neutral-500">{list.notes}</p>}
+        {list.notes && <p style={{ fontStyle: "italic", marginTop: 14, fontSize: 13, color: "var(--sx-mute)" }}>{list.notes}</p>}
       </div>
 
       {/* ACTIONS */}
-      <div className="rounded-lg border border-neutral-200 bg-white p-4 space-y-2">
-        <div className="eyebrow">Actions</div>
-        <p className="text-xs text-neutral-500">
-          Publishing makes these prices active in the quote builder for sellers assigned to
-          this list ({costedCount} product{costedCount === 1 ? "" : "s"} with a cost
-          {missingCount > 0 ? `; ${missingCount} skipped — no cost` : ""}).
+      <div className="card sec">
+        <div className="px-micro">Actions</div>
+        <p style={{ fontSize: 13, color: "var(--sx-mute)", lineHeight: 1.6, margin: "8px 0 16px", maxWidth: 880 }}>
+          Publishing makes these prices active in the quote builder for sellers assigned to this list ({costedCount} product{costedCount === 1 ? "" : "s"} with a cost{missingCount > 0 ? `; ${missingCount} skipped — no cost` : ""}).
         </p>
-        <div className="flex flex-wrap items-center gap-3">
+        <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 16 }}>
           <PricingActionsClient priceListId={list.id} listName={list.name} totalCount={costedCount} missingCount={missingCount} />
           {list.status === "published" && (
             <form action={unpublishPriceList}>
               <input type="hidden" name="id" value={list.id} />
-              <button className="text-sm text-neutral-600 hover:underline">Unpublish</button>
+              <button className="sx-muted-link">Unpublish</button>
             </form>
           )}
           <form action={duplicatePriceList}>
             <input type="hidden" name="id" value={list.id} />
-            <button className="text-sm text-neutral-600 hover:underline">Duplicate</button>
+            <button className="sx-muted-link">Duplicate</button>
           </form>
           {list.status !== "archived" && (
             <form action={archivePriceList}>
               <input type="hidden" name="id" value={list.id} />
-              <button className="text-sm text-neutral-600 hover:underline">Archive</button>
+              <button className="sx-muted-link">Archive</button>
             </form>
           )}
           <form action={deletePriceList}>
             <input type="hidden" name="id" value={list.id} />
-            <button className="text-sm text-rose-600 hover:underline">Delete</button>
+            <button className="px-link-amber">Delete</button>
           </form>
         </div>
       </div>
 
-      {/* INCOMPLETE-LINE WARNING */}
+      {/* MISSING-COST NOTICE */}
       {missingCount > 0 && (
-        <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-          <span className="font-semibold">
-            {missingCount} of {rows.length} product{rows.length === 1 ? "" : "s"} in this category{" "}
-            {missingCount === 1 ? "has" : "have"} no active cost.
-          </span>{" "}
-          {missingCount === 1 ? "It is" : "They are"} shown below as{" "}
-          <span className="font-medium">Missing cost</span> and will be skipped when you publish —
-          the other {costedCount} calculate normally. Enter a cost in Cost entry, then re-open and
-          re-publish this list to include {missingCount === 1 ? "it" : "them"}.
+        <div className="px-notice amber">
+          <b>{missingCount} of {rows.length} product{rows.length === 1 ? "" : "s"} in this category {missingCount === 1 ? "has" : "have"} no active cost.</b>{" "}
+          {missingCount === 1 ? "It is" : "They are"} shown below as <b>Missing cost</b> and will be skipped when you publish — the other {costedCount} calculate normally. Enter a cost in Cost entry, then re-open and re-publish this list to include {missingCount === 1 ? "it" : "them"}.
         </div>
       )}
 
       {/* PRODUCT PRICING TABLE */}
-      <section className="panel overflow-x-auto">
-        <div className="px-4 py-2.5 bg-solux-muted border-b border-neutral-200 eyebrow flex items-center justify-between gap-2">
-          <span>Product pricing</span>
-          <span className="text-[10px] font-normal normal-case text-neutral-400">
-            Live preview at current costs · {costedCount} priced
-            {missingCount > 0 ? ` · ${missingCount} missing cost` : ""}
+      <div className="card" style={{ padding: 0, marginTop: 18 }}>
+        <div className="px-tblhead">
+          <span className="px-micro" style={{ color: "var(--sx-ink)" }}>Product pricing</span>
+          <span style={{ fontSize: 12, color: "var(--sx-mute)" }}>
+            Live preview at current costs · {costedCount} priced{missingCount > 0 ? ` · ${missingCount} missing cost` : ""}
           </span>
         </div>
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="bg-solux-accent text-left">
-              <th className="px-3 py-2 text-xs font-semibold text-neutral-700">Product</th>
-              <th className="px-3 py-2 text-xs font-semibold text-neutral-700 text-right">Cost (USD)</th>
-              <th className="px-3 py-2 text-xs font-semibold text-neutral-700 text-right">Tier 1</th>
-              <th className="px-3 py-2 text-xs font-semibold text-neutral-700 text-right">Tier 2</th>
-              <th className="px-3 py-2 text-xs font-semibold text-neutral-700 text-right">Tier 3</th>
-              <th className="px-3 py-2 text-xs font-semibold text-neutral-700">Status</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.length === 0 ? (
+        <div style={{ overflowX: "auto" }}>
+          <table className="px-grid">
+            <thead>
               <tr>
-                <td colSpan={6} className="px-3 py-6 text-center text-neutral-500">
-                  No products in this category.
-                </td>
+                <th>Product</th>
+                <th className="num">Cost (USD)</th>
+                <th className="num">Tier 1</th>
+                <th className="num">Tier 2</th>
+                <th className="num">Tier 3</th>
+                <th>Status</th>
               </tr>
-            ) : (
-              rows.map((r) => {
-                const anyThin = r.tiers.some((t) => t.thin);
-                const noCost = r.costRmb <= 0;
-                return (
-                  <tr key={r.id} className="border-t border-neutral-100">
-                    <td className="px-3 py-2">
-                      <span className="font-medium">{r.name}</span>
-                      <span className="ml-2 font-mono text-[11px] text-neutral-400">{r.sku ?? "—"}</span>
-                    </td>
-                    <td className="px-3 py-2 text-right tabular-nums">
-                      {noCost ? "—" : money(r.usdCost)}
-                    </td>
-                    {r.tiers.map((t, i) => (
-                      <td
-                        key={i}
-                        className={`px-3 py-2 text-right tabular-nums ${t.thin ? "bg-rose-50/60" : ""}`}
-                      >
-                        {noCost ? (
-                          "—"
-                        ) : (
-                          <>
-                            <span className="font-medium">{money(t.price)}</span>
-                            <span className="block text-[10px] text-neutral-500">
-                              {fmtPct(t.marginPctAfterTax)}
+            </thead>
+            <tbody>
+              {rows.length === 0 ? (
+                <tr>
+                  <td colSpan={6} style={{ textAlign: "center", padding: "28px 12px", color: "var(--sx-mute)" }}>
+                    No products in this category.
+                  </td>
+                </tr>
+              ) : (
+                rows.map((r) => {
+                  const anyThin = r.tiers.some((t) => t.thin);
+                  const noCost = r.costRmb <= 0;
+                  return (
+                    <tr key={r.id}>
+                      <td>
+                        <span className="px-pname">{r.name}</span>
+                        <span className="px-sku">{r.sku ?? "—"}</span>
+                      </td>
+                      <td className="num">{noCost ? <span className="px-muteit">—</span> : money(r.usdCost)}</td>
+                      {r.tiers.map((t, i) => (
+                        <td key={i} className={`num ${t.thin ? "thincell" : ""}`}>
+                          {noCost ? (
+                            <span className="px-muteit">—</span>
+                          ) : (
+                            <span className="px-cellprice">
+                              {money(t.price)}
+                              <span className="mg">{fmtPct(t.marginPctAfterTax)}</span>
                             </span>
-                          </>
+                          )}
+                        </td>
+                      ))}
+                      <td>
+                        {noCost ? (
+                          <span className="px-sbadge missing" title="No active cost — skipped when publishing.">Missing cost</span>
+                        ) : anyThin ? (
+                          <span className="px-sbadge thin">Thin margin</span>
+                        ) : (
+                          <span className="px-sbadge ok">OK</span>
                         )}
                       </td>
-                    ))}
-                    <td className="px-3 py-2">
-                      {noCost ? (
-                        <span
-                          className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-700"
-                          title="No active cost for this product — it will be skipped when publishing."
-                        >
-                          Missing cost
-                        </span>
-                      ) : anyThin ? (
-                        <span className="rounded-full bg-rose-100 px-2 py-0.5 text-[10px] font-semibold text-rose-700">
-                          Thin margin
-                        </span>
-                      ) : (
-                        <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">
-                          OK
-                        </span>
-                      )}
-                    </td>
-                  </tr>
-                );
-              })
-            )}
-          </tbody>
-        </table>
-      </section>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
 
       {/* EDIT DETAILS (collapsible) */}
-      <details className="rounded-lg border border-neutral-200 bg-white p-4">
-        <summary className="cursor-pointer text-sm text-neutral-600 hover:text-neutral-900">
-          Edit list details &amp; margins
-        </summary>
-        <form action={updatePriceList} className="mt-3 flex flex-wrap items-end gap-3">
+      <details className="card sec px-collap">
+        <summary>Edit list details &amp; margins</summary>
+        <form action={updatePriceList} className="px-editrow">
           <input type="hidden" name="id" value={list.id} />
-          <label className="block">
-            <span className="text-[11px] text-neutral-500">Name</span>
-            <input name="name" defaultValue={list.name} required className="mt-0.5 block rounded border px-2 py-1 text-sm" />
-          </label>
-          <label className="block">
-            <span className="text-[11px] text-neutral-500">T1</span>
-            <input name="targetMargin1" type="number" step="0.01" min="0" max="0.99" defaultValue={list.target_margin1} className="mt-0.5 block w-20 rounded border px-2 py-1 text-sm tabular-nums" />
-          </label>
-          <label className="block">
-            <span className="text-[11px] text-neutral-500">T2</span>
-            <input name="targetMargin2" type="number" step="0.01" min="0" max="0.99" defaultValue={list.target_margin2} className="mt-0.5 block w-20 rounded border px-2 py-1 text-sm tabular-nums" />
-          </label>
-          <label className="block">
-            <span className="text-[11px] text-neutral-500">T3</span>
-            <input name="targetMargin3" type="number" step="0.01" min="0" max="0.99" defaultValue={list.target_margin3} className="mt-0.5 block w-20 rounded border px-2 py-1 text-sm tabular-nums" />
-          </label>
-          <label className="block">
-            <span className="text-[11px] text-neutral-500">Effective date</span>
-            <input name="effectiveDate" type="date" defaultValue={list.effective_date ?? ""} className="mt-0.5 block rounded border px-2 py-1 text-sm" />
-          </label>
-          <label className="block flex-1 min-w-[12rem]">
-            <span className="text-[11px] text-neutral-500">Notes</span>
-            <input name="notes" defaultValue={list.notes ?? ""} className="mt-0.5 block w-full rounded border px-2 py-1 text-sm" />
-          </label>
-          <button className="btn-secondary text-sm">Save</button>
+          <div className="fcol"><span className="px-flabel">Name</span><input className="wname" name="name" defaultValue={list.name} required type="text" /></div>
+          <div className="fcol"><span className="px-flabel">T1</span><input className="w20" name="targetMargin1" type="number" step="0.01" min="0" max="0.99" defaultValue={list.target_margin1} /></div>
+          <div className="fcol"><span className="px-flabel">T2</span><input className="w20" name="targetMargin2" type="number" step="0.01" min="0" max="0.99" defaultValue={list.target_margin2} /></div>
+          <div className="fcol"><span className="px-flabel">T3</span><input className="w20" name="targetMargin3" type="number" step="0.01" min="0" max="0.99" defaultValue={list.target_margin3} /></div>
+          <div className="fcol"><span className="px-flabel">Effective date</span><input name="effectiveDate" type="date" defaultValue={list.effective_date ?? ""} /></div>
+          <div className="fcol grow"><span className="px-flabel">Notes</span><input name="notes" defaultValue={list.notes ?? ""} type="text" /></div>
+          <button className="sx-btn">Save</button>
         </form>
-        <p className="mt-1 text-[11px] text-neutral-400">
-          After editing a published list, re-publish to push the new prices to quotes.
-        </p>
+        <div className="px-fhint">After editing a published list, re-publish to push the new prices to quotes.</div>
       </details>
 
       {/* ASSIGNMENTS */}
-      <section className="rounded-lg border border-neutral-200 bg-white p-4 space-y-3">
-        <div className="eyebrow">Assigned to — who quotes on this list</div>
+      <div className="card sec">
+        <div className="px-micro">Assigned to — who quotes on this list</div>
         {list.assignments.length === 0 ? (
-          <p className="text-sm text-neutral-500">Not assigned yet.</p>
+          <p style={{ fontSize: 13, color: "var(--sx-mute)", marginTop: 10 }}>Not assigned yet.</p>
         ) : (
-          <div className="flex flex-wrap gap-2">
+          <div className="px-chips">
             {list.assignments.map((a) => (
-              <span
-                key={a.id}
-                className="inline-flex items-center gap-1 rounded-full bg-neutral-100 px-2.5 py-1 text-sm"
-              >
-                <span className="text-neutral-500">{a.assignee_type}:</span>
+              <span key={a.id} className="px-chip">
+                <span className="k">{a.assignee_type}:</span>
                 {a.assignee_name ?? a.assignee_id ?? "—"}
-                <form action={removeAssignment} className="inline">
+                <form action={removeAssignment} style={{ display: "inline" }}>
                   <input type="hidden" name="id" value={a.id} />
-                  <button className="ml-1 text-neutral-400 hover:text-rose-600" title="Unassign">
-                    ×
-                  </button>
+                  <button className="x" title="Unassign">×</button>
                 </form>
               </span>
             ))}
           </div>
         )}
-        <div className="border-t border-neutral-100 pt-3">
-          <AssignmentForm
-            priceListId={list.id}
-            sellers={owners.map((s) => ({ id: s.id, name: s.name }))}
-          />
+        <div style={{ borderTop: "1px solid var(--sx-line)", marginTop: 16, paddingTop: 16 }}>
+          <AssignmentForm priceListId={list.id} sellers={owners.map((s) => ({ id: s.id, name: s.name }))} />
         </div>
-      </section>
+      </div>
     </div>
   );
 }
 
 function Meta({ label, value }: { label: string; value: string }) {
   return (
-    <div className="min-w-0">
-      <div className="text-[10px] uppercase tracking-widerx text-neutral-400">{label}</div>
-      <div className="truncate text-neutral-800">{value}</div>
+    <div className="meta min-w-0">
+      <div className="mk">{label}</div>
+      <div className="mv truncate">{value}</div>
     </div>
   );
 }

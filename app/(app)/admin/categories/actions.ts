@@ -1,7 +1,12 @@
 "use server";
 
 import { createClient } from "@/lib/supabase/server";
-import { requireAdmin } from "@/lib/auth";
+import { requireCapability, requireCapabilityOrAdmin } from "@/lib/permissions";
+import {
+  buildFactoryMappingClonePlan,
+  type SourceMappedOption,
+  type TargetOption,
+} from "@/lib/factory-mapping-clone";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import type { ConfigFieldType } from "@/lib/types";
@@ -26,7 +31,7 @@ function bool(fd: FormData, key: string) {
 // ---------- CATEGORIES ----------
 
 export async function createCategory(formData: FormData) {
-  await requireAdmin();
+  await requireCapabilityOrAdmin("admin.manage_categories");
   const name = str(formData, "name");
   if (!name) throw new Error("Category name is required");
 
@@ -49,7 +54,7 @@ export async function createCategoryReturning(
   name: string,
   position: number
 ): Promise<{ id: string }> {
-  await requireAdmin();
+  await requireCapabilityOrAdmin("admin.manage_categories");
   const clean = name.trim();
   if (!clean) throw new Error("Category name is required");
 
@@ -67,7 +72,7 @@ export async function createCategoryReturning(
 }
 
 export async function renameCategory(formData: FormData) {
-  await requireAdmin();
+  await requireCapabilityOrAdmin("admin.manage_categories");
   const id = String(formData.get("id"));
   const name = str(formData, "name");
   if (!id) throw new Error("Missing category id");
@@ -93,7 +98,7 @@ export async function renameCategory(formData: FormData) {
 }
 
 export async function deleteCategory(formData: FormData) {
-  await requireAdmin();
+  await requireCapabilityOrAdmin("admin.manage_categories");
   const id = String(formData.get("id"));
   if (!id) throw new Error("Missing category id");
   // Optional: move this category's products to another category before deleting.
@@ -149,7 +154,7 @@ export async function deleteCategory(formData: FormData) {
 // ---------- FIELDS ----------
 
 export async function createConfigField(formData: FormData) {
-  await requireAdmin();
+  await requireCapabilityOrAdmin("admin.manage_categories");
   const category_id = String(formData.get("category_id"));
   const field_name = str(formData, "field_name");
   const field_type = str(formData, "field_type");
@@ -232,7 +237,7 @@ export async function createConfigField(formData: FormData) {
 }
 
 export async function updateConfigField(formData: FormData) {
-  await requireAdmin();
+  await requireCapabilityOrAdmin("admin.manage_categories");
   const id = String(formData.get("id"));
   const category_id = String(formData.get("category_id"));
   if (!id) throw new Error("Missing field id");
@@ -277,7 +282,7 @@ export async function updateConfigField(formData: FormData) {
 }
 
 export async function deleteConfigField(formData: FormData) {
-  await requireAdmin();
+  await requireCapabilityOrAdmin("admin.manage_categories");
   const id = String(formData.get("id"));
   const category_id = String(formData.get("category_id"));
   if (!id) throw new Error("Missing field id");
@@ -292,7 +297,7 @@ export async function deleteConfigField(formData: FormData) {
 // ---------- FIELD OPTIONS ----------
 
 export async function addFieldOption(formData: FormData) {
-  await requireAdmin();
+  await requireCapabilityOrAdmin("admin.manage_categories");
   const field_id = String(formData.get("field_id"));
   const category_id = String(formData.get("category_id"));
   const option_value = str(formData, "option_value");
@@ -316,7 +321,7 @@ export async function addFieldOption(formData: FormData) {
  * current max. Empty lines are ignored. Much faster than one-at-a-time.
  */
 export async function addFieldOptionsBulk(formData: FormData) {
-  await requireAdmin();
+  await requireCapabilityOrAdmin("admin.manage_categories");
   const field_id = String(formData.get("field_id"));
   const category_id = String(formData.get("category_id"));
   const raw = String(formData.get("bulk_options") ?? "");
@@ -362,7 +367,7 @@ export async function addFieldOptionsBulk(formData: FormData) {
 }
 
 export async function deleteFieldOption(formData: FormData) {
-  await requireAdmin();
+  await requireCapabilityOrAdmin("admin.manage_categories");
   const id = String(formData.get("id"));
   const category_id = String(formData.get("category_id"));
   if (!id) throw new Error("Missing option id");
@@ -387,9 +392,17 @@ export async function deleteFieldOption(formData: FormData) {
  * in the copy so you can duplicate a template to derive a new variant).
  */
 export async function duplicateCategory(formData: FormData) {
-  await requireAdmin();
+  await requireCapabilityOrAdmin("admin.manage_categories");
   const id = String(formData.get("id"));
   if (!id) throw new Error("Missing category id");
+
+  // Optional: also clone the source family's factory mappings onto the copy.
+  // Writing factory_mappings is governed by `factory_mapping.access` at BOTH
+  // the app layer and RLS (migration 088) — enforce it up front, before any
+  // writes, so we never leave a half-built copy that then fails on the mapping
+  // upsert. (Admins hold this capability in the matrix, so they pass.)
+  const copyMappings = bool(formData, "copy_factory_mappings");
+  if (copyMappings) await requireCapability("factory_mapping.access");
 
   const supabase = createClient();
 
@@ -414,7 +427,7 @@ export async function duplicateCategory(formData: FormData) {
   const { data: srcOptions } = fieldIds.length
     ? await supabase
         .from("config_field_options")
-        .select("field_id, option_value, option_order")
+        .select("id, field_id, option_value, option_order")
         .in("field_id", fieldIds)
         .order("option_order")
     : { data: [] };
@@ -459,7 +472,8 @@ export async function duplicateCategory(formData: FormData) {
       oldToNew.set(f.id, newF.id);
     }
 
-    // 4. Copy options using new field ids.
+    // 4. Copy options using new field ids. Capture the inserted ids so we can
+    //    re-bind factory mappings to them below (step 5).
     const optRows = (srcOptions ?? [])
       .map((o) => {
         const newFieldId = oldToNew.get(o.field_id);
@@ -468,13 +482,77 @@ export async function duplicateCategory(formData: FormData) {
       })
       .filter(Boolean) as { field_id: string; option_value: string; option_order: number }[];
 
+    let newOptions: { id: string; field_id: string; option_value: string }[] = [];
     if (optRows.length > 0) {
-      const { error: optErr } = await supabase.from("config_field_options").insert(optRows);
+      const { data: inserted, error: optErr } = await supabase
+        .from("config_field_options")
+        .insert(optRows)
+        .select("id, field_id, option_value");
       if (optErr) throw new Error(optErr.message);
+      newOptions = inserted ?? [];
+    }
+
+    // 5. Optionally clone the source family's factory mappings onto the copy.
+    //    The copy has brand-new option_ids, so mappings (keyed by option_id)
+    //    don't carry over by themselves — we re-bind them by matching option
+    //    VALUE per field, the same key the resolver/gate use. Reuses the shared
+    //    pure planner so the standalone "copy between families" path and this
+    //    one stay in lock-step.
+    if (copyMappings && newOptions.length > 0) {
+      const oldFieldName = new Map((srcFields ?? []).map((f) => [f.id, f.field_name]));
+      const newFieldName = new Map<string, string>();
+      for (const f of srcFields ?? []) {
+        const nid = oldToNew.get(f.id);
+        if (nid) newFieldName.set(nid, f.field_name);
+      }
+
+      const srcOptIds = (srcOptions ?? []).map((o) => o.id);
+      const { data: mappings } = srcOptIds.length
+        ? await supabase
+            .from("factory_mappings")
+            .select("option_id, factory_instruction, factory_code, notes, active")
+            .in("option_id", srcOptIds)
+        : { data: [] as any[] };
+      const mappingByOption = new Map((mappings ?? []).map((m) => [m.option_id, m]));
+
+      const sourceMappedOptions: SourceMappedOption[] = [];
+      for (const o of srcOptions ?? []) {
+        const m = mappingByOption.get(o.id);
+        if (!m) continue;
+        sourceMappedOptions.push({
+          field_name: oldFieldName.get(o.field_id) ?? "",
+          option_value: o.option_value,
+          factory_instruction: m.factory_instruction,
+          factory_code: m.factory_code,
+          notes: m.notes,
+          active: m.active,
+        });
+      }
+
+      if (sourceMappedOptions.length > 0) {
+        const targetOptions: TargetOption[] = newOptions.map((o) => ({
+          field_id: o.field_id,
+          option_id: o.id,
+          field_name: newFieldName.get(o.field_id) ?? "",
+          option_value: o.option_value,
+        }));
+        const plan = buildFactoryMappingClonePlan({ sourceMappedOptions, targetOptions });
+        if (plan.rows.length > 0) {
+          const stamped = plan.rows.map((r) => ({
+            ...r,
+            updated_at: new Date().toISOString(),
+          }));
+          const { error: mapErr } = await supabase
+            .from("factory_mappings")
+            .upsert(stamped, { onConflict: "option_id" });
+          if (mapErr) throw new Error(mapErr.message);
+        }
+      }
     }
   }
 
   revalidatePath("/admin/categories");
+  if (copyMappings) revalidatePath("/factory-mapping");
   redirect(`/admin/categories/${newCatId}`);
 }
 
@@ -483,7 +561,7 @@ export async function duplicateCategory(formData: FormData) {
  * The copy is named "<Field name> (Copy)" and appended after the last field.
  */
 export async function duplicateConfigField(formData: FormData) {
-  await requireAdmin();
+  await requireCapabilityOrAdmin("admin.manage_categories");
   const id = String(formData.get("id"));
   const category_id = String(formData.get("category_id"));
   if (!id) throw new Error("Missing field id");
@@ -560,7 +638,7 @@ export async function duplicateConfigField(formData: FormData) {
  * so the UI can list it separately and hide it from product dropdowns.
  */
 export async function saveAsTemplate(formData: FormData) {
-  await requireAdmin();
+  await requireCapabilityOrAdmin("admin.manage_categories");
   const id = String(formData.get("id"));
   if (!id) throw new Error("Missing category id");
 
@@ -578,7 +656,7 @@ export async function saveAsTemplate(formData: FormData) {
  * Unmark a template so it becomes a regular category again.
  */
 export async function unmarkTemplate(formData: FormData) {
-  await requireAdmin();
+  await requireCapabilityOrAdmin("admin.manage_categories");
   const id = String(formData.get("id"));
   if (!id) throw new Error("Missing category id");
 
@@ -598,7 +676,7 @@ export async function unmarkTemplate(formData: FormData) {
  * The new category always has is_template = false.
  */
 export async function createFromTemplate(formData: FormData) {
-  await requireAdmin();
+  await requireCapabilityOrAdmin("admin.manage_categories");
   const template_id = String(formData.get("template_id"));
   const name = str(formData, "name");
   if (!template_id) throw new Error("Missing template id");

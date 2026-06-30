@@ -37,6 +37,7 @@ import {
 import { formatPaymentTerms } from "@/lib/payment";
 import { formatProductionTime, fromProductionColumns } from "@/lib/logistics";
 import { countMissingMappings } from "@/lib/task-list-mapping-status";
+import { isManualLine } from "@/lib/manual-items";
 import {
   revisionCategoryLabel,
   type RevisionThreadInfo,
@@ -69,6 +70,12 @@ export default async function TaskListDetailPage({
   // button entirely for roles without the capability so they can't
   // even attempt it. Backend still enforces via requireCapability().
   const canDeleteTaskList = await hasUiCapability("task_list.delete");
+  // Capability-gated workflow actions (UI only — backend re-checks via
+  // requireCapability). A technical role WITHOUT these (e.g. Operations once
+  // the matrix removes them) sees the task list read-only instead of active
+  // Validate/Reject buttons that error on click.
+  const canValidateTaskList = await hasUiCapability("task_list.validate");
+  const canRejectTaskList = await hasUiCapability("task_list.reject");
 
   const [{ data: task }, { data: lines }] = await Promise.all([
     supabase
@@ -80,20 +87,47 @@ export default async function TaskListDetailPage({
         // team doesn't have to bounce back to the quotation. Single
         // source of truth stays on the document — PTL only stores
         // overrides (shipping_method) on its own row.
-        "id, number, status, date, shipping_method, production_notes, technical_notes, quotation_id, client_id, created_by, submitted_at, factory_sent_at, clients(company_name, country, contact_name, client_code), documents:quotation_id(number, type, date, affair_name, incoterm, freight_type, freight_cost, port_of_loading, port_of_destination, currency, payment_mode, payment_terms, production_mode, production_days, production_date, total_price)"
+        "id, number, status, date, shipping_method, production_notes, technical_notes, quotation_id, client_id, created_by, submitted_at, factory_sent_at, original_sales_request, clients(company_name, country, contact_name, client_code), documents:quotation_id(number, type, date, affair_name, incoterm, freight_type, freight_cost, port_of_loading, port_of_destination, currency, payment_mode, payment_terms, production_mode, production_days, production_date, total_price)"
       )
       .eq("id", params.id)
       .maybeSingle(),
     supabase
       .from("production_task_list_lines")
       .select(
-        "id, quantity, config_values, technical_values, factory_overrides, internal_notes, position, product_id, product_name, product_sku, product_category, products(name, sku, category, category_id, image_url)"
+        // NB: the m135 manual-item columns (is_manual, unit_price, manual_specs)
+        // are fetched SEPARATELY + defensively below so this page renders even
+        // before the migration is applied (same pattern as sticker/risk flags).
+        "id, quantity, config_values, technical_values, factory_overrides, internal_notes, position, product_id, category_id, product_name, product_sku, product_category, products(name, sku, category, category_id, image_url)"
       )
       .eq("task_list_id", params.id)
       .order("position"),
   ]);
 
   if (!task) notFound();
+
+  // m135 — manual-item columns, fetched defensively so a missing migration
+  // just leaves the map empty (the page falls back to the product/category
+  // rule + an empty price/specs; saves soft-fail until m135 is applied). Same
+  // resilience pattern as the sticker/risk-flags fetches below.
+  const manualByLine = new Map<
+    string,
+    { is_manual: boolean | null; unit_price: number | null; manual_specs: string | null }
+  >();
+  {
+    const { data, error } = await supabase
+      .from("production_task_list_lines")
+      .select("id, is_manual, unit_price, manual_specs")
+      .eq("task_list_id", params.id);
+    if (!error) {
+      for (const r of (data ?? []) as any[]) {
+        manualByLine.set(r.id, {
+          is_manual: r.is_manual ?? null,
+          unit_price: r.unit_price ?? null,
+          manual_specs: r.manual_specs ?? null,
+        });
+      }
+    }
+  }
 
   // ---- Config fetch MUST be scoped to this task list's categories ----------
   // config_field_options and factory_mappings are app-wide tables. An UNSCOPED
@@ -106,9 +140,24 @@ export default async function TaskListDetailPage({
   // scoping so the page count and the release gate can never diverge.
   const lineCategoryIds = Array.from(
     new Set(
-      ((lines ?? []) as any[]).map((l) => l.products?.category_id).filter(Boolean)
+      // m133 — prefer the line's own category; fall back to the live product
+      // join for legacy catalog lines created before the backfill.
+      ((lines ?? []) as any[])
+        .map((l) => l.category_id ?? l.products?.category_id)
+        .filter(Boolean)
     )
   ) as string[];
+
+  // m134 — category names, so a line WITHOUT a chosen model still shows its
+  // family ("AOSPRO +") on the task list instead of "—" (modèle optionnel).
+  const categoryNameById = new Map<string, string>();
+  if (lineCategoryIds.length > 0) {
+    const { data: cats } = await supabase
+      .from("product_categories")
+      .select("id, name")
+      .in("id", lineCategoryIds);
+    for (const c of (cats ?? []) as any[]) categoryNameById.set(c.id, c.name);
+  }
 
   let fields: any[] | null = [];
   let opts: any[] | null = [];
@@ -454,7 +503,7 @@ export default async function TaskListDetailPage({
   const missingMappingCount = countMissingMappings({
     lines: ((lines ?? []) as any[]).map((l) => ({
       productId: l.product_id,
-      categoryId: l.products?.category_id ?? null,
+      categoryId: l.category_id ?? l.products?.category_id ?? null, // m133
       config: (l.config_values ?? {}) as Record<string, string>,
       overrides: (l.factory_overrides ?? {}) as Record<string, string>,
     })),
@@ -640,6 +689,8 @@ export default async function TaskListDetailPage({
             taskListId={task.id}
             status={status}
             isTechnical={technical}
+            canValidate={canValidateTaskList}
+            canReject={canRejectTaskList}
             revisionThread={revisionThread}
             missingMappingCount={missingMappingCount}
             clientName={clientName}
@@ -682,10 +733,53 @@ export default async function TaskListDetailPage({
           summary per line (for fast ops/factory scanning) on top of the
           full sales/technical/factory editor. Logistics + notes follow
           below. */}
+      {/* S1-6 — section quick-nav: the long task list reads as navigable
+          sections (jump links) instead of one wall. Anchors target the
+          section <h2> ids below. (Poles are manual line-items inside Product
+          configuration — no separate section to anchor.) */}
+      <nav className="tl-secnav" style={{ display: "flex", flexWrap: "wrap", gap: 6, margin: "4px 0 16px" }}>
+        {[
+          { href: "#tl-request", label: "Sales request" },
+          { href: "#tl-product", label: "Product" },
+          { href: "#tl-production", label: "Production" },
+          { href: "#tl-risks", label: "Risks" },
+          { href: "#tl-logistics", label: "Logistics" },
+          { href: "#tl-activity", label: "Activity" },
+        ].map((s) => (
+          <a
+            key={s.href}
+            href={s.href}
+            style={{ fontSize: 12, fontWeight: 600, color: "var(--sx-ink-soft, #444)", padding: "4px 11px", borderRadius: 999, border: "1px solid var(--sx-line, #e5e7eb)", background: "#fff", textDecoration: "none" }}
+          >
+            {s.label}
+          </a>
+        ))}
+      </nav>
+
+      {/* Original Sales Request — read-only reminder of the client's original
+          free-text need (m134), carried from the Service Request. Sits above the
+          configuration so the floor always sees what the client asked for. It is
+          NEVER the source of config — purely informational. */}
+      {(task as any).original_sales_request?.trim() && (
+        <div className="prod-shell" style={{ marginBottom: "1rem" }}>
+          <div className="sec-head">
+            <div className="lhs">
+              <h2 id="tl-request" style={{ scrollMarginTop: 16 }}>Original sales request</h2>
+            </div>
+            <div className="rhs">
+              <span className="micro">from the service request · read-only</span>
+            </div>
+          </div>
+          <p style={{ whiteSpace: "pre-wrap", margin: "0.25rem 0 0", fontSize: "0.875rem" }}>
+            {(task as any).original_sales_request}
+          </p>
+        </div>
+      )}
+
       <div className="prod-shell space-y-4">
         <div className="sec-head">
           <div className="lhs">
-            <h2>Product configuration</h2>
+            <h2 id="tl-product" style={{ scrollMarginTop: 16 }}>Product configuration</h2>
           </div>
           <div className="rhs">
             {lines?.length ?? 0} line{(lines?.length ?? 0) === 1 ? "" : "s"} ·{" "}
@@ -693,17 +787,29 @@ export default async function TaskListDetailPage({
           </div>
         </div>
         {(lines ?? []).map((l: any) => {
-          const categoryId = l.products?.category_id ?? null;
+          const categoryId = l.category_id ?? l.products?.category_id ?? null; // m133
+          // m135 — a manual item has neither a catalog product nor a category.
+          // Prefer the explicit flag (defensive fetch); fall back to the shared
+          // rule for rows created before the is_manual column existed.
+          const manual = manualByLine.get(l.id);
+          const isManual =
+            manual?.is_manual ?? isManualLine(l.product_id, categoryId);
           const salesFields = categoryId
             ? salesFieldsByCategory.get(categoryId) ?? []
             : [];
           const technicalFields = categoryId
             ? technicalFieldsByCategory.get(categoryId) ?? []
             : [];
+          // Display name: catalog product → category family → manual snapshot.
+          const displayName =
+            l.products?.name ??
+            l.product_name ??
+            categoryNameById.get(categoryId) ??
+            (isManual ? "Manual item" : "—");
           return (
             <div key={l.id}>
               <ProductSummaryCard
-                productName={l.products?.name ?? l.product_name ?? "—"}
+                productName={displayName}
                 sku={l.products?.sku ?? l.product_sku ?? null}
                 imageUrl={l.products?.image_url ?? null}
                 quantity={Number(l.quantity || 0)}
@@ -711,6 +817,7 @@ export default async function TaskListDetailPage({
                 factoryOverrides={
                   (l.factory_overrides ?? {}) as Record<string, string>
                 }
+                isManual={isManual}
               />
               <TaskLineEditor
                 lineId={l.id}
@@ -718,11 +825,21 @@ export default async function TaskListDetailPage({
                 clientId={task.client_id ?? null}
                 productId={l.product_id}
                 categoryId={categoryId}
-                productName={`${l.products?.name ?? l.product_name ?? "—"}${
-                  (l.products?.sku ?? l.product_sku)
+                isManual={isManual}
+                productName={`${displayName}${
+                  !isManual && (l.products?.sku ?? l.product_sku)
                     ? ` · ${l.products?.sku ?? l.product_sku}`
                     : ""
                 }`}
+                initialName={isManual ? (l.product_name ?? "") : ""}
+                initialSpecs={isManual ? (manual?.manual_specs ?? null) : null}
+                salesSpec={(task as any).original_sales_request ?? null}
+                unitPrice={
+                  isManual && manual?.unit_price != null
+                    ? Number(manual.unit_price)
+                    : null
+                }
+                currency={linkedQuote?.currency ?? null}
                 initialQty={Number(l.quantity || 0)}
                 initialConfig={(l.config_values ?? {}) as Record<string, string>}
                 initialTechnical={
@@ -760,7 +877,7 @@ export default async function TaskListDetailPage({
           risky project is still obvious without taking much space. */}
       <div className="sec-head">
         <div className="lhs">
-          <h2>Known risks &amp; warnings</h2>
+          <h2 id="tl-risks" style={{ scrollMarginTop: 16 }}>Known risks &amp; warnings</h2>
           <p className="micro">
             These notes help transfer commercial knowledge and project-specific
             requirements — client commitments, sensitive points, negotiated
@@ -795,7 +912,7 @@ export default async function TaskListDetailPage({
           page now leads with product configuration instead. */}
       <div className="sec-head">
         <div className="lhs">
-          <h2>Production &amp; technical notes</h2>
+          <h2 id="tl-production" style={{ scrollMarginTop: 16 }}>Production &amp; technical notes</h2>
         </div>
       </div>
       <form action={updateTaskListHeader} className="card pad">
@@ -864,7 +981,7 @@ export default async function TaskListDetailPage({
         <>
           <div className="sec-head">
             <div className="lhs">
-              <h2>Logistics from quotation</h2>
+              <h2 id="tl-logistics" style={{ scrollMarginTop: 16 }}>Logistics from quotation</h2>
               <div className="lead">
                 Commercial terms agreed with the client — single source of
                 truth.
@@ -936,7 +1053,7 @@ export default async function TaskListDetailPage({
           current state and who pushed it there. */}
       <div className="sec-head">
         <div className="lhs">
-          <h2>Activity</h2>
+          <h2 id="tl-activity" style={{ scrollMarginTop: 16 }}>Activity</h2>
           <div className="lead">Task list timeline.</div>
         </div>
         <div className="rhs tnum">

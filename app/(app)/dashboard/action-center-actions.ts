@@ -101,7 +101,6 @@ export async function acknowledgeAction(formData: FormData) {
   if (error && !isMissingActionAcksSchema(error)) {
     throw new Error(`Couldn't acknowledge action: ${error.message}`);
   }
-  revalidatePath("/dashboard-v2");
   revalidatePath("/dashboard");
 }
 
@@ -135,7 +134,6 @@ export async function markActionDone(formData: FormData) {
   if (error && !isMissingActionAcksSchema(error)) {
     throw new Error(`Couldn't mark action done: ${error.message}`);
   }
-  revalidatePath("/dashboard-v2");
   revalidatePath("/dashboard");
 }
 
@@ -152,7 +150,6 @@ export async function unacknowledgeAction(formData: FormData) {
   if (error && !isMissingActionAcksSchema(error)) {
     throw new Error(`Couldn't undo acknowledge: ${error.message}`);
   }
-  revalidatePath("/dashboard-v2");
   revalidatePath("/dashboard");
 }
 
@@ -187,7 +184,6 @@ export async function addActionNote(formData: FormData) {
   await postEntityComment(fd);
 
   revalidatePath("/dashboard");
-  revalidatePath("/dashboard-v2");
 }
 
 /** Delete one of your OWN notes from an action card. RLS enforces authorship
@@ -204,6 +200,5 @@ export async function deleteActionNote(formData: FormData) {
   if (error && !isMissingActionNotesSchema(error)) {
     throw new Error(`Couldn't delete note: ${error.message}`);
   }
-  revalidatePath("/dashboard-v2");
   revalidatePath("/dashboard");
 }

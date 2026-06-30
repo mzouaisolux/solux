@@ -1,9 +1,13 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
+// Render fresh so a just-saved mapping shows immediately (#12), without the
+// app-wide cache penalty of a global no-store.
+export const dynamic = "force-dynamic";
 import { hasUiCapability } from "@/lib/permissions";
 import { type FactoryMapping } from "@/lib/types";
 import AccessDenied from "@/components/AccessDenied";
 import MappingRow from "./MappingRow";
+import CopyMappingsPanel from "./CopyMappingsPanel";
 
 /**
  * Factory Mapping (production configuration).
@@ -134,6 +138,13 @@ export default async function FactoryMappingPage() {
           </div>
         </div>
       </div>
+
+      {/* Copy mappings from an existing family (e.g. a duplicated one). */}
+      {(categories ?? []).length >= 2 && (
+        <CopyMappingsPanel
+          categories={(categories ?? []).map((c) => ({ id: c.id, name: c.name }))}
+        />
+      )}
 
       {totalOptions === 0 && (
         <div className="panel p-10 text-center space-y-2">

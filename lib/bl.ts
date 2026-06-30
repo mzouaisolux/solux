@@ -142,6 +142,51 @@ export function defaultBlProfile(currency = "USD"): BlProfile {
  *
  * Safe to call with `null` (returns a fresh default profile).
  */
+/* ---------------------------------------------------------------------------
+   BL profile completeness (Sales → Operations workflow step).
+   ---------------------------------------------------------------------------
+   Operations cannot book a shipment without the consignee block. The status
+   is COMPUTED — never stored — so it can't drift from the profile itself:
+
+     complete — every required field present: consignee company name,
+                address, country, contact person, and email OR phone.
+     partial  — some useful consignee info exists, but not all of it.
+     missing  — no useful consignee information at all.
+--------------------------------------------------------------------------- */
+
+export type BlProfileStatus = "complete" | "partial" | "missing";
+
+const filled = (s: string | null | undefined): boolean =>
+  !!s && String(s).trim() !== "";
+
+/** Human-readable list of the required consignee fields still missing. */
+export function blProfileMissingFields(profile: BlProfile): string[] {
+  const c = profile.consignee;
+  const out: string[] = [];
+  if (!filled(c.company_name)) out.push("Consignee company name");
+  if (!filled(c.address)) out.push("Delivery address");
+  if (!filled(c.country)) out.push("Country");
+  if (!filled(c.contact_person)) out.push("Contact person");
+  if (!filled(c.email) && !filled(c.phone)) out.push("Email or phone");
+  return out;
+}
+
+/** Computed completeness of a (normalised) BL profile. */
+export function blProfileStatus(profile: BlProfile): BlProfileStatus {
+  const c = profile.consignee;
+  const missing = blProfileMissingFields(profile);
+  if (missing.length === 0) return "complete";
+  const anyUseful =
+    filled(c.company_name) ||
+    filled(c.address) ||
+    filled(c.country) ||
+    filled(c.contact_person) ||
+    filled(c.email) ||
+    filled(c.phone) ||
+    filled(c.tax_id);
+  return anyUseful ? "partial" : "missing";
+}
+
 export function normalizeBlProfile(
   raw: unknown,
   currency = "USD"

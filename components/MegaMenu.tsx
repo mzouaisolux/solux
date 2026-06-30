@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { NavCategory } from "@/lib/navigation";
 import { NavGlyph, NavArrow, pickGlyph } from "@/components/NavIcons";
 
@@ -30,6 +30,10 @@ export default function MegaMenu({
   const pathname = usePathname() ?? "";
   const [openId, setOpenId] = useState<string | null>(null);
   const rootRef = useRef<HTMLElement | null>(null);
+  const triggerRefs = useRef<Map<string, HTMLElement>>(new Map());
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  // Computed viewport position of the open panel (anchored to its trigger).
+  const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
 
   // Close on click-outside + Escape.
   useEffect(() => {
@@ -50,6 +54,34 @@ export default function MegaMenu({
     };
   }, [openId]);
 
+  // Anchor the open panel to ITS trigger: a single-column menu drops directly
+  // under the button (left-aligned); a wide multi-column menu is centred under
+  // it. The left is clamped to the viewport so a panel never spills off either
+  // edge. `top` is the nav's measured bottom (so it's banner-aware) and is
+  // shared with the scrim, whose dim therefore never reaches above the titles.
+  useLayoutEffect(() => {
+    if (!openId) {
+      setPos(null);
+      return;
+    }
+    const place = () => {
+      const root = rootRef.current;
+      const trigger = triggerRefs.current.get(openId);
+      if (!root || !trigger) return;
+      const navBottom = root.getBoundingClientRect().bottom;
+      const t = trigger.getBoundingClientRect();
+      const pw = panelRef.current?.offsetWidth ?? 0;
+      const cols = categories.find((c) => c.id === openId)?.groups.length ?? 1;
+      const MARGIN = 12;
+      let left = cols >= 2 ? t.left + t.width / 2 - pw / 2 : t.left;
+      left = Math.max(MARGIN, Math.min(left, window.innerWidth - pw - MARGIN));
+      setPos({ left, top: navBottom });
+    };
+    place();
+    window.addEventListener("resize", place);
+    return () => window.removeEventListener("resize", place);
+  }, [openId, categories]);
+
   const base = (href: string) => href.split("?")[0];
   const isActiveHref = (href: string) => {
     const b = base(href);
@@ -62,7 +94,7 @@ export default function MegaMenu({
 
   return (
     <nav ref={rootRef} className="flex items-stretch h-[62px]">
-      {categories.map((cat, i) => {
+      {categories.map((cat) => {
         const hasPanel = cat.groups.length > 0;
         const active = isActiveCategory(cat);
         const catBadge = badges?.[cat.id] ?? 0;
@@ -86,24 +118,34 @@ export default function MegaMenu({
         }
 
         const open = openId === cat.id;
-        const alignRight = i >= categories.length - 2;
         const isOrders = cat.id === "orders";
         const cols = cat.groups.length;
 
+        // Option A: hover (or keyboard focus) opens the panel; clicking the
+        // section label NAVIGATES to its landing page (cat.href, resolved in
+        // buildVisibleNavigation). Panels are LEFT-ANCHORED to the nav root
+        // with content-driven width (see nav-premium.css) — every section
+        // opens at the same left point; width follows its content. Banner-
+        // aware via top:100% of the nav (which sits below the sim banner).
         return (
           <div
             key={cat.id}
-            className="relative flex"
+            ref={(el) => {
+              if (el) triggerRefs.current.set(cat.id, el);
+              else triggerRefs.current.delete(cat.id);
+            }}
+            className="flex"
             onMouseEnter={() => setOpenId(cat.id)}
             onMouseLeave={() =>
               setOpenId((cur) => (cur === cat.id ? null : cur))
             }
+            onFocus={() => setOpenId(cat.id)}
           >
-            <button
-              type="button"
-              aria-expanded={open}
+            <Link
+              href={cat.href ?? "#"}
               aria-haspopup="true"
-              onClick={() => setOpenId((cur) => (cur === cat.id ? null : cat.id))}
+              aria-expanded={open}
+              onClick={() => setOpenId(null)}
               className={`sx-navlink flex items-center gap-2 px-4 text-[13.5px] font-medium transition-colors ${
                 active || open ? "text-white" : "text-[#DFDEE4] hover:text-white"
               } ${open ? "is-open" : ""}`}
@@ -115,109 +157,106 @@ export default function MegaMenu({
               <span className="sx-caret" aria-hidden>
                 ▾
               </span>
-            </button>
+            </Link>
 
             {open &&
               (isOrders ? (
                 <div
+                  ref={panelRef}
                   className="sx-mega sx-list"
-                  style={alignRight ? { right: 0, left: "auto" } : undefined}
+                  style={{ left: pos?.left, top: pos?.top, visibility: pos ? undefined : "hidden" }}
                 >
-                  <div className="sx-colhead">{cat.label}</div>
-                  {cat.groups
-                    .flatMap((g) => g.items)
-                    .map((item) => (
-                      <Link
-                        key={item.href}
-                        href={item.href}
-                        onClick={() => setOpenId(null)}
-                        className={`sx-li ${isActiveHref(item.href) ? "is-active" : ""}`}
-                      >
-                        <span className={`sx-lidot ${orderDot(item.label)}`} />
-                        <span className="sx-body">
-                          <span className="sx-title">{item.label}</span>
-                          {item.description && (
-                            <span className="sx-sub">{item.description}</span>
-                          )}
-                        </span>
-                        <span className="sx-arrow">
-                          <NavArrow />
-                        </span>
-                      </Link>
-                    ))}
+                  <div className="sx-mega-inner">
+                    <div className="sx-list-col">
+                      <div className="sx-colhead">{cat.label}</div>
+                      {cat.groups
+                        .flatMap((g) => g.items)
+                        .map((item) => (
+                          <Link
+                            key={item.href}
+                            href={item.href}
+                            onClick={() => setOpenId(null)}
+                            className={`sx-li ${isActiveHref(item.href) ? "is-active" : ""}`}
+                          >
+                            <span className={`sx-lidot ${orderDot(item.label)}`} />
+                            <span className="sx-body">
+                              <span className="sx-title">{item.label}</span>
+                              {item.description && (
+                                <span className="sx-sub">{item.description}</span>
+                              )}
+                            </span>
+                            <span className="sx-arrow">
+                              <NavArrow />
+                            </span>
+                          </Link>
+                        ))}
+                    </div>
+                  </div>
                 </div>
               ) : (
                 <div
+                  ref={panelRef}
                   className="sx-mega"
-                  style={alignRight ? { right: 0, left: "auto" } : undefined}
+                  style={{ left: pos?.left, top: pos?.top, visibility: pos ? undefined : "hidden" }}
                 >
-                  <div
-                    className="sx-mega-cols"
-                    style={{
-                      gridTemplateColumns: `repeat(${cols}, 290px)`,
-                    }}
-                  >
-                    {cat.groups.map((group, gi) => (
-                      <div
-                        key={group.title}
-                        className={`sx-mega-col ${
-                          cols > 1 && gi === cols - 1 ? "accent" : ""
-                        }`}
-                      >
-                        <div className="sx-colhead">{group.title}</div>
-                        {group.items.map((item) => {
-                          const itemActive = isActiveHref(item.href);
-                          const cnt = itemBadges?.[base(item.href)] ?? 0;
-                          return (
-                            <Link
-                              key={item.href}
-                              href={item.href}
-                              onClick={() => setOpenId(null)}
-                              className={`sx-item ${itemActive ? "is-active" : ""}`}
-                            >
-                              <span className="sx-ic">
-                                <NavGlyph name={pickGlyph(item.label)} />
-                              </span>
-                              <span className="sx-body">
-                                <span className="sx-title">
-                                  {item.label}
-                                  {cnt > 0 && (
-                                    <span className="sx-badge">
-                                      <span className="sx-ring" />
-                                      {cnt > 99 ? "99+" : cnt}
-                                    </span>
+                  <div className="sx-mega-inner">
+                    <div
+                      className="sx-mega-cols"
+                      style={{
+                        gridTemplateColumns: `repeat(${cols}, 290px)`,
+                      }}
+                    >
+                      {cat.groups.map((group, gi) => (
+                        <div
+                          key={group.title}
+                          className={`sx-mega-col ${
+                            cols > 1 && gi === cols - 1 ? "accent" : ""
+                          }`}
+                        >
+                          <div className="sx-colhead">{group.title}</div>
+                          {group.items.map((item) => {
+                            const itemActive = isActiveHref(item.href);
+                            const cnt = itemBadges?.[base(item.href)] ?? 0;
+                            return (
+                              <Link
+                                key={item.href}
+                                href={item.href}
+                                onClick={() => setOpenId(null)}
+                                className={`sx-item ${itemActive ? "is-active" : ""}`}
+                              >
+                                <span className="sx-ic">
+                                  <NavGlyph name={pickGlyph(item.label)} />
+                                </span>
+                                <span className="sx-body">
+                                  <span className="sx-title">
+                                    {item.label}
+                                    {cnt > 0 && (
+                                      <span className="sx-badge">
+                                        <span className="sx-ring" />
+                                        {cnt > 99 ? "99+" : cnt}
+                                      </span>
+                                    )}
+                                  </span>
+                                  {item.description && (
+                                    <span className="sx-sub">{item.description}</span>
                                   )}
                                 </span>
-                                {item.description && (
-                                  <span className="sx-sub">{item.description}</span>
-                                )}
-                              </span>
-                              <span className="sx-arrow">
-                                <NavArrow />
-                              </span>
-                            </Link>
-                          );
-                        })}
-                        {gi === 0 && cat.href && (
-                          <div className="sx-colfoot">
-                            <Link
-                              href={cat.href}
-                              onClick={() => setOpenId(null)}
-                              className="sx-footlink"
-                            >
-                              <NavArrow /> All {cat.label.toLowerCase()}
-                            </Link>
-                          </div>
-                        )}
-                      </div>
-                    ))}
+                                <span className="sx-arrow">
+                                  <NavArrow />
+                                </span>
+                              </Link>
+                            );
+                          })}
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 </div>
               ))}
           </div>
         );
       })}
-      {openId && <div className="sx-scrim" aria-hidden />}
+      {openId && <div className="sx-scrim" aria-hidden style={{ top: pos?.top ?? 0 }} />}
     </nav>
   );
 }

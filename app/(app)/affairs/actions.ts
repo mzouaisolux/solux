@@ -12,10 +12,16 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentUserRole } from "@/lib/auth";
-import { isTechnicalRole } from "@/lib/types";
+import { canSupervise } from "@/lib/types";
+import { emitEvent } from "@/lib/events";
 
 const LIFECYCLE = [
   "lead",
+  // m109 — first stage of a tender-sourced opportunity: review the tender.
+  "tender_review",
+  // m108 — tender-sourced opportunity created BEFORE the local partner
+  // (distributor / EPC / installer) is known.
+  "partner_selection",
   "opportunity",
   "quotation",
   "negotiation",
@@ -29,6 +35,27 @@ const LIFECYCLE = [
 
 const now = () => new Date().toISOString();
 
+/** Affair source — the commercial origin of a deal (m102, revised m125).
+ *  Not exported — "use server" files may only export async functions; the
+ *  UI labels live in components/affairs/affair-sources.ts. Keep this list in
+ *  sync with that file and the affairs_source_check constraint. */
+const AFFAIR_SOURCES = [
+  "tender",
+  "prospecting",
+  "referral",
+  "existing_customer_opportunity",
+  "partner",
+  "website_inquiry",
+  "exhibition_event",
+  "direct_request",
+  "other",
+] as const;
+
+function parseSource(raw: FormDataEntryValue | null): string | null {
+  const v = String(raw ?? "").trim();
+  return (AFFAIR_SOURCES as readonly string[]).includes(v) ? v : null;
+}
+
 /** Create a project FIRST — before any quotation. */
 export async function createAffair(formData: FormData) {
   const supabase = createClient();
@@ -41,16 +68,102 @@ export async function createAffair(formData: FormData) {
   const client_id = String(formData.get("client_id") ?? "") || null;
   const ownerRaw = String(formData.get("owner_id") ?? "");
   const owner_id = ownerRaw && ownerRaw !== "__unassign__" ? ownerRaw : user?.id ?? null;
+  const source = parseSource(formData.get("source"));
 
-  const { error } = await supabase.from("affairs").insert({
+  const base = {
     name,
     client_id,
     owner_id,
     status: "lead",
     created_by: user?.id ?? null,
-  });
+  };
+  let { data, error } = await supabase
+    .from("affairs")
+    .insert({ ...base, source })
+    .select("id")
+    .single();
+  // Defensive pre-m102: if the source column doesn't exist yet, retry
+  // without it so affair creation never breaks on a pending migration.
+  if (error && /source/i.test(error.message)) {
+    ({ data, error } = await supabase
+      .from("affairs")
+      .insert(base)
+      .select("id")
+      .single());
+  }
   if (error) throw new Error(error.message);
   revalidatePath("/affairs");
+  revalidatePath("/clients");
+  // Return the new id so the caller can redirect to the created affair (#2).
+  return { id: (data?.id as string) ?? null };
+}
+
+/** Inline "+ New Project" from the quotation builder. Creates the affair and
+ *  RETURNS its {id, name} so the client can append + auto-select it without a
+ *  page reload (no form data lost). Description persists once m129 is applied;
+ *  before that it falls back to creating without it. */
+export async function quickCreateAffair(input: {
+  clientId: string;
+  name: string;
+  description?: string | null;
+}): Promise<{ id: string; name: string }> {
+  const supabase = createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  const name = input.name.trim();
+  if (!name) throw new Error("Project name is required");
+  if (!input.clientId) throw new Error("A client is required");
+  const description = (input.description ?? "").trim() || null;
+
+  const base = {
+    name,
+    client_id: input.clientId,
+    owner_id: user?.id ?? null,
+    status: "lead",
+    created_by: user?.id ?? null,
+    source: "direct_request",
+  };
+  let res = await supabase
+    .from("affairs")
+    .insert({ ...base, description })
+    .select("id, name")
+    .single();
+  // Defensive: retry without description (pre-m129), keeping source; if source
+  // itself is unsupported (pre-m102) drop it too — the inline "+ New Project"
+  // must never lose the in-progress quote over a pending migration.
+  if (res.error && /description|source/i.test(res.error.message)) {
+    res = await supabase.from("affairs").insert(base).select("id, name").single();
+    if (res.error && /source/i.test(res.error.message)) {
+      const { source: _src, ...baseNoSource } = base;
+      res = await supabase
+        .from("affairs")
+        .insert(baseNoSource)
+        .select("id, name")
+        .single();
+    }
+  }
+  if (res.error || !res.data) {
+    throw new Error(res.error?.message ?? "Could not create the project");
+  }
+  revalidatePath("/clients");
+  revalidatePath("/affairs");
+  return { id: res.data.id as string, name: res.data.name as string };
+}
+
+/** CRM step 3 (m102): tag / re-tag where the deal came from. */
+export async function setAffairSource(formData: FormData) {
+  const id = String(formData.get("id") ?? "");
+  if (!id) throw new Error("Missing project id");
+  const source = parseSource(formData.get("source"));
+  const supabase = createClient();
+  const { error } = await supabase
+    .from("affairs")
+    .update({ source, updated_at: now() })
+    .eq("id", id);
+  if (error) throw new Error(error.message);
+  revalidatePath(`/affairs/${id}`);
+  revalidatePath("/clients");
 }
 
 export async function renameAffair(formData: FormData) {
@@ -92,7 +205,7 @@ export async function setAffairOwner(formData: FormData) {
   const owner_id = raw && raw !== "__unassign__" ? raw : null;
 
   const { role } = await getCurrentUserRole();
-  if (!isTechnicalRole(role)) {
+  if (!canSupervise(role)) {
     throw new Error("Only management roles can reassign project ownership.");
   }
 
@@ -210,4 +323,120 @@ export async function unassignDocument(formData: FormData) {
   await supabase.from("production_orders").update({ affair_id: null }).in("quotation_id", ids);
   revalidatePath("/affairs");
   if (affair_id) revalidatePath(`/affairs/${affair_id}`);
+}
+
+// =====================================================================
+// CRM step 4 (m103) — planned actions: the affair's to-do engine.
+// One thin table; completing an action logs into `events` (entity
+// 'affair') so history lives in the existing timeline. Golden rule
+// (enforced visually, not in DB): a live affair always has a next
+// action with a date.
+// =====================================================================
+
+const ACTION_TYPES = ["call", "meeting", "visit", "follow_up", "send_quote", "other"] as const;
+const ACTION_LABEL: Record<string, string> = {
+  call: "Call",
+  meeting: "Meeting",
+  visit: "Site visit",
+  follow_up: "Follow-up",
+  send_quote: "Send quote",
+  other: "Action",
+};
+
+export async function createPlannedAction(formData: FormData) {
+  const affairId = String(formData.get("affair_id") ?? "");
+  if (!affairId) throw new Error("Missing project id");
+  const type = String(formData.get("action_type") ?? "");
+  if (!(ACTION_TYPES as readonly string[]).includes(type)) {
+    throw new Error("Pick an action type");
+  }
+  const dueDate = String(formData.get("due_date") ?? "").trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dueDate)) {
+    throw new Error("A planned action needs a due date");
+  }
+  const title = String(formData.get("title") ?? "").trim() || null;
+
+  const supabase = createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  const { error } = await supabase.from("planned_actions").insert({
+    affair_id: affairId,
+    action_type: type,
+    title,
+    due_date: dueDate,
+    created_by: user?.id ?? null,
+  });
+  if (error) throw new Error(error.message);
+
+  await emitEvent({
+    entity_type: "affair",
+    entity_id: affairId,
+    event_type: "affair.action_planned",
+    message: `${ACTION_LABEL[type]} planned${title ? `: ${title}` : ""} — due ${dueDate}`,
+    payload: { action_type: type, title, due_date: dueDate },
+    bestEffort: true,
+  });
+  revalidatePath(`/affairs/${affairId}`);
+}
+
+export async function completePlannedAction(formData: FormData) {
+  const id = String(formData.get("id") ?? "");
+  const affairId = String(formData.get("affair_id") ?? "");
+  if (!id || !affairId) throw new Error("Missing action id");
+
+  const supabase = createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  const { data: snapshot } = await supabase
+    .from("planned_actions")
+    .select("action_type, title, due_date")
+    .eq("id", id)
+    .maybeSingle();
+
+  const { error } = await supabase
+    .from("planned_actions")
+    .update({ done_at: now(), done_by: user?.id ?? null, updated_at: now() })
+    .eq("id", id);
+  if (error) throw new Error(error.message);
+
+  const label = ACTION_LABEL[snapshot?.action_type ?? "other"] ?? "Action";
+  await emitEvent({
+    entity_type: "affair",
+    entity_id: affairId,
+    event_type: "affair.action_done",
+    message: `${label} done${snapshot?.title ? `: ${snapshot.title}` : ""}`,
+    payload: snapshot ?? undefined,
+    bestEffort: true,
+  });
+  revalidatePath(`/affairs/${affairId}`);
+}
+
+export async function deletePlannedAction(formData: FormData) {
+  const id = String(formData.get("id") ?? "");
+  const affairId = String(formData.get("affair_id") ?? "");
+  if (!id || !affairId) throw new Error("Missing action id");
+
+  const supabase = createClient();
+  const { data: snapshot } = await supabase
+    .from("planned_actions")
+    .select("action_type, title")
+    .eq("id", id)
+    .maybeSingle();
+
+  const { error } = await supabase.from("planned_actions").delete().eq("id", id);
+  if (error) throw new Error(error.message);
+
+  const label = ACTION_LABEL[snapshot?.action_type ?? "other"] ?? "Action";
+  await emitEvent({
+    entity_type: "affair",
+    entity_id: affairId,
+    event_type: "affair.action_deleted",
+    message: `Planned ${label.toLowerCase()} removed${snapshot?.title ? `: ${snapshot.title}` : ""}`,
+    bestEffort: true,
+  });
+  revalidatePath(`/affairs/${affairId}`);
 }

@@ -2,11 +2,10 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { StatusBadge } from "@/components/StatusBadge";
-import DocQuickActions from "@/components/DocQuickActions";
-import InlineStatusSwitcher from "@/components/InlineStatusSwitcher";
+import { ClientDocumentsByAffaire } from "@/components/clients/ClientDocumentsByAffaire";
 import ContextMenu from "@/components/ContextMenu";
 import {
-  deleteClientAction,
+  deleteClientPermanently,
   archiveClientAction,
   unarchiveClientAction,
 } from "../actions";
@@ -26,6 +25,7 @@ import {
 } from "@/lib/queries";
 import { ScopeTabs } from "@/components/ScopeTabs";
 import { ClientBlSummary } from "@/components/clients/ClientBlSummary";
+import { ClientContactsCard } from "@/components/clients/ClientContactsCard";
 import { hasUiCapability } from "@/lib/permissions";
 import { Timeline } from "@/components/Timeline";
 import { listEventsForEntities } from "@/lib/events";
@@ -42,6 +42,11 @@ import {
 import { ClientMessageComposer } from "@/components/clients/ClientMessageComposer";
 import { AffairRow } from "@/components/affairs/AffairRow";
 import { getClientAffairs } from "@/lib/client-affairs";
+import {
+  ACTIVE_PIPELINE,
+  COMMERCIAL_STATUS_LABEL,
+  STATUS_CHIP,
+} from "@/components/prospects/tender-status";
 import { NewProjectPanel } from "@/components/affairs/NewProjectPanel";
 import { listAssignableOwners } from "@/lib/owner";
 import type { AssignableDoc } from "@/components/affairs/AssignDocumentPanel";
@@ -75,10 +80,11 @@ export default async function ClientWorkspacePage({
     ? (searchParams.tab as HubTab)
     : "affairs";
   const canCreateQuotation = await hasUiCapability("quotation.create");
+  const canCreateProjectRequest = await hasUiCapability("project.create");
   // ?event=<uuid> auto-opens the conversation drawer overlaid on
   // this client page — notification entry point.
   const eventDiscussionId = parseEventSearchParam(searchParams?.event);
-  const { userId: currentUserId, role } = await getCurrentUserRole();
+  const { userId: currentUserId, role, isSuperAdmin } = await getCurrentUserRole();
 
   // Single full fetch — KPIs need everything, table is in-memory
   // filtered. One query instead of two = simpler + always coherent.
@@ -112,12 +118,34 @@ export default async function ClientWorkspacePage({
   const { data: allDocs } = await supabase
     .from("documents")
     .select(
-      "id, number, type, date, total_price, status, currency, archived_at"
+      "id, number, type, date, total_price, status, currency, archived_at, affair_id, affair_name"
     )
     .eq("client_id", params.id)
     .order("date", { ascending: false });
 
   if (!client) notFound();
+
+  // CRM step 2 (m101): the client's address book. Defensive pre-migration:
+  // if the contacts table doesn't exist yet the query errors → empty list,
+  // and the tab keeps rendering the embedded company contact.
+  const { data: contactRows } = await supabase
+    .from("contacts")
+    .select("id, client_id, name, title, email, phone, is_primary, notes")
+    .eq("client_id", params.id)
+    .order("is_primary", { ascending: false })
+    .order("created_at", { ascending: true });
+  const contacts = (contactRows ?? []) as any[];
+
+  // Tender pipeline (m112): tenders where this client was identified as
+  // the local partner. Defensive pre-migration — error → empty list.
+  const { data: tenderRows } = await supabase
+    .from("tenders")
+    .select("id, title, country, buyer, deadline, commercial_status, converted_affair_id")
+    .eq("attached_client_id", params.id)
+    .order("deadline", { ascending: true, nullsFirst: false });
+  const activeTenders = ((tenderRows ?? []) as any[]).filter((t) =>
+    ACTIVE_PIPELINE.has(t.commercial_status)
+  );
 
   // In-memory scope filter — semantics match applyDocScope() in
   // lib/queries.ts, just applied client-side because we want
@@ -322,8 +350,16 @@ export default async function ClientWorkspacePage({
             Edit client info
           </Link>
           {canCreateQuotation && (
-            <Link href="/documents/new" className="btn-primary">
+            <Link href={`/documents/new?client=${client.id}`} className="btn-primary">
               + New quotation
+            </Link>
+          )}
+          {canCreateProjectRequest && (
+            <Link
+              href={`/projects/new?client=${client.id}`}
+              className="btn-secondary"
+            >
+              + New service request
             </Link>
           )}
           {/* DESTRUCTIVE ACTIONS only — kept in a discreet 3-dot menu
@@ -348,14 +384,18 @@ export default async function ClientWorkspacePage({
                 variant="success"
               />
             )}
-            <ContextMenuActionItem
-              action={deleteClientAction}
-              id={client.id}
-              label="Delete client"
-              pendingLabel="Deleting…"
-              variant="danger"
-              confirmMessage={`Permanently delete ${client.company_name}? This cannot be undone. If the client has linked quotations / task lists / production orders, the delete will be refused — use Archive instead in that case.`}
-            />
+            {isSuperAdmin && (
+              <ContextMenuActionItem
+                action={deleteClientPermanently}
+                id={client.id}
+                label="Permanently delete"
+                pendingLabel="Deleting…"
+                variant="danger"
+                confirmMessage={
+                  "Cette action est irréversible. Le client et toutes les données liées seront définitivement supprimés. Voulez-vous continuer ?"
+                }
+              />
+            )}
           </ContextMenu>
         </div>
       </div>
@@ -419,6 +459,66 @@ export default async function ClientWorkspacePage({
       {/* ---------- SHIPPING / BL PROFILE (read-only summary) ---------- */}
       <ClientBlSummary clientId={client.id} rawProfile={client.bl_profile ?? null} />
 
+      {/* ---------- ACTIVE TENDERS (m112) ----------
+          Tenders where this client was identified as the local partner.
+          The pipeline stays the work surface; this is the client-side
+          read (Règle Produit #0: display, don't own). */}
+      {activeTenders.length > 0 && (
+        <section className="panel p-4">
+          <div className="flex items-center justify-between gap-3">
+            <div className="eyebrow">Active tenders ({activeTenders.length})</div>
+            <Link
+              href="/prospects/pipeline"
+              className="text-[12px] font-semibold text-neutral-500 hover:text-neutral-900 hover:underline"
+            >
+              Open the pipeline →
+            </Link>
+          </div>
+          <ul className="mt-2 divide-y divide-neutral-100">
+            {activeTenders.map((t) => {
+              const dl = t.deadline
+                ? Math.round(
+                    (Date.parse(t.deadline + "T00:00:00Z") - Date.now()) / 86_400_000
+                  )
+                : null;
+              return (
+                <li key={t.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 py-2">
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-[13px] font-semibold text-neutral-900">
+                      {t.title}
+                    </div>
+                    <div className="text-[11.5px] text-neutral-500">
+                      {[t.country, t.buyer].filter(Boolean).join(" · ") || "—"}
+                    </div>
+                  </div>
+                  {dl != null && (
+                    <span
+                      className={`text-[11px] font-semibold tabular-nums ${
+                        dl >= 0 && dl < 7
+                          ? "text-rose-700"
+                          : dl < 0
+                            ? "text-neutral-300"
+                            : "text-neutral-500"
+                      }`}
+                    >
+                      {dl < 0 ? "closed" : `${dl}d left`}
+                    </span>
+                  )}
+                  <span
+                    className={`rounded px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide ring-1 ${
+                      STATUS_CHIP[t.commercial_status] ??
+                      "bg-neutral-100 text-neutral-600 ring-neutral-200"
+                    }`}
+                  >
+                    {COMMERCIAL_STATUS_LABEL[t.commercial_status] ?? t.commercial_status}
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+        </section>
+      )}
+
       {/* ---------- ACTIVITY CARD ---------- */}
       {latestDoc && (
         <section className="panel p-4">
@@ -470,9 +570,7 @@ export default async function ClientWorkspacePage({
               operational workspace.
             </p>
             <NewProjectPanel
-              clients={[
-                { id: client.id, name: client.company_name ?? "This client" },
-              ]}
+              lockedClient={{ id: client.id, name: client.company_name ?? "This client" }}
               owners={affairOwners}
             />
           </div>
@@ -504,10 +602,10 @@ export default async function ClientWorkspacePage({
       <section className="space-y-3">
         <div className="flex items-end justify-between gap-3 flex-wrap">
           <div>
-            <h2 className="text-lg font-semibold">Quotation history</h2>
+            <h2 className="text-lg font-semibold">Documents by affaire</h2>
             <p className="text-xs text-neutral-500">
-              Inline status switcher — change a deal's status with one click.
-              Won deals expose the production handoff right there.
+              Grouped by project so nothing gets lost as history grows — filter
+              by affaire, or expand a project to see its quotations & proformas.
             </p>
           </div>
           <ScopeTabs
@@ -541,84 +639,20 @@ export default async function ClientWorkspacePage({
             to see this client's history.
           </div>
         ) : (
-          <div className="panel overflow-hidden">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="bg-solux-accent text-left">
-                  <th className="px-4 py-2.5 font-semibold text-xs uppercase tracking-widerx text-neutral-700">
-                    Quote
-                  </th>
-                  <th className="px-4 py-2.5 font-semibold text-xs uppercase tracking-widerx text-neutral-700">
-                    Type
-                  </th>
-                  <th className="px-4 py-2.5 font-semibold text-xs uppercase tracking-widerx text-neutral-700">
-                    Date
-                  </th>
-                  <th className="px-4 py-2.5 font-semibold text-xs uppercase tracking-widerx text-neutral-700 text-right">
-                    Value
-                  </th>
-                  <th className="px-4 py-2.5 font-semibold text-xs uppercase tracking-widerx text-neutral-700">
-                    Status
-                  </th>
-                  <th className="px-4 py-2.5 font-semibold text-xs uppercase tracking-widerx text-neutral-700">
-                    Quick action
-                  </th>
-                  <th className="px-4 py-2.5"></th>
-                </tr>
-              </thead>
-              <tbody>
-                {(docs ?? []).map((d) => (
-                  <tr
-                    key={d.id}
-                    className="border-t border-neutral-100 hover:bg-neutral-50/70"
-                  >
-                    <td className="px-4 py-3 font-mono text-[13px]">
-                      <Link
-                        href={`/documents/${d.id}`}
-                        className="hover:underline"
-                      >
-                        {d.number ?? "—"}
-                      </Link>
-                    </td>
-                    <td className="px-4 py-3 capitalize text-neutral-700">
-                      {d.type}
-                    </td>
-                    <td className="px-4 py-3 text-neutral-600">
-                      {new Date(d.date).toLocaleDateString("en-GB", {
-                        year: "2-digit",
-                        month: "short",
-                        day: "2-digit",
-                      })}
-                    </td>
-                    <td className="px-4 py-3 text-right font-semibold tabular-nums">
-                      {d.currency ? `${d.currency} ` : "$"}
-                      {Number(d.total_price).toLocaleString(undefined, {
-                        minimumFractionDigits: 2,
-                        maximumFractionDigits: 2,
-                      })}
-                    </td>
-                    <td className="px-4 py-3">
-                      <InlineStatusSwitcher
-                        docId={d.id}
-                        current={(d.status as DocStatus) ?? "draft"}
-                      />
-                    </td>
-                    <td className="px-4 py-3">
-                      <DocQuickActions
-                        doc={{ id: d.id, status: d.status }}
-                        taskList={taskListByDoc.get(d.id) ?? null}
-                      />
-                    </td>
-                    <td className="px-4 py-3 text-right">
-                      <Link href={`/documents/${d.id}`} className="row-link">
-                        Open →
-                      </Link>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <ClientDocumentsByAffaire
+            docs={(docs as any[]).map((d) => ({
+              id: d.id,
+              number: d.number,
+              type: d.type,
+              date: d.date,
+              total_price: d.total_price,
+              status: d.status,
+              currency: d.currency,
+              affair_id: d.affair_id ?? null,
+              affair_name: d.affair_name ?? null,
+              taskList: taskListByDoc.get(d.id) ?? null,
+            }))}
+          />
         )}
 
         {/* Status pipeline footer — quick scan of distribution */}
@@ -681,9 +715,12 @@ export default async function ClientWorkspacePage({
 
       {/* ===== CONTACTS ===== */}
       {tab === "contacts" && (
+        <>
+        {/* CRM step 2 (m101) — the people address book (several per client). */}
+        <ClientContactsCard clientId={client.id} contacts={contacts} />
         <section className="panel p-5 space-y-4">
           <div className="flex items-center justify-between">
-            <div className="eyebrow">Contact</div>
+            <div className="eyebrow">Company record — printed on documents</div>
             <Link href={`/clients/${client.id}/edit`} className="row-link">
               Edit client →
             </Link>
@@ -710,6 +747,7 @@ export default async function ClientWorkspacePage({
             </div>
           )}
         </section>
+        </>
       )}
 
       {/* ===== ACTIVITY ===== */}

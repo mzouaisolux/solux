@@ -636,6 +636,19 @@ export default function NewDocumentForm({
       setError("Add at least one product line");
       return null;
     }
+    // BUSINESS RULE — mandatory catalogue model. A line generated from a
+    // Service Request carries a category but no catalogue product until sales
+    // picks the exact model (ProductConfigurator → CategoryLineCard). The
+    // configuration must always attach to a real model, so every save path
+    // (preview, save, save & generate, draft) is blocked until each such line
+    // has one. Free-text lines (poles, freight) carry no category_id and are
+    // intentionally model-less, so they stay exempt.
+    if (lines.some((l) => !l.product_id && l.category_id)) {
+      setError(
+        "Every product must have an exact catalogue model selected before continuing."
+      );
+      return null;
+    }
     const normalized = normalizePaymentTerms(paymentMode, paymentTerms);
     const paymentErr = validatePaymentTerms(paymentMode, normalized);
     if (paymentErr) {
@@ -1625,6 +1638,27 @@ export default function NewDocumentForm({
             + Add catalogue product
           </button>
         </div>
+
+        {/* Original Sales Request — the project's "cahier des charges", captured
+            at the Service Request and READ-ONLY here. Document-level + always
+            visible (even after a model is picked) so the sales rep can compare
+            the configuration against the client's original demand — and the TLM
+            can do the same downstream. Never auto-parsed into config. */}
+        {initialDoc?.original_sales_request?.trim() && (
+          <div className="rounded-lg border border-indigo-200 bg-indigo-50/40 px-4 py-3">
+            <div className="flex flex-wrap items-center gap-2 mb-1">
+              <span className="text-[11px] font-semibold uppercase tracking-wide text-indigo-700">
+                Original sales request
+              </span>
+              <span className="text-[11px] text-neutral-500">
+                client's original spec · read-only
+              </span>
+            </div>
+            <p className="text-sm text-neutral-700 whitespace-pre-wrap">
+              {initialDoc.original_sales_request}
+            </p>
+          </div>
+        )}
 
         {lines.map((line, i) => (
           <ProductConfigurator

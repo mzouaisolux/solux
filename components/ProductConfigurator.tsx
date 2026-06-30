@@ -45,6 +45,38 @@ function saveFavorites(set: Set<string>) {
   }
 }
 
+/** Tiny inline icons (kept local so the configurator stays self-contained). */
+function LockIcon({ className = "h-3.5 w-3.5" }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      className={className}
+      aria-hidden
+    >
+      <rect x="5" y="11" width="14" height="9" rx="2" />
+      <path d="M8 11V8a4 4 0 0 1 8 0v3" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function CheckIcon({ className = "h-4 w-4" }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.5"
+      className={className}
+      aria-hidden
+    >
+      <path d="M5 13l4 4L19 7" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
 /**
  * Free-text / manual line card (no catalogue product).
  *
@@ -88,7 +120,7 @@ function FreeTextLineCard({
             Project product
           </span>
           <span className="text-xs text-neutral-500">
-            Generated from a project request — not from the catalogue
+            Generated from a service request — not from the catalogue
           </span>
         </div>
         {onRemove && (
@@ -147,6 +179,259 @@ function FreeTextLineCard({
   );
 }
 
+/**
+ * Category line card (m133/m134 — workflow vision) — MANDATORY MODEL SELECTION.
+ *
+ * A line generated from a Service Request carries a CATEGORY (category_id) but
+ * no catalogue product yet. The commercial configuration must ALWAYS attach to
+ * a real catalogue model, so this card is a guided two-step gate:
+ *
+ *   STEP 1 — select the exact catalogue MODEL within the category (required).
+ *   STEP 2 — configure that model (locked/greyed until a model is picked).
+ *
+ * Picking a model sets product_id → the parent ProductConfigurator re-routes
+ * the line to the full catalogue card (real tier pricing + configuration),
+ * keeping the category + quantity. So this card only ever renders the PRE-model
+ * state; the post-model "✓ Model selected" confirmation lives on the full card.
+ * The client's original free-text need stays visible as a document-level
+ * read-only banner (see NewDocumentForm). No text is ever auto-parsed.
+ */
+function CategoryLineCard({
+  value,
+  onChange,
+  onRemove,
+  products,
+  fieldsByCategory,
+}: {
+  value: DocumentLine;
+  onChange: (line: DocumentLine) => void;
+  onRemove?: () => void;
+  products: Product[];
+  fieldsByCategory?: Map<string, ConfigField[]>;
+}) {
+  const categoryId = value.category_id ?? null;
+  const categoryName = useMemo(
+    () =>
+      products.find((p) => p.category_id === categoryId)?.category ??
+      "Service request",
+    [products, categoryId]
+  );
+  const models = useMemo(
+    () => products.filter((p) => p.category_id === categoryId),
+    [products, categoryId]
+  );
+  const categoryFields = categoryId
+    ? fieldsByCategory?.get(categoryId) ?? []
+    : [];
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [search, setSearch] = useState("");
+
+  const filteredModels = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return models;
+    return models.filter((p) =>
+      `${p.name} ${p.sku ?? ""}`.toLowerCase().includes(q)
+    );
+  }, [models, search]);
+
+  const configValues = value.config_values ?? {};
+
+  // Pick a real catalogue model → hand off to the normal product flow (full
+  // card: catalogue tier pricing + configuration). Keep category_id + any
+  // config_values + quantity so nothing carried from the request is lost.
+  //
+  // Clear client_product_name: on a Service-Request line it holds the SR's
+  // commercial description (the cahier des charges — preserved at document level
+  // in the "Original sales request" banner). The full card reuses that field as
+  // the optional, client-facing "Client reference" shown on the PDF, so leaving
+  // the spec text in there leaks confusing noise into the reference. Start it
+  // empty — the model's own name is the internal label, and sales can type a
+  // real client reference if they want one.
+  function pickModel(id: string) {
+    onChange({
+      ...value,
+      product_id: id,
+      pricing_mode: "auto",
+      client_product_name: null,
+    });
+  }
+
+  return (
+    <div className="rounded-xl border border-neutral-200 bg-white p-4 space-y-4 shadow-sm">
+      {/* Header: category origin + remove. The "Original sales request" cahier
+          des charges is rendered ONCE as a document-level banner in the builder
+          (always visible) — see NewDocumentForm. Not repeated per line. */}
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="rounded-full bg-indigo-100 px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-indigo-700">
+            {categoryName}
+          </span>
+          <span className="text-xs text-neutral-500">
+            From the service request
+          </span>
+        </div>
+        {onRemove && (
+          <button
+            type="button"
+            onClick={onRemove}
+            className="shrink-0 rounded border border-neutral-200 px-2.5 py-1 text-sm text-red-600 hover:bg-red-50"
+          >
+            Remove
+          </button>
+        )}
+      </div>
+
+      {/* ───────── STEP 1 — MANDATORY MODEL SELECTION (the hero) ───────── */}
+      <div className="rounded-xl border-2 border-blue-500 bg-blue-50/60 p-4 sm:p-5">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <span className="text-[11px] font-bold uppercase tracking-wider text-blue-700">
+            Step 1 of 2
+          </span>
+          <span className="rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-red-700">
+            Required
+          </span>
+        </div>
+        <h3 className="mt-2 text-lg font-bold leading-snug text-neutral-900">
+          Select the exact catalogue model
+        </h3>
+        <p className="mt-0.5 text-sm text-neutral-600">
+          Required before configuration — the configuration must always attach to
+          a real product model.
+        </p>
+
+        {models.length === 0 ? (
+          <p className="mt-4 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+            No catalogue model exists in <b>{categoryName}</b> yet. Add one in{" "}
+            <i>Admin → Products</i> before quoting this line.
+          </p>
+        ) : !pickerOpen ? (
+          <button
+            type="button"
+            onClick={() => setPickerOpen(true)}
+            className="mt-4 inline-flex items-center gap-2 rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500/40"
+          >
+            Choose Model
+          </button>
+        ) : (
+          <div className="mt-4 space-y-3">
+            <div className="flex items-center gap-2">
+              <input
+                type="search"
+                placeholder="Search models by name or SKU…"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                autoFocus
+                className="w-full rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500/40"
+              />
+              <button
+                type="button"
+                onClick={() => {
+                  setPickerOpen(false);
+                  setSearch("");
+                }}
+                className="shrink-0 rounded border border-neutral-200 bg-white px-2.5 py-2 text-xs text-neutral-600 hover:bg-neutral-50"
+              >
+                Cancel
+              </button>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 max-h-[380px] overflow-y-auto pr-1">
+              {filteredModels.map((p) => (
+                <button
+                  key={p.id}
+                  type="button"
+                  onClick={() => pickModel(p.id)}
+                  className="flex gap-3 rounded-lg border border-neutral-200 bg-white p-2.5 text-left transition hover:border-blue-500 hover:shadow-sm"
+                >
+                  <div className="h-16 w-16 shrink-0 overflow-hidden rounded-md border border-neutral-200 bg-neutral-50">
+                    {p.image_url ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={p.image_url}
+                        alt={p.name}
+                        loading="lazy"
+                        className="h-full w-full object-cover"
+                      />
+                    ) : (
+                      <div className="flex h-full w-full items-center justify-center text-[10px] text-neutral-400">
+                        No image
+                      </div>
+                    )}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="line-clamp-2 text-sm font-semibold leading-tight text-neutral-900">
+                      {p.name}
+                    </div>
+                    <div className="mt-1 truncate font-mono text-[11px] text-neutral-500">
+                      {p.sku ?? "—"}
+                    </div>
+                    <div className="truncate text-[11px] text-neutral-400">
+                      {p.category ?? categoryName}
+                    </div>
+                  </div>
+                </button>
+              ))}
+              {filteredModels.length === 0 && (
+                <p className="col-span-full py-3 text-center text-sm text-neutral-500">
+                  No models match “{search}”.
+                </p>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Warning — reinforces that nothing downstream is usable until a model
+          is chosen. Stays until product_id is set (card swaps to the full one). */}
+      <div className="flex items-center gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+        <span aria-hidden className="text-base leading-none">
+          ⚠
+        </span>
+        <span>You must select a product model before configuring this item.</span>
+      </div>
+
+      {/* ───────── STEP 2 — CONFIGURATION (locked until a model is picked) ───────── */}
+      <div>
+        <div className="mb-2 flex flex-wrap items-center gap-2">
+          <span className="text-[11px] font-bold uppercase tracking-wider text-neutral-400">
+            Step 2 of 2 · Configuration
+          </span>
+          <span
+            className="inline-flex items-center gap-1 text-[11px] text-neutral-400"
+            title="Select a model first"
+          >
+            <LockIcon /> Locked — select a model first
+          </span>
+        </div>
+        {categoryFields.length > 0 ? (
+          // A disabled <fieldset> greys out AND blocks every native control
+          // (select/input/textarea/button) for mouse and keyboard;
+          // pointer-events-none also covers the custom checkbox spans.
+          <fieldset
+            disabled
+            aria-label="Configuration locked until a model is selected"
+            className="m-0 border-0 p-0 pointer-events-none select-none opacity-50"
+          >
+            <div className="grid gap-3 sm:grid-cols-2">
+              {categoryFields.map((f) => (
+                <ConfigFieldInput
+                  key={f.id}
+                  field={f}
+                  values={configValues}
+                  onChange={() => {}}
+                />
+              ))}
+            </div>
+          </fieldset>
+        ) : (
+          <p className="text-sm italic text-neutral-400">
+            Configuration becomes available after you select a model.
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
 type Props = {
   products: Product[];
   options: Option[];
@@ -184,14 +469,23 @@ export default function ProductConfigurator({
   );
 
   // ----- picker state -----
-  const [pickerOpen, setPickerOpen] = useState(!product);
+  // Closed by default: the no-product case is handled by a dedicated empty-state
+  // early return below (which renders the picker directly), so when the FULL card
+  // renders a product is always present. Initialising to `!product` used to latch
+  // the change-picker open for lines that started product-less — notably a
+  // Service-Request category line, which would then hand off to this card with
+  // the picker stuck open and the "✓ Model selected" confirmation hidden.
+  const [pickerOpen, setPickerOpen] = useState(false);
   const [categoryFilter, setCategoryFilter] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [showFavoritesOnly, setShowFavoritesOnly] = useState(false);
   const [favorites, setFavorites] = useState<Set<string>>(new Set());
-  // Configuration is collapsed by default (most sales price first, configure
-  // later) — but auto-expanded when the line already carries config/options
-  // so existing/revised quotes don't hide their setup.
+  // Configuration is collapsed by default for plain catalogue lines (most sales
+  // price first, configure later) — but OPEN by default when:
+  //   - the line already carries config/options (existing/revised quotes), or
+  //   - it came from a Service Request (value.category_id set): such a line
+  //     exists precisely to be configured against the chosen model, so STEP 2
+  //     should be ready, not hidden behind a "Configure now" click.
   const [configOpen, setConfigOpen] = useState(() => {
     const hasOpts = Object.values(value.selected_options ?? {}).some(
       (v) => v != null && v !== ""
@@ -199,7 +493,7 @@ export default function ProductConfigurator({
     const hasCfg = Object.values(value.config_values ?? {}).some(
       (v) => v != null && v !== ""
     );
-    return hasOpts || hasCfg;
+    return hasOpts || hasCfg || value.category_id != null;
   });
 
   useEffect(() => {
@@ -250,6 +544,20 @@ export default function ProductConfigurator({
   // while a project line stays a free-text card even if its text is cleared.
   // (All hooks above run unconditionally, so this early return is safe.)
   if (!value.product_id && value.client_product_name != null) {
+    // m133/m134 — a Service-Request line that carries a category goes through
+    // the category-centric configurator (reminder + optional model + config).
+    // Only truly category-less legacy lines fall back to the free-text card.
+    if (value.category_id) {
+      return (
+        <CategoryLineCard
+          value={value}
+          onChange={onChange}
+          onRemove={onRemove}
+          products={products}
+          fieldsByCategory={fieldsByCategory}
+        />
+      );
+    }
     return (
       <FreeTextLineCard value={value} onChange={onChange} onRemove={onRemove} />
     );
@@ -518,6 +826,23 @@ export default function ProductConfigurator({
         </div>
       )}
 
+      {/* ✓ Model selected — success confirmation for lines that originated from
+          a Service Request (category-origin). Reassures sales that the mandatory
+          Step 1 is done and the configuration below is now unlocked. Hidden
+          while the picker is open (they're actively changing the model). */}
+      {value.category_id && !pickerOpen && (
+        <div className="flex items-center gap-2 rounded-lg border border-green-300 bg-green-50 px-3 py-2 text-sm text-green-800">
+          <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-green-600 text-white">
+            <CheckIcon className="h-3 w-3" />
+          </span>
+          <span>
+            <b>Model selected.</b> {product.name}
+            {product.sku ? ` · ${product.sku}` : ""} — configuration is now
+            available below.
+          </span>
+        </div>
+      )}
+
       {/* ---------- HEADER: thumbnail + prominent product name + actions ---------- */}
       <div className="flex items-start gap-3">
         {/* Small thumbnail keeps the card recognizable + unified without
@@ -570,7 +895,11 @@ export default function ProductConfigurator({
             onClick={() => setPickerOpen((v) => !v)}
             className="rounded border border-neutral-200 px-2.5 py-1 text-sm hover:bg-neutral-50"
           >
-            {pickerOpen ? "Cancel" : "Change product"}
+            {pickerOpen
+              ? "Cancel"
+              : value.category_id
+              ? "Change model"
+              : "Change product"}
           </button>
           {onRemove && (
             <button

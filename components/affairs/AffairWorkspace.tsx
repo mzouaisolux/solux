@@ -3,6 +3,7 @@
 // =====================================================================
 // Affair workspace — a COMMERCIAL DEAL workspace (not a PM dashboard).
 // Order = what a salesperson reaches for:
+//   0. Next action (CRM step 4 — the to-do engine; only on the full page)
 //   1. Operational progress (thin pipeline line)
 //   2. Quotations (primary — open / edit / duplicate / export PDF)
 //   3. Conversation (last message preview + count + open)
@@ -16,6 +17,7 @@ import { fmtDate } from "@/components/affairs/badges";
 import { AffairProgressStrip } from "@/components/affairs/AffairProgressStrip";
 import { AffairQuotations } from "@/components/affairs/AffairQuotations";
 import { AffairDocumentsCard } from "@/components/affairs/AffairDocumentsCard";
+import { AffairActionsCard, type PlannedActionRow } from "@/components/affairs/AffairActionsCard";
 import type { AssignableDoc } from "@/components/affairs/AssignDocumentPanel";
 
 function SectionLabel({ children }: { children: React.ReactNode }) {
@@ -30,15 +32,24 @@ export function AffairWorkspace({
   affair,
   affairId,
   assignableDocs = [],
+  plannedActions,
 }: {
   affair: AffairGroup;
   affairId: string;
   assignableDocs?: AssignableDoc[];
+  /** CRM step 4 (m103). Omitted (undefined/null) in the client-hub inline
+   *  expansion and pre-migration — the card simply doesn't render. */
+  plannedActions?: PlannedActionRow[] | null;
 }) {
   const fileDocId = affair.latest?.id ?? affair.documents[0]?.id ?? null;
 
   return (
     <div className="space-y-5">
+      {/* 0. Next action — the deal's to-do engine (PLAN_CRM_SOLUX §8). */}
+      {plannedActions != null && (
+        <AffairActionsCard affairId={affairId} actions={plannedActions} />
+      )}
+
       {/* 1. Operational progress — thin pipeline line. */}
       <AffairProgressStrip affair={affair} />
 

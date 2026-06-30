@@ -4,22 +4,13 @@ import CreatePriceListForm from "./CreatePriceListForm";
 import { isAdminLike, type PriceListStatus } from "@/lib/types";
 import { getEffectiveRole } from "@/lib/auth";
 import AccessDenied from "@/components/AccessDenied";
+import { canAccessOrAdmin } from "@/lib/permissions";
 
 export const dynamic = "force-dynamic";
 
 function StatusBadge({ status }: { status?: PriceListStatus }) {
   const s = status ?? "draft";
-  const cls =
-    s === "published"
-      ? "bg-emerald-100 text-emerald-800"
-      : s === "archived"
-        ? "bg-neutral-200 text-neutral-500"
-        : "bg-amber-100 text-amber-800";
-  return (
-    <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase ${cls}`}>
-      {s}
-    </span>
-  );
+  return <span className={`px-sbadge ${s}`}>{s}</span>;
 }
 
 /**
@@ -35,7 +26,7 @@ function StatusBadge({ status }: { status?: PriceListStatus }) {
  */
 export default async function CreatePriceListPage() {
   const { effectiveRole } = await getEffectiveRole();
-  if (!isAdminLike(effectiveRole)) {
+  if (!(await canAccessOrAdmin(["pricing.manage"]))) {
     return (
       <AccessDenied
         title="Administrators only"
@@ -49,7 +40,7 @@ export default async function CreatePriceListPage() {
   const recent = lists.slice(0, 6);
 
   return (
-    <div className="mx-auto max-w-screen-2xl px-6 py-8 space-y-6">
+    <div className="solux-pro mx-auto max-w-screen-2xl px-6 py-8 space-y-6">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <div className="eyebrow">Admin · Pricing</div>
@@ -63,9 +54,19 @@ export default async function CreatePriceListPage() {
             draft — then configure, assign and publish it from its page.
           </p>
         </div>
-        <Link href="/admin/pricing/library" className="btn-secondary text-sm">
+        <Link href="/admin/pricing/library" className="sx-btn sx-btn-ink">
           Price List Library →
         </Link>
+      </div>
+
+      {/* WORKFLOW BANNER */}
+      <div className="px-banner">
+        <div>
+          <div className="px-micro" style={{ color: "var(--sx-ink)" }}>Create → Library → Assign</div>
+          <p>
+            <b>Create</b> a draft (category + margins). It lands in the <b>Library</b> where you view, filter and maintain it. Configure the product prices, then <b>Publish</b> to push live prices into the quote builder, and <b>Assign</b> the list to the sellers / teams who quote on it. Creating is &lt;5% of the workflow — the other 95% lives in the Library and each list&apos;s detail page.
+          </p>
+        </div>
       </div>
 
       <CreatePriceListForm
@@ -76,88 +77,57 @@ export default async function CreatePriceListPage() {
         products={products}
       />
 
-      {/* RECENT PRICE LISTS — connect creation to the management workspace. The
-          Library is the primary tool; this is a quick peek + a door into it. */}
-      <section className="rounded-lg border border-neutral-200 bg-white p-4 space-y-3">
-        <div className="flex items-center justify-between gap-3">
-          <div className="eyebrow">Recent price lists</div>
-          <Link href="/admin/pricing/library" className="row-link text-sm font-medium">
-            View full library →
-          </Link>
+      {/* RECENT PRICE LISTS */}
+      <section className="card sec">
+        <div className="sechead" style={{ marginBottom: 0 }}>
+          <div>
+            <div className="px-micro">Recent price lists</div>
+            <div style={{ fontSize: 13, color: "var(--sx-mute)", margin: "6px 0 0" }}>
+              Compact peek — a door into the full Library.
+            </div>
+          </div>
+          <Link href="/admin/pricing/library" className="sx-link">View full library →</Link>
         </div>
         {recent.length === 0 ? (
-          <p className="text-sm text-neutral-500">
+          <p style={{ fontSize: 13, color: "var(--sx-mute)", marginTop: 12 }}>
             No price lists yet — create your first one above.
           </p>
         ) : (
-          <ul className="-mx-2 space-y-0.5">
+          <div style={{ marginTop: 10 }}>
             {recent.map((l) => {
               const status = l.status ?? "draft";
-              const dot =
-                status === "published"
-                  ? "bg-emerald-500"
-                  : status === "archived"
-                    ? "bg-neutral-300"
-                    : "bg-amber-400";
               const assignment =
                 l.assignments.length === 0
                   ? null
-                  : l.assignments
-                      .map((a) => a.assignee_name ?? a.assignee_id ?? a.assignee_type)
-                      .join(", ");
+                  : l.assignments.map((a) => a.assignee_name ?? a.assignee_id ?? a.assignee_type).join(", ");
               return (
-                <li key={l.id}>
-                  <Link
-                    href={`/admin/pricing/${l.id}`}
-                    className="group flex items-center gap-3 rounded-md px-2 py-2.5 transition-colors hover:bg-neutral-50"
-                  >
-                    <span className={`h-2 w-2 shrink-0 rounded-full ${dot}`} aria-hidden />
-                    <span className="min-w-0 flex-1 truncate font-medium text-neutral-800">
-                      {l.name}
-                    </span>
-                    <span className="hidden shrink-0 text-xs text-neutral-400 sm:inline">
-                      {l.categoryName ?? "All"}
-                    </span>
-                    <StatusBadge status={l.status} />
-                    <span
-                      className={`hidden w-44 shrink-0 truncate text-right text-xs md:inline ${
-                        assignment ? "text-neutral-500" : "text-neutral-300 italic"
-                      }`}
-                    >
-                      {assignment ?? "Unassigned"}
-                    </span>
-                    <span className="shrink-0 text-neutral-300 transition-colors group-hover:text-neutral-600">
-                      →
-                    </span>
-                  </Link>
-                </li>
+                <Link key={l.id} href={`/admin/pricing/${l.id}`} className="px-recent-row">
+                  <span className={`px-dot ${status}`} aria-hidden />
+                  <span className="nm">{l.name}</span>
+                  <span className="px-sub" style={{ width: 130, textAlign: "right", flex: "none" }}>{l.categoryName ?? "All"}</span>
+                  <StatusBadge status={l.status} />
+                  <span className="rc" style={assignment ? undefined : { fontStyle: "italic" }}>{assignment ?? "Unassigned"}</span>
+                  <span style={{ color: "var(--sx-mute-2)" }}>→</span>
+                </Link>
               );
             })}
-          </ul>
+          </div>
         )}
       </section>
 
-      {/* Global pricing parameters — used by every price list's computation. */}
-      <details className="rounded-lg border border-neutral-200 bg-white p-4">
-        <summary className="cursor-pointer text-sm text-neutral-600 hover:text-neutral-900">
-          Global settings (exchange rate, tax rebate, thin-margin threshold)
-        </summary>
-        <form action={updateSettings} className="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-4">
-          <label className="block">
-            <span className="text-xs font-medium text-neutral-600">Exchange rate (RMB→USD)</span>
-            <input name="exchangeRate" type="number" step="0.0001" min="0" defaultValue={settings.exchangeRate} className="mt-1 w-full rounded border px-3 py-2 tabular-nums" />
-          </label>
-          <label className="block">
-            <span className="text-xs font-medium text-neutral-600">Tax rebate</span>
-            <input name="taxRebate" type="number" step="0.01" min="0" max="1" defaultValue={settings.taxRebate} className="mt-1 w-full rounded border px-3 py-2 tabular-nums" />
-          </label>
-          <label className="block">
-            <span className="text-xs font-medium text-neutral-600">Thin-margin threshold</span>
-            <input name="thinMarginThreshold" type="number" step="0.01" min="0" max="1" defaultValue={thinThreshold} className="mt-1 w-full rounded border px-3 py-2 tabular-nums" />
-          </label>
-          <div className="sm:col-span-3 flex justify-end">
-            <button className="btn-secondary">Save settings</button>
+      {/* Global pricing parameters */}
+      <details className="card sec px-collap">
+        <summary>Global settings — exchange rate, tax rebate, thin-margin threshold</summary>
+        <div style={{ fontSize: 13, color: "var(--sx-mute)", margin: "12px 0 0", lineHeight: 1.6 }}>
+          Used by every price list&apos;s computation. Selling price = usdCost × (1 − rebate) ÷ (1 − margin).
+        </div>
+        <form action={updateSettings}>
+          <div className="px-settings-grid">
+            <div className="fcol"><span className="px-flabel">Exchange rate (RMB→USD)</span><input name="exchangeRate" type="number" step="0.0001" min="0" defaultValue={settings.exchangeRate} style={{ textAlign: "right" }} /></div>
+            <div className="fcol"><span className="px-flabel">Tax rebate</span><input name="taxRebate" type="number" step="0.01" min="0" max="1" defaultValue={settings.taxRebate} style={{ textAlign: "right" }} /></div>
+            <div className="fcol"><span className="px-flabel">Thin-margin threshold</span><input name="thinMarginThreshold" type="number" step="0.01" min="0" max="1" defaultValue={thinThreshold} style={{ textAlign: "right" }} /></div>
           </div>
+          <div className="savebar"><button className="sx-btn">Save settings</button></div>
         </form>
       </details>
     </div>

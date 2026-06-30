@@ -66,10 +66,10 @@ export default function CreatePriceListForm({
   }, [catProducts, m1, m2, m3]);
 
   return (
-    <form action={createPriceList} className="rounded-lg border border-neutral-200 bg-white p-4 space-y-4">
+    <form action={createPriceList} className="card sec space-y-4">
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <label className="block">
-          <span className="text-xs font-medium text-neutral-600">Product category *</span>
+          <span className="px-flabel">Product category *</span>
           <select
             name="categoryId"
             required
@@ -88,7 +88,7 @@ export default function CreatePriceListForm({
           </select>
         </label>
         <label className="block">
-          <span className="text-xs font-medium text-neutral-600">Cost version</span>
+          <span className="px-flabel">Cost version</span>
           <select name="costBatchId" defaultValue={costVersions[0]?.id ?? ""} className="mt-1 w-full rounded border px-3 py-2">
             <option value="">Latest active cost</option>
             {costVersions.map((v) => (
@@ -100,7 +100,7 @@ export default function CreatePriceListForm({
           <span className="mt-0.5 block text-[11px] text-neutral-400">prices use the current active cost</span>
         </label>
         <label className="block">
-          <span className="text-xs font-medium text-neutral-600">Price list name *</span>
+          <span className="px-flabel">Price list name *</span>
           <input
             name="name"
             required
@@ -121,7 +121,7 @@ export default function CreatePriceListForm({
           ] as const
         ).map(([label, val, setter, hint, i]) => (
           <label key={label} className="block">
-            <span className="text-xs font-medium text-neutral-600">{label}</span>
+            <span className="px-flabel">{label}</span>
             <input
               type="number"
               step="0.5"
@@ -129,17 +129,18 @@ export default function CreatePriceListForm({
               max="99"
               value={val}
               onChange={(e) => setter(Number(e.target.value))}
-              className={`mt-1 w-full rounded border px-3 py-2 tabular-nums ${tierThin[i] ? "border-rose-400 text-rose-700" : ""}`}
+              className="mt-1 w-full tabular-nums"
+              style={{ textAlign: "right", ...(tierThin[i] ? { borderColor: "var(--sx-amber-line)", color: "var(--sx-amber-deep)" } : {}) }}
             />
-            <span className="mt-0.5 block text-[11px] text-neutral-400">{hint} pcs</span>
+            <span className={`mt-0.5 block text-[11px] ${tierThin[i] ? "text-[color:var(--sx-amber-deep)]" : "text-neutral-400"}`}>{hint} pcs{tierThin[i] ? " · thin margin" : ""}</span>
           </label>
         ))}
         <label className="block">
-          <span className="text-xs font-medium text-neutral-600">Effective date</span>
+          <span className="px-flabel">Effective date</span>
           <input name="effectiveDate" type="date" className="mt-1 w-full rounded border px-3 py-2" />
         </label>
         <label className="block">
-          <span className="text-xs font-medium text-neutral-600">Notes</span>
+          <span className="px-flabel">Notes</span>
           <input name="notes" placeholder="optional" className="mt-1 w-full rounded border px-3 py-2" />
         </label>
       </div>
@@ -151,98 +152,82 @@ export default function CreatePriceListForm({
 
       {/* live preview */}
       {categoryId && (
-        <div className="space-y-2">
+        <div>
           {missingCount > 0 && (
-            <div className="rounded border border-amber-200 bg-amber-50 px-3 py-2 text-[12px] text-amber-800">
-              <span className="font-semibold">
-                {missingCount} of {catProducts.length} product{catProducts.length === 1 ? "" : "s"}{" "}
-                {missingCount === 1 ? "has" : "have"} no active cost
-              </span>{" "}
-              and {missingCount === 1 ? "is" : "are"} shown as{" "}
-              <span className="font-medium">Missing cost</span> below. The list will save fine and the
-              other {costedCount} calculate normally — enter a cost in Cost entry, then publish to price{" "}
-              {missingCount === 1 ? "it" : "them"}.
+            <div className="px-notice amber" style={{ marginTop: 4 }}>
+              <b>{missingCount} of {catProducts.length} product{catProducts.length === 1 ? "" : "s"} {missingCount === 1 ? "has" : "have"} no active cost</b> and {missingCount === 1 ? "is" : "are"} shown as <b>Missing cost</b> below. The list will save fine and the other {costedCount} calculate normally — enter a cost in Cost entry, then publish to price {missingCount === 1 ? "it" : "them"}.
             </div>
           )}
-          <div className="text-[11px] text-neutral-500">
+          <div className="px-preview" style={{ marginTop: 12 }}>
             Average profit per unit (after rebate — realised margin = your target):{" "}
-            T1 <span className="font-medium text-emerald-600">${money(avgProfit[0])}</span>{" "}
-            <span className="text-neutral-400">({m1.toFixed(1)}%)</span> ·{" "}
-            T2 <span className="font-medium text-emerald-600">${money(avgProfit[1])}</span>{" "}
-            <span className="text-neutral-400">({m2.toFixed(1)}%)</span> ·{" "}
-            T3 <span className="font-medium text-emerald-600">${money(avgProfit[2])}</span>{" "}
-            <span className="text-neutral-400">({m3.toFixed(1)}%)</span>
+            T1 <b style={{ color: "var(--sx-green-deep)" }}>${money(avgProfit[0])}</b> <span style={{ color: "var(--sx-mute-2)" }}>({m1.toFixed(1)}%)</span> ·{" "}
+            T2 <b style={{ color: "var(--sx-green-deep)" }}>${money(avgProfit[1])}</b> <span style={{ color: "var(--sx-mute-2)" }}>({m2.toFixed(1)}%)</span> ·{" "}
+            T3 <b style={{ color: "var(--sx-green-deep)" }}>${money(avgProfit[2])}</b> <span style={{ color: "var(--sx-mute-2)" }}>({m3.toFixed(1)}%)</span>
           </div>
-          <div className="rounded border border-neutral-200 overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="bg-solux-accent text-left">
-                <th className="px-3 py-2 text-xs font-semibold text-neutral-700">Product</th>
-                <th className="px-3 py-2 text-xs font-semibold text-neutral-700 text-right">Cost RMB</th>
-                <th className="px-3 py-2 text-xs font-semibold text-neutral-700 text-right">USD</th>
-                <th className={`px-3 py-2 text-xs font-semibold text-right ${tierThin[0] ? "text-rose-700" : "text-neutral-700"}`}>T1 ({fmtPct(margins.targetMargin1, 0)})</th>
-                <th className={`px-3 py-2 text-xs font-semibold text-right ${tierThin[1] ? "text-rose-700" : "text-neutral-700"}`}>T2 ({fmtPct(margins.targetMargin2, 0)})</th>
-                <th className={`px-3 py-2 text-xs font-semibold text-right ${tierThin[2] ? "text-rose-700" : "text-neutral-700"}`}>T3 ({fmtPct(margins.targetMargin3, 0)})</th>
-              </tr>
-            </thead>
-            <tbody>
-              {catProducts.length === 0 ? (
-                <tr>
-                  <td colSpan={6} className="px-3 py-6 text-center text-neutral-500">No products in this category.</td>
-                </tr>
-              ) : (
-                catProducts.map((p) => {
-                  const r = computePricing(p.costRmb, settings, margins);
-                  const tiers = [r.tier1, r.tier2, r.tier3];
-                  const noCost = p.costRmb <= 0;
-                  return (
-                    <tr key={p.id} className="border-t border-neutral-100">
-                      <td className="px-3 py-1.5">
-                        <span className="font-medium">{p.name}</span>
-                        <span className="ml-2 font-mono text-[11px] text-neutral-400">{p.sku ?? "—"}</span>
-                        {noCost && (
-                          <span className="ml-2 rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700">
-                            Missing cost
-                          </span>
-                        )}
-                      </td>
-                      <td className="px-3 py-1.5 text-right tabular-nums">{noCost ? "—" : money(p.costRmb)}</td>
-                      <td className="px-3 py-1.5 text-right tabular-nums">{noCost ? "—" : money(p.usdCost)}</td>
-                      {tiers.map((t, i) => {
-                        const loss = !noCost && t.price <= p.usdCost;
-                        // After-tax profit (price − usdCost + rebate) so profit/price
-                        // equals the tier's target margin shown in the header.
-                        const profit = t.marginValueAfterTax;
-                        return (
-                          <td key={i} className={`px-3 py-1.5 text-right tabular-nums ${tierThin[i] || loss ? "bg-rose-50/60" : ""}`}>
-                            {noCost ? (
-                              <span className="text-neutral-300">—</span>
-                            ) : (
-                              <>
-                                <span className={loss ? "text-rose-700 font-medium" : "font-medium"}>{money(round(t.price))}</span>
-                                <span className={`block text-[10px] ${profit > 0 ? "text-emerald-600" : "text-rose-600"}`}>
-                                  ${money(round(profit))}
-                                </span>
-                              </>
-                            )}
-                          </td>
-                        );
-                      })}
+          <div className="card" style={{ marginTop: 8, padding: 0, boxShadow: "none" }}>
+            <div style={{ overflowX: "auto" }}>
+              <table className="px-grid">
+                <thead>
+                  <tr>
+                    <th>Product</th>
+                    <th className="num">Cost RMB</th>
+                    <th className="num">USD</th>
+                    <th className="num" style={tierThin[0] ? { color: "var(--sx-amber-deep)" } : undefined}>T1 ({fmtPct(margins.targetMargin1, 0)})</th>
+                    <th className="num" style={tierThin[1] ? { color: "var(--sx-amber-deep)" } : undefined}>T2 ({fmtPct(margins.targetMargin2, 0)})</th>
+                    <th className="num" style={tierThin[2] ? { color: "var(--sx-amber-deep)" } : undefined}>T3 ({fmtPct(margins.targetMargin3, 0)})</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {catProducts.length === 0 ? (
+                    <tr>
+                      <td colSpan={6} style={{ textAlign: "center", padding: "28px 12px", color: "var(--sx-mute)" }}>No products in this category.</td>
                     </tr>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
+                  ) : (
+                    catProducts.map((p) => {
+                      const r = computePricing(p.costRmb, settings, margins);
+                      const tiers = [r.tier1, r.tier2, r.tier3];
+                      const noCost = p.costRmb <= 0;
+                      return (
+                        <tr key={p.id}>
+                          <td>
+                            <span className="px-pname">{p.name}</span>
+                            <span className="px-sku">{p.sku ?? "—"}</span>
+                            {noCost && <span className="px-sbadge missing" style={{ marginLeft: 8 }}>Missing cost</span>}
+                          </td>
+                          <td className="num">{noCost ? <span className="px-muteit">—</span> : money(p.costRmb)}</td>
+                          <td className="num">{noCost ? <span className="px-muteit">—</span> : money(p.usdCost)}</td>
+                          {tiers.map((t, i) => {
+                            const loss = !noCost && t.price <= p.usdCost;
+                            const profit = t.marginValueAfterTax;
+                            return (
+                              <td key={i} className={`num ${tierThin[i] || loss ? "thincell" : ""}`}>
+                                {noCost ? (
+                                  <span className="px-muteit">—</span>
+                                ) : (
+                                  <span className="px-cellprice">
+                                    {money(round(t.price))}
+                                    <span className="mg" style={{ color: profit > 0 ? "var(--sx-green-deep)" : "var(--sx-amber-deep)" }}>${money(round(profit))}</span>
+                                  </span>
+                                )}
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
       )}
 
-      <div className="flex items-center gap-3">
-        <button type="submit" disabled={!categoryId || !name.trim()} className="btn-primary disabled:opacity-50">
+      <div className="savebar">
+        <button type="submit" disabled={!categoryId || !name.trim()} className="sx-btn sx-btn-go disabled:opacity-50">
           Create price list (draft)
         </button>
-        <span className="text-[11px] text-neutral-400">Saved as a draft — publish it from the library when ready.</span>
+        <span className="px-sub">Saved as a draft — publish it from the library when ready.</span>
       </div>
     </form>
   );

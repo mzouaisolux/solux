@@ -5,6 +5,7 @@ import { fmtPct } from "@/lib/pricing-engine";
 import { isAdminLike } from "@/lib/types";
 import { getEffectiveRole } from "@/lib/auth";
 import AccessDenied from "@/components/AccessDenied";
+import { canAccessOrAdmin } from "@/lib/permissions";
 import LibraryTable, { type LibraryRow } from "./LibraryTable";
 
 export const dynamic = "force-dynamic";
@@ -28,7 +29,7 @@ export default async function PriceListLibraryPage({
   };
 }) {
   const { effectiveRole } = await getEffectiveRole();
-  if (!isAdminLike(effectiveRole)) {
+  if (!(await canAccessOrAdmin(["pricing.manage"]))) {
     return (
       <AccessDenied
         title="Administrators only"
@@ -90,7 +91,7 @@ export default async function PriceListLibraryPage({
     "rounded border border-neutral-300 px-2 py-1 text-sm bg-white";
 
   return (
-    <div className="mx-auto max-w-screen-2xl px-6 py-8 space-y-5">
+    <div className="solux-pro mx-auto max-w-screen-2xl px-6 py-8 space-y-5">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <div className="eyebrow">Admin · Pricing</div>
@@ -99,67 +100,59 @@ export default async function PriceListLibraryPage({
             View, filter, assign, publish and maintain every price list ({lists.length} total).
           </p>
         </div>
-        <Link href="/admin/pricing" className="btn-secondary text-sm">
+        <Link href="/admin/pricing" className="sx-btn">
           + Create price list
         </Link>
       </div>
 
       {/* FILTER BAR — plain GET form (data-first, no client state) */}
-      <form className="flex flex-wrap items-end gap-2" action="/admin/pricing/library">
-        <label className="block">
-          <span className="text-[11px] text-neutral-500">Search</span>
-          <input name="q" defaultValue={searchParams?.q ?? ""} placeholder="Name…" className={`${field} block`} />
-        </label>
-        <label className="block">
-          <span className="text-[11px] text-neutral-500">Status</span>
-          <select name="fstatus" defaultValue={fstatus} className={`${field} block`}>
+      <form className="card sec px-filterbar" action="/admin/pricing/library">
+        <div className="fcol">
+          <span className="px-flabel">Search</span>
+          <input name="q" defaultValue={searchParams?.q ?? ""} placeholder="Name…" type="text" />
+        </div>
+        <div className="fcol">
+          <span className="px-flabel">Status</span>
+          <select name="fstatus" defaultValue={fstatus}>
             <option value="">All</option>
             <option value="draft">Draft</option>
             <option value="published">Published</option>
             <option value="archived">Archived</option>
           </select>
-        </label>
-        <label className="block">
-          <span className="text-[11px] text-neutral-500">Category</span>
-          <select name="fcat" defaultValue={fcat} className={`${field} block`}>
+        </div>
+        <div className="fcol">
+          <span className="px-flabel">Category</span>
+          <select name="fcat" defaultValue={fcat}>
             <option value="">All</option>
             {categories.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-              </option>
+              <option key={c.id} value={c.id}>{c.name}</option>
             ))}
           </select>
-        </label>
-        <label className="block">
-          <span className="text-[11px] text-neutral-500">Created by</span>
-          <select name="fcreated" defaultValue={fcreated} className={`${field} block`}>
+        </div>
+        <div className="fcol">
+          <span className="px-flabel">Created by</span>
+          <select name="fcreated" defaultValue={fcreated}>
             <option value="">Anyone</option>
             {creators.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-              </option>
+              <option key={c.id} value={c.id}>{c.name}</option>
             ))}
           </select>
-        </label>
-        <label className="block">
-          <span className="text-[11px] text-neutral-500">Assigned to</span>
-          <select name="fassigned" defaultValue={fassigned} className={`${field} block`}>
+        </div>
+        <div className="fcol">
+          <span className="px-flabel">Assigned to</span>
+          <select name="fassigned" defaultValue={fassigned}>
             <option value="">Anyone</option>
             {owners.map((o) => (
-              <option key={o.id} value={o.id}>
-                {o.name}
-              </option>
+              <option key={o.id} value={o.id}>{o.name}</option>
             ))}
           </select>
-        </label>
-        <label className="block">
-          <span className="text-[11px] text-neutral-500">Effective from</span>
-          <input name="feff" type="date" defaultValue={feff} className={`${field} block`} />
-        </label>
-        <button className="btn-secondary text-sm">Apply</button>
-        <Link href="/admin/pricing/library" className="text-sm text-neutral-500 hover:underline self-center">
-          Reset
-        </Link>
+        </div>
+        <div className="fcol">
+          <span className="px-flabel">Effective from</span>
+          <input name="feff" type="date" defaultValue={feff} />
+        </div>
+        <button className="sx-btn">Apply</button>
+        <Link href="/admin/pricing/library" className="px-reset">Reset</Link>
       </form>
 
       <LibraryTable rows={rows} sellers={owners.map((o) => ({ id: o.id, name: o.name }))} />

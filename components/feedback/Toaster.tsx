@@ -61,7 +61,9 @@ export function Toaster() {
             className={`pointer-events-auto flex max-w-sm cursor-pointer items-start gap-2 rounded-lg border px-3.5 py-2.5 text-sm shadow-lg shadow-neutral-200/60 ${tone.box}`}
           >
             <span className="mt-0.5 font-semibold">{tone.icon}</span>
-            <span className="font-medium">{t.message}</span>
+            {/* Strip any leading ✓ baked into the message so we never render ✓✓
+                (many success strings start with "✓ …" and the icon adds one). */}
+            <span className="font-medium">{t.message.replace(/^\s*[✓✔]+\s*/, "")}</span>
           </div>
         );
       })}

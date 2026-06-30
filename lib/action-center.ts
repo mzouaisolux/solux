@@ -31,6 +31,9 @@ import { eventTypeLabel, type EventEntityType } from "@/lib/events-shared";
 import {
   DOC_ACTIVE_STATUSES,
   PRODUCTION_COMPLETED_STATUSES,
+  computeExpectedBalance,
+  type PaymentMode,
+  type PaymentTerms,
   type Role,
 } from "@/lib/types";
 
@@ -49,9 +52,12 @@ export type ActionKind =
   | "doc_validate"
   | "deposit"
   | "production_late"
+  | "balance_due"
+  | "shipment_blocked"
   | "missing_deadline"
   | "won_no_tasklist"
   | "bl_missing_destination"
+  | "tender_stalled"
   | "info";
 
 export const ACTION_SECTION_ORDER: ActionSection[] = [
@@ -144,10 +150,13 @@ export type ActionItem = {
   tag: string | null;
   acknowledgedByName?: string | null;
   acknowledgedAt?: string | null;
+  /** When the underlying condition last changed — lets applyAcks expire a
+   *  stale "done" ack so a worsening situation resurfaces (see Signal). */
+  refreshedAt?: string | null;
   /** The underlying entity this card is about. Drives the canonical
    *  per-entity conversation (entity_messages) used as the card's notes —
    *  all cards on the same order/project share one operational-memory thread. */
-  entityType: "document" | "task_list" | "production_order" | "client";
+  entityType: "document" | "task_list" | "production_order" | "client" | "tender";
   entityId: string;
   /** Number of notes on this card's entity conversation. 0 = nothing yet. */
   noteCount: number;
@@ -242,6 +251,29 @@ const ACTION_TYPES: Record<ActionKind, ActionTypeDef> = {
       ],
     },
   },
+  // Alert-routing audit fix: these two existed only as table/cockpit alerts
+  // (computeOperationsAlert) — never as actionable items, so Sales got the
+  // bell notification but nothing in the action area. Both block execution.
+  balance_due: {
+    behavior: "followup", resolution: "manual", roles: ["sales", "operations"],
+    section: "urgent", priority: 84,
+    title: "Balance outstanding — collect before shipment",
+    sla: {
+      stages: [
+        { afterDays: 14, priority: 94, tag: "Escalated", addRoles: ["management"] },
+      ],
+    },
+  },
+  shipment_blocked: {
+    behavior: "followup", resolution: "manual", roles: ["operations", "sales"],
+    section: "urgent", priority: 80,
+    title: "Production complete — shipment not booked",
+    sla: {
+      stages: [
+        { afterDays: 14, priority: 88, tag: "Escalated", addRoles: ["management"] },
+      ],
+    },
+  },
   missing_deadline: {
     behavior: "action", resolution: "auto_clear", roles: ["operations"],
     section: "info_missing", priority: 44,
@@ -257,6 +289,19 @@ const ACTION_TYPES: Record<ActionKind, ActionTypeDef> = {
     section: "info_missing", priority: 40,
     title: "Confirm BL & shipping info before booking",
   },
+  // m110 critical rule: an ACCEPTED tender must never sit without a next
+  // action. Self-clears the moment one is planned; escalates to the
+  // manager after 3 days of drift.
+  tender_stalled: {
+    behavior: "action", resolution: "auto_clear", roles: ["sales"],
+    section: "urgent", priority: 78,
+    title: "Accepted tender without next action — plan the next step",
+    sla: {
+      stages: [
+        { afterDays: 3, priority: 86, tag: "Escalated", addRoles: ["management"] },
+      ],
+    },
+  },
   info: {
     behavior: "info", resolution: "auto_clear",
     roles: ["sales", "operations", "task_list_manager"],
@@ -266,7 +311,7 @@ const ACTION_TYPES: Record<ActionKind, ActionTypeDef> = {
 
 /* ===================== Signals + materialize ===================== */
 
-type SignalEntity = "document" | "task_list" | "production_order" | "client";
+type SignalEntity = "document" | "task_list" | "production_order" | "client" | "tender";
 
 type Signal = {
   kind: ActionKind;
@@ -285,6 +330,12 @@ type Signal = {
   titleOverride?: string;
   idOverride?: string;
   hrefOverride?: string;
+  /** ISO timestamp the underlying condition last CHANGED (e.g. the latest
+   *  delay event). A manual "Done" ack only suppresses the card while it is
+   *  NEWER than this — when the condition evolves again after the Done, the
+   *  card resurfaces (alert-routing audit fix: previously a Done hid the
+   *  card forever, even as the delay kept growing). */
+  refreshedAt?: string | null;
 };
 
 /**
@@ -361,6 +412,7 @@ function entityHref(t: SignalEntity, id: string): string {
     case "task_list": return `/task-lists/${id}`;
     case "production_order": return `/production/orders/${id}`;
     case "client": return `/clients/${id}`;
+    case "tender": return "/prospects";
   }
 }
 
@@ -409,6 +461,7 @@ function materialize(s: Signal): ActionItem {
     amount: s.amount ?? null,
     contextChips: s.contextChips ?? [],
     tag,
+    refreshedAt: s.refreshedAt ?? null,
     entityType: s.entityType,
     entityId: s.entityId,
     noteCount: 0,
@@ -464,7 +517,10 @@ async function gatherSignals(
         // m075: also pull shipping_details (BL execution) + client.bl_profile
         // so the BL action can self-clear once the operator has actually
         // saved consignee / BL number / forwarder somewhere.
-        "id, number, status, initial_production_deadline, current_production_deadline, created_at, deposit_received_amount, shipping_details, quotation_id, documents:quotation_id(created_by, sales_owner_id, client_id, affair_name, number, total_price, currency, incoterm, freight_type, port_of_destination, root_document_id, version, clients:client_id(company_name, bl_profile))"
+        // Alert-routing audit: + balance_received_amount / shipment_booked /
+        // actual_completion_date (PO) and payment_mode / payment_terms (doc)
+        // so the balance_due + shipment_blocked sensors can fire.
+        "id, number, status, initial_production_deadline, current_production_deadline, created_at, deposit_received_amount, balance_received_amount, shipment_booked, actual_completion_date, shipping_details, quotation_id, documents:quotation_id(created_by, sales_owner_id, client_id, affair_name, number, total_price, currency, incoterm, freight_type, port_of_destination, payment_mode, payment_terms, root_document_id, version, clients:client_id(company_name, bl_profile))"
       )
       .limit(500),
     supabase
@@ -493,8 +549,17 @@ async function gatherSignals(
   // "Added Xd ago" footer on the card so it reads operationally honest.
   const factoryDelayByOrder = new Map<string, number>();
   const factoryEarliestByOrder = new Map<string, string>();
+  // Latest delay event of ANY attribution per order — drives the "done ack
+  // expires when the situation changes again" rule (refreshedAt).
+  const latestChangeByOrder = new Map<string, string>();
   if (!deadlineChangesRes.error) {
     for (const r of (deadlineChangesRes.data ?? []) as any[]) {
+      {
+        const oid = String(r.production_order_id);
+        const ts = String(r.created_at ?? "");
+        const prevTs = latestChangeByOrder.get(oid);
+        if (ts && (!prevTs || ts > prevTs)) latestChangeByOrder.set(oid, ts);
+      }
       const t = (r.delay_type ?? "production") as string;
       if (t !== "production") continue;
       let delta: number;
@@ -623,19 +688,37 @@ async function gatherSignals(
             : [],
         });
       } else {
-        // m072 — only the FACTORY portion of the slip triggers production_late
-        // (NULL-typed legacy rows are treated as production). External delays
-        // (payment / shipping / client / supplier / customs) push the project
-        // ETA but don't fire this sensor — they surface elsewhere so they
-        // never poison the factory KPI.
+        // m072 — only the FACTORY portion of the slip drives the factory
+        // chip / factory KPI (NULL-typed legacy rows are treated as
+        // production). External delays (payment / shipping / client /
+        // supplier / customs) never poison that attribution.
         const factorySlip = factoryDelayByOrder.get(String(o.id)) ?? 0;
         const overdueDays =
           new Date(o.current_production_deadline) < today
             ? ageDaysFrom(o.current_production_deadline) ?? 0
             : 0;
-        // Past the current deadline AND still in production = factory falling
-        // behind right now, regardless of how the slip was tagged historically.
-        const lateBy = Math.max(factorySlip, overdueDays);
+        // Alert-routing audit fix: ROUTING is broader than attribution.
+        // A deadline pushed for ANY reason (total slip = current − initial),
+        // or an order explicitly marked `production_delayed`, must reach the
+        // deal owner — the client has to be informed regardless of who caused
+        // the slip. Previously external-attributed slips and status-led
+        // delays fired the bell (po.deadline_changed / po.status_changed)
+        // but never produced an action item. The chips below keep the
+        // factory/external attribution honest (m072 intact).
+        const totalSlip = (() => {
+          if (!o.initial_production_deadline || !o.current_production_deadline) return 0;
+          const a = Date.parse(o.initial_production_deadline + "T00:00:00Z");
+          const b = Date.parse(o.current_production_deadline + "T00:00:00Z");
+          if (!Number.isFinite(a) || !Number.isFinite(b)) return 0;
+          return Math.max(0, Math.round((b - a) / 86_400_000));
+        })();
+        const statusDelayed = o.status === "production_delayed";
+        const lateBy = Math.max(
+          factorySlip,
+          overdueDays,
+          totalSlip,
+          statusDelayed ? 1 : 0
+        );
         if (lateBy > 0) {
           // Card open age = when the first factory event landed (m073 stream).
           // For overdue-without-events orders, fall back to the deadline date.
@@ -660,15 +743,87 @@ async function gatherSignals(
               tone: "warn",
             });
           }
-          lateChips.push({
-            label: "Factory",
-            value: `+${lateBy}d`,
-            tone: "danger",
-          });
+          // Attribution chips stay honest (m072): Factory shows only the
+          // factory-attributed slip; External shows the rest; a status-led
+          // declaration gets its own chip.
+          if (factorySlip > 0) {
+            lateChips.push({
+              label: "Factory",
+              value: `+${factorySlip}d`,
+              tone: "danger",
+            });
+          }
+          const externalSlip = Math.max(0, totalSlip - factorySlip);
+          if (externalSlip > 0) {
+            lateChips.push({
+              label: "External",
+              value: `+${externalSlip}d`,
+              tone: "warn",
+            });
+          }
+          if (statusDelayed) {
+            lateChips.push({
+              label: "Status",
+              value: "Marked delayed",
+              tone: "danger",
+            });
+          }
           signals.push({
             kind: "production_late", entityType: "production_order", entityId: o.id, ownerId: owner,
             ctx, ageDays: lateBy, since, amount,
             contextChips: lateChips,
+            // A new delay event (any attribution) after a manual "Done"
+            // resurfaces the card — the situation changed again.
+            refreshedAt: latestChangeByOrder.get(String(o.id)) ?? null,
+          });
+        }
+      }
+    }
+
+    // SENSOR: balance due / shipment blocked (alert-routing audit fix).
+    // Both conditions previously existed ONLY as cockpit/table alerts
+    // (computeOperationsAlert) — the bell could notify Sales while the
+    // action area stayed empty. Both block execution, so both are urgent.
+    if (!terminal && (PRODUCTION_COMPLETED_STATUSES as string[]).includes(o.status)) {
+      // Balance outstanding — production done, money not in, shipment at risk.
+      const expectedBalance = computeExpectedBalance(
+        Number(doc.total_price ?? o.documents?.total_price ?? 0),
+        ((doc.payment_mode ?? o.documents?.payment_mode ?? null) as PaymentMode | null),
+        ((doc.payment_terms ?? o.documents?.payment_terms ?? null) as PaymentTerms | null)
+      );
+      const balanceReceived = Number(o.balance_received_amount ?? 0);
+      if (expectedBalance > 0 && balanceReceived + 0.01 < expectedBalance) {
+        const remaining = expectedBalance - balanceReceived;
+        const balanceChips: ActionContextChip[] = [
+          {
+            label: "Outstanding",
+            value: remaining.toLocaleString(undefined, { maximumFractionDigits: 0 }),
+            tone: "danger",
+          },
+        ];
+        if (o.actual_completion_date) {
+          balanceChips.push({
+            label: "Completed",
+            value: fmtShortDate(o.actual_completion_date),
+          });
+        }
+        signals.push({
+          kind: "balance_due", entityType: "production_order", entityId: o.id, ownerId: owner,
+          ctx, since: o.actual_completion_date ?? o.created_at, amount,
+          contextChips: balanceChips,
+        });
+      }
+      // Shipment blocked — factory done 7+ days, logistics hasn't moved.
+      if (o.status === "production_completed" && !o.shipment_booked && o.actual_completion_date) {
+        const idleDays = ageDaysFrom(o.actual_completion_date) ?? 0;
+        if (idleDays >= 7) {
+          signals.push({
+            kind: "shipment_blocked", entityType: "production_order", entityId: o.id, ownerId: owner,
+            ctx, ageDays: idleDays, since: o.actual_completion_date, amount,
+            contextChips: [
+              { label: "Completed", value: fmtShortDate(o.actual_completion_date) },
+              { label: "Idle", value: `+${idleDays}d`, tone: "danger" },
+            ],
           });
         }
       }
@@ -741,10 +896,61 @@ async function gatherSignals(
     }
   }
 
+  // SENSOR: stalled accepted tenders (m110 critical rule) — an accepted
+  // tender must NEVER sit without an upcoming next action. Fires when an
+  // active-pipeline tender has no open planned action, or its earliest
+  // open action is overdue. Soft-fails pre-m107/m110 (tables/columns
+  // missing → no signals, the rest of the action center keeps working).
+  {
+    const ACTIVE_TENDER_STATUSES = [
+      "accepted", "searching_partner", "partner_assigned", "contacted",
+      "waiting_feedback", "interested", "quotation_requested",
+    ];
+    const { data: activeTenders, error: tErr } = await supabase
+      .from("tenders")
+      .select("id, title, country, owner_id, created_by, commercial_status, accepted_at, created_at, budget_usd")
+      .in("commercial_status", ACTIVE_TENDER_STATUSES)
+      .limit(500);
+    if (!tErr && (activeTenders ?? []).length > 0) {
+      const ids = (activeTenders ?? []).map((t: any) => t.id);
+      const { data: tActions, error: aErr } = await supabase
+        .from("planned_actions")
+        .select("tender_id, due_date, done_at")
+        .in("tender_id", ids)
+        .is("done_at", null);
+      if (!aErr) {
+        const todayIso = new Date().toISOString().slice(0, 10);
+        const earliestOpenByTender = new Map<string, string>();
+        for (const a of (tActions ?? []) as any[]) {
+          const cur = earliestOpenByTender.get(a.tender_id);
+          if (!cur || a.due_date < cur) earliestOpenByTender.set(a.tender_id, a.due_date);
+        }
+        for (const t of (activeTenders ?? []) as any[]) {
+          const owner = ((t.owner_id ?? t.created_by) as string | null) ?? null;
+          if (!canSeeRow(scope, owner)) continue;
+          const earliest = earliestOpenByTender.get(t.id);
+          const overdue = !!earliest && earliest < todayIso;
+          if (earliest && !overdue) continue; // has an upcoming action — fine
+          signals.push({
+            kind: "tender_stalled", entityType: "tender", entityId: t.id, ownerId: owner,
+            ctx: `${t.title} · ${t.country ?? "—"}`,
+            since: t.accepted_at ?? t.created_at,
+            ageDays: overdue
+              ? ageDaysFrom(earliest) ?? 0
+              : ageDaysFrom(t.accepted_at ?? t.created_at) ?? 0,
+            amount: t.budget_usd ? { value: Number(t.budget_usd), currency: "USD" } : null,
+            contextChips: overdue
+              ? [{ label: "Next action", value: `overdue ${earliest}`, tone: "danger" }]
+              : [{ label: "Next action", value: "none planned", tone: "danger" }],
+          });
+        }
+      }
+    }
+  }
+
   return signals;
 }
 
-/** SENSOR: recent passive events → info signals (no role filter beyond RLS). */
 async function gatherInfoItems(supabase: SupabaseClient): Promise<ActionItem[]> {
   const { data, error } = await supabase
     .from("events")
@@ -818,7 +1024,21 @@ async function applyAcks(supabase: SupabaseClient, items: ActionItem[]): Promise
   const out: ActionItem[] = [];
   for (const it of items) {
     const a = byKey.get(it.id);
-    if (a?.state === "done") continue;
+    if (a?.state === "done") {
+      // Alert-routing audit fix: a manual "Done" used to hide the card
+      // FOREVER (the ack key has no notion of the condition evolving), so
+      // an order whose delay kept growing never resurfaced. Now: if the
+      // underlying condition changed AFTER the Done (refreshedAt newer than
+      // acknowledged_at), the card comes back — fresh, without the stale
+      // ack badge. Otherwise it stays handled.
+      const resurfaced =
+        !!it.refreshedAt &&
+        !!a.acknowledged_at &&
+        String(it.refreshedAt) > String(a.acknowledged_at);
+      if (!resurfaced) continue;
+      out.push(it);
+      continue;
+    }
     if (a) {
       it.acknowledgedAt = a.acknowledged_at;
       it.acknowledgedByName = a.acknowledged_by ? names.get(a.acknowledged_by) ?? null : null;
@@ -924,52 +1144,5 @@ export async function getOperationsActions(
 }
 
 /* ===================== V2 (behavior) view ===================== */
-
-export type ActionCenterV2Data = {
-  action: ActionItem[];
-  followup: ActionItem[];
-  info: ActionItem[];
-  actionCount: number;
-  followupCount: number;
-};
-
-function emptyV2(): ActionCenterV2Data {
-  return { action: [], followup: [], info: [], actionCount: 0, followupCount: 0 };
-}
-
-/** V2 — role-aware, behavior-grouped, with acknowledge state + activity strip. */
-export async function getActionCenterV2(
-  userId: string | null,
-  role: Role | null
-): Promise<ActionCenterV2Data> {
-  if (!userId) return emptyV2();
-  const supabase = createClient();
-  const scope = await getVisibilityScope(userId, role);
-  const signals = await gatherSignals(supabase, scope);
-  const visible = await attachNotes(
-    supabase,
-    await applyAcks(supabase, filterByRole(signals.map(materialize), role))
-  );
-
-  const action = visible.filter((i) => i.behavior === "action");
-  const followup = visible.filter((i) => i.behavior === "followup");
-  const info = await gatherInfoItems(supabase);
-
-  action.sort((a, b) => b.priority - a.priority || (b.ageDays ?? 0) - (a.ageDays ?? 0));
-  followup.sort((a, b) => {
-    const aa = a.acknowledgedAt ? 1 : 0;
-    const ba = b.acknowledgedAt ? 1 : 0;
-    if (aa !== ba) return aa - ba; // un-acknowledged first
-    return b.priority - a.priority || (b.ageDays ?? 0) - (a.ageDays ?? 0);
-  });
-
-  return {
-    action,
-    followup,
-    info,
-    actionCount: action.length,
-    followupCount: followup.filter((i) => !i.acknowledgedAt).length,
-  };
-}
 
 export { DOC_ACTIVE_STATUSES };

@@ -1,3 +1,4 @@
+import { Fragment } from "react";
 import {
   DOC_ALIVE_STATUSES,
   DOC_PIPELINE_STATUSES,
@@ -178,94 +179,41 @@ const FLOWS: EntityFlow[] = [
 
 export function LifecycleSection() {
   return (
-    <section className="panel p-5 space-y-4">
-      <div className="flex items-baseline justify-between gap-3 flex-wrap">
-        <div>
-          <div className="eyebrow">Lifecycle · canonical state machine</div>
-          <h2 className="text-base font-semibold text-neutral-900 mt-0.5">
-            Doc → Task list → Production order
-          </h2>
-        </div>
-        <a
-          href="https://github.com/your-repo"
-          className="text-[11px] text-neutral-400 italic select-none"
-          aria-hidden
-        >
-          {/* Intentional non-link — keeps a balanced header without
-              adding a destination we don't control. */}
-          read from lib/lifecycle.ts
-        </a>
+    <>
+      <div className="sx-micro" style={{ margin: "22px 0 8px" }}>
+        Lifecycle · canonical state machine
       </div>
-
-      <p className="text-xs text-neutral-500 max-w-3xl">
-        Buckets reflect what the runtime enforces. Cancellation
-        propagates downstream via the migration 023 trigger: a doc
-        marked <b>cancelled</b> or <b>lost</b> cancels every linked
-        task list and production order in the same SQL statement.
+      <p className="ad-lead" style={{ marginBottom: 10 }}>
+        Read from <code>lib/lifecycle.ts</code> so the diagram always matches the code — legal statuses per
+        entity, in order. Terminal states are greyed. Cancellation propagates downstream via the migration 023
+        trigger: a doc marked <b>cancelled</b> or <b>lost</b> cancels every linked task list and production
+        order in the same SQL statement.
       </p>
-
-      <div className="space-y-4">
-        {FLOWS.map((flow) => (
-          <article
-            key={flow.title}
-            className="rounded-lg border border-neutral-200 bg-white p-4 space-y-3"
-          >
-            <header>
-              <h3 className="text-sm font-semibold text-neutral-900">
-                {flow.title}
-              </h3>
-              <p className="text-[11px] text-neutral-500 mt-0.5">
-                {flow.blurb}
-              </p>
-            </header>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
-              {flow.buckets.map((bucket) => {
-                const tone = TONE[bucket.tone];
-                return (
-                  <div
-                    key={bucket.label}
-                    className={`rounded-md border px-3 py-2 ${tone.bucket}`}
-                  >
-                    <div className="flex items-center gap-1.5">
-                      <span
-                        className={`inline-block w-1.5 h-1.5 rounded-full ${tone.dot}`}
-                        aria-hidden
-                      />
-                      <span className="text-[11px] font-semibold uppercase tracking-widerx text-neutral-700">
-                        {bucket.label}
-                      </span>
-                    </div>
-                    <p className="text-[10px] text-neutral-500 mt-0.5">
-                      {bucket.blurb}
-                    </p>
-                    <div className="flex flex-wrap gap-1 mt-2">
-                      {bucket.statuses.length === 0 ? (
-                        <span className="text-[10px] text-neutral-400 italic">
-                          (none)
+      <div className="card ad-sub-block">
+        {FLOWS.map((flow, fi) => {
+          const segs = flow.buckets.filter((b) => b.statuses.length > 0);
+          return (
+            <div key={flow.title}>
+              <div className={`ad-lc-label${fi === 0 ? " first" : ""}`}>{flow.title}</div>
+              <div className="ad-lifecycle">
+                {segs.map((b, j) => {
+                  const terminal = b.tone === "emerald" || b.tone === "rose";
+                  return (
+                    <Fragment key={b.label}>
+                      {j > 0 && <span className="ad-lc-arrow">→</span>}
+                      {b.statuses.map((s) => (
+                        <span key={s} className={`ad-lc-node${terminal ? " terminal" : ""}`}>
+                          {s}
                         </span>
-                      ) : (
-                        bucket.statuses.map((s) => (
-                          <span
-                            key={s}
-                            className={`inline-flex items-center rounded-md border px-1.5 py-0.5 text-[10px] font-mono ${tone.chip}`}
-                          >
-                            {s}
-                          </span>
-                        ))
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
+                      ))}
+                    </Fragment>
+                  );
+                })}
+              </div>
             </div>
-          </article>
-        ))}
+          );
+        })}
       </div>
-
-      <p className="text-[10px] text-neutral-400 italic">
-        Source: <code>lib/lifecycle.ts</code>. Transition rules:{" "}
-        <code>supabase/migrations/023_lifecycle_propagation.sql</code>.
-      </p>
-    </section>
+    </>
   );
 }

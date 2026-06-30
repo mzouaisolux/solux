@@ -11,8 +11,15 @@ import { hasUiCapability } from "@/lib/permissions";
 import { parseListScope, type ListScope } from "@/lib/queries";
 import { ScopeTabs } from "@/components/ScopeTabs";
 import { ClientAffairTree } from "@/components/clients/ClientAffairTree";
+import {
+  ClientCrmCards,
+  type CrmCard,
+  type CrmKpis,
+  type CrmAttention,
+} from "@/components/clients/ClientCrmCards";
 import { getAllClientAffairs } from "@/lib/client-affairs";
-import type { ClientAffairs } from "@/lib/affairs-prototype";
+import type { ClientAffairs, AffairGroup } from "@/lib/affairs-prototype";
+import { findCountry } from "@/lib/countries";
 
 /**
  * Unified client-centric sales workspace.
@@ -239,16 +246,233 @@ export default async function ClientsWorkspacePage({
   ).length;
   const totalWon = docs.filter((d) => d.status === "won").length;
 
-  // ---- Drill-down tree (prototype): Client → Affair → Quotation version ----
-  // Default view. Built from the affair grouping, scoped to the clients visible
-  // in the current scope. The flat list stays reachable at ?view=flat.
-  const view = searchParams?.view === "flat" ? "flat" : "tree";
+  // ---- Views ----
+  // CRM cards (default, solux-clients-crm skin) / drill-down tree / flat list.
+  const view =
+    searchParams?.view === "flat"
+      ? "flat"
+      : searchParams?.view === "tree"
+        ? "tree"
+        : "cards";
   let treeClients: ClientAffairs[] = [];
-  if (view === "tree") {
+  if (view === "tree" || view === "cards") {
     const scopedIds = new Set((clients ?? []).map((c: any) => c.id));
     const all = await getAllClientAffairs();
     treeClients = all.filter((ca) => ca.clientId && scopedIds.has(ca.clientId));
   }
+
+  // ================= CRM CARDS VIEW (default) =================
+  if (view === "cards") {
+    // Primary contact per client (m101 address book; defensive pre-migration —
+    // an error simply falls back to the embedded clients.contact_name).
+    const { data: contactRows } = await supabase
+      .from("contacts")
+      .select("client_id, name, title, email, phone, is_primary")
+      .order("is_primary", { ascending: false })
+      .order("created_at", { ascending: true });
+    const contactByClient = new Map<string, any>();
+    for (const r of (contactRows ?? []) as any[]) {
+      if (!contactByClient.has(r.client_id)) contactByClient.set(r.client_id, r);
+    }
+
+    // Same "live affair" rule as the tree view.
+    const DEAD = new Set(["lost", "abandoned", "archived"]);
+    const isActiveAffair = (a: AffairGroup) =>
+      !a.isArchived &&
+      a.effectiveStatus !== "lost" &&
+      a.effectiveStatus !== "cancelled" &&
+      !(a.lifecycleStatus && DEAD.has(a.lifecycleStatus));
+
+    const treeByClient = new Map<string, ClientAffairs>();
+    for (const tc of treeClients) if (tc.clientId) treeByClient.set(tc.clientId, tc);
+
+    const docsByClient = new Map<string, typeof docs>();
+    for (const d of docs) {
+      const arr = docsByClient.get(d.client_id);
+      if (arr) arr.push(d);
+      else docsByClient.set(d.client_id, [d]);
+    }
+    // Behind-schedule production orders per client (current > initial deadline).
+    const clientByDoc = new Map(docs.map((d) => [d.id, d.client_id]));
+    const behindByClient = new Map<string, number>();
+    for (const po of productionOrders) {
+      if (
+        po.initial_production_deadline &&
+        po.current_production_deadline &&
+        po.current_production_deadline > po.initial_production_deadline
+      ) {
+        const cid = clientByDoc.get(po.quotation_id);
+        if (cid) behindByClient.set(cid, (behindByClient.get(cid) ?? 0) + 1);
+      }
+    }
+
+    const nowMs = Date.now();
+    const daysSince = (iso: string | null | undefined): number | null => {
+      if (!iso) return null;
+      const t = Date.parse(iso);
+      return Number.isNaN(t) ? null : Math.floor((nowMs - t) / 86400000);
+    };
+    // Last 7 calendar months (yyyy-mm keys) for the sparklines.
+    const months: string[] = Array.from({ length: 7 }, (_, i) => {
+      const d = new Date(nowMs);
+      d.setDate(1);
+      d.setMonth(d.getMonth() - (6 - i));
+      return d.toISOString().slice(0, 7);
+    });
+    const sparkOf = (clientDocs: typeof docs): { h: number; hi: boolean }[] => {
+      const sums = months.map((m) =>
+        clientDocs
+          .filter((d) => d.status !== "cancelled" && (d.date ?? "").slice(0, 7) === m)
+          .reduce((acc, d) => acc + d.total_price, 0)
+      );
+      const max = Math.max(...sums, 0);
+      return sums.map((v) => ({
+        h: max > 0 ? Math.max(8, Math.round((v / max) * 100)) : 10,
+        hi: max > 0 && v >= max * 0.8,
+      }));
+    };
+    const trendOf = (clientDocs: typeof docs): number | null => {
+      const d90 = 90 * 86400000;
+      let cur = 0;
+      let prev = 0;
+      for (const d of clientDocs) {
+        if (!d.date || d.status === "cancelled") continue;
+        const t = Date.parse(d.date);
+        if (Number.isNaN(t)) continue;
+        if (t >= nowMs - d90) cur += d.total_price;
+        else if (t >= nowMs - 2 * d90) prev += d.total_price;
+      }
+      if (prev <= 0) return null;
+      return ((cur - prev) / prev) * 100;
+    };
+    const money = (n: number) =>
+      `$${n.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
+    const compact = (n: number) =>
+      n >= 1_000_000
+        ? `$${(n / 1_000_000).toFixed(2)}M`
+        : n >= 1_000
+          ? `$${Math.round(n / 1_000)}k`
+          : `$${Math.round(n)}`;
+
+    const cards: CrmCard[] = (clients ?? []).map((c: any) => {
+      const tc = treeByClient.get(c.id);
+      const affairs = tc?.affairs ?? [];
+      const live = affairs.filter(isActiveAffair);
+      const wonTotal = affairs.filter((a) => a.effectiveStatus === "won").length;
+      const wonLive = live.filter((a) => a.effectiveStatus === "won").length;
+      const prodCount = live.filter(
+        (a) => a.hasProductionOrder && a.effectiveStatus !== "won"
+      ).length;
+      const quoteCount = Math.max(0, live.length - prodCount - wonLive);
+      const value = live.reduce((acc, a) => acc + (a.totalValue || 0), 0);
+      const clientDocs = docsByClient.get(c.id) ?? [];
+      const awaitingReply = clientDocs.filter((d) => d.status === "sent").length;
+      const behind = behindByClient.get(c.id) ?? 0;
+      const lastDoc = clientDocs.reduce<string | null>(
+        (acc, d) => (d.date && (!acc || d.date > acc) ? d.date : acc),
+        null
+      );
+      const days = daysSince(
+        [tc?.latestDate, lastDoc].filter(Boolean).sort().reverse()[0] ?? null
+      );
+      const topAffair = live
+        .slice()
+        .sort((a, b) => (b.totalValue || 0) - (a.totalValue || 0))[0]?.displayName;
+      // Health heuristic: amber when something drags (behind schedule, quotes
+      // ignored, account gone quiet); green when winning and recently active.
+      const health: CrmCard["health"] =
+        behind > 0 || (awaitingReply > 0 && (days ?? 99) > 14) || (live.length > 0 && (days ?? 99) > 30)
+          ? "watch"
+          : wonTotal >= 1 && (days ?? 99) <= 7
+            ? "strong"
+            : "steady";
+      const contact = contactByClient.get(c.id);
+      return {
+        clientId: c.id,
+        name: c.company_name,
+        code: c.client_code ?? null,
+        country: c.country ?? null,
+        countryCode: findCountry(c.country)?.code ?? null,
+        topAffair: topAffair ?? null,
+        health,
+        value,
+        valueLabel: money(value),
+        trendPct: trendOf(clientDocs),
+        spark: sparkOf(clientDocs),
+        activeCount: live.length,
+        wonCount: wonTotal,
+        quoteCount,
+        prodCount,
+        awaitingReply,
+        behindSchedule: behind,
+        lastActivityDays: days,
+        ownerName: salesByClient[c.id]?.name !== "—" ? salesByClient[c.id]?.name ?? null : null,
+        contactName: contact?.name ?? c.contact_name ?? null,
+        contactRole: contact?.title ?? null,
+        contactEmail: contact?.email ?? c.email ?? null,
+        contactPhone: contact?.phone ?? c.phone_number ?? null,
+        archived: !!c.archived_at,
+      };
+    });
+
+    // KPI band — computed over the scoped card set + the full doc set.
+    const quarterStart = (() => {
+      const d = new Date(nowMs);
+      const qm = Math.floor(d.getMonth() / 3) * 3;
+      return new Date(d.getFullYear(), qm, 1).toISOString().slice(0, 10);
+    })();
+    const wonDocsQuarter = docs.filter(
+      (d) => d.status === "won" && (d.date ?? "") >= quarterStart
+    );
+    const newAffairs30d = treeClients
+      .flatMap((tc) => tc.affairs)
+      .filter((a) => {
+        const first = a.documents[0]?.date ?? null;
+        return first ? nowMs - Date.parse(first) <= 30 * 86400000 : false;
+      }).length;
+    const kpis: CrmKpis = {
+      totalClients: cards.length,
+      activeClients: cards.filter((c) => c.activeCount > 0).length,
+      dormantClients: cards.filter((c) => c.activeCount === 0).length,
+      activeAffairs: cards.reduce((acc, c) => acc + c.activeCount, 0),
+      newAffairs30d,
+      wonQuarter: wonDocsQuarter.length,
+      wonQuarterValueLabel: compact(
+        wonDocsQuarter.reduce((acc, d) => acc + d.total_price, 0)
+      ),
+      portfolioValueLabel: compact(cards.reduce((acc, c) => acc + c.value, 0)),
+      portfolioSpark: sparkOf(docs),
+    };
+    const flagged = cards.filter((c) => c.awaitingReply > 0 || c.behindSchedule > 0);
+    const attention: CrmAttention = {
+      awaitingReply: cards.reduce((acc, c) => acc + c.awaitingReply, 0),
+      behindSchedule: cards.reduce((acc, c) => acc + c.behindSchedule, 0),
+      accounts: flagged.length,
+    };
+
+  return (
+      <ClientCrmCards
+        cards={cards}
+        kpis={kpis}
+        attention={attention}
+        scope={scope}
+        scopeCounts={scopeCounts}
+        canCreateQuotation={canCreateQuotation}
+        showOwnerFilter={global}
+      />
+    );
+  }
+
+  // Golden rule (Phase 2): affairs with at least one OPEN planned action.
+  // One lean query — the tree flags live deals missing from this set.
+  const { data: openActs } = await supabase
+    .from("planned_actions")
+    .select("affair_id")
+    .is("done_at", null)
+    .not("affair_id", "is", null);
+  const openActionAffairIds = [
+    ...new Set(((openActs ?? []) as any[]).map((r) => r.affair_id as string)),
+  ];
 
   return (
     <div className="po-premium mx-auto max-w-screen-2xl px-6 py-8 space-y-6">
@@ -295,11 +519,15 @@ export default async function ClientsWorkspacePage({
         </div>
       )}
 
-      {/* View toggle — the drill-down tree (default) or the flat list. */}
+      {/* View toggle — CRM cards (default) / drill-down tree / flat list. */}
       <div className="flex items-center gap-2 text-[12px]">
         <span className="text-neutral-400">View:</span>
+        <Link href="/clients" className="text-neutral-500 hover:underline">
+          Cards
+        </Link>
+        <span className="text-neutral-300">·</span>
         <Link
-          href="/clients"
+          href="/clients?view=tree"
           className={
             view === "tree"
               ? "font-semibold text-solux-ink"
@@ -333,7 +561,7 @@ export default async function ClientsWorkspacePage({
           showSales={global}
         />
       ) : (
-        <ClientAffairTree clients={treeClients} />
+        <ClientAffairTree clients={treeClients} openActionAffairIds={openActionAffairIds} />
       )}
     </div>
   );

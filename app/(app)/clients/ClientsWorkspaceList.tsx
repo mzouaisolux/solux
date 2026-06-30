@@ -543,7 +543,7 @@ function ClientRowItem({
               <div className="flex items-center gap-2">
                 {canCreateQuotation && (
                   <Link
-                    href={`/documents/new?client_id=${client.id}`}
+                    href={`/documents/new?client=${client.id}`}
                     className="btn-xs"
                   >
                     + New quotation

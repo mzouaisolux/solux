@@ -1,95 +1,65 @@
 /**
  * Project Request status → visual color system (m090).
  *
- * Mirrors lib/status-colors.ts: subtle, semantic pills + left-border accents.
- * Class strings are spelled out literally so Tailwind JIT picks them up
- * (tailwind.config content paths already include lib/**). Archived rows read
- * neutral regardless of status.
- *
- * Semantic mapping: draft/cancelled > neutral, submitted/priced > sky,
- * waiting-approval > amber, waiting-cost > indigo, waiting-logistics > teal,
- * ready-for-pricing > violet, quotation-generated/won > emerald, lost > rose.
+ * Disciplined SOLUX Projects palette (from the offline mockup): rather than a
+ * rainbow, statuses read in three accents — ink (in-flight), amber (waiting on
+ * the director), green (commercial: quotation ready / won) — plus a neutral
+ * line for inert states (draft / lost / cancelled / archived). Class strings
+ * are spelled out literally (incl. arbitrary hex values) so Tailwind JIT picks
+ * them up (tailwind.config content paths already include lib/**).
  */
 
 import type { StatusColor } from "@/lib/status-colors";
 import type { ProjectRequestStatus } from "@/lib/types";
 
-export const PROJECT_REQUEST_STATUS_COLORS: Record<ProjectRequestStatus, StatusColor> = {
-  draft: {
-    dot: "bg-neutral-400",
-    leftBorder: "border-l-neutral-300",
-    rowBg: "",
-    pill: "bg-neutral-50 text-neutral-700 border-neutral-200",
-  },
-  submitted: {
-    dot: "bg-sky-500",
-    leftBorder: "border-l-sky-400",
-    rowBg: "",
-    pill: "bg-sky-50 text-sky-800 border-sky-200",
-  },
-  waiting_director_approval: {
-    dot: "bg-amber-500",
-    leftBorder: "border-l-amber-400",
-    rowBg: "",
-    pill: "bg-amber-50 text-amber-800 border-amber-200",
-  },
-  waiting_factory_cost: {
-    dot: "bg-indigo-500",
-    leftBorder: "border-l-indigo-400",
-    rowBg: "",
-    pill: "bg-indigo-50 text-indigo-800 border-indigo-200",
-  },
-  // Same palette as waiting_factory_cost — both display "Operations in progress".
-  waiting_logistics: {
-    dot: "bg-indigo-500",
-    leftBorder: "border-l-indigo-400",
-    rowBg: "",
-    pill: "bg-indigo-50 text-indigo-800 border-indigo-200",
-  },
-  ready_for_pricing: {
-    dot: "bg-violet-500",
-    leftBorder: "border-l-violet-400",
-    rowBg: "",
-    pill: "bg-violet-50 text-violet-800 border-violet-200",
-  },
-  priced: {
-    dot: "bg-sky-600",
-    leftBorder: "border-l-sky-500",
-    rowBg: "",
-    pill: "bg-sky-50 text-sky-800 border-sky-200",
-  },
-  quotation_generated: {
-    dot: "bg-emerald-500",
-    leftBorder: "border-l-emerald-400",
-    rowBg: "",
-    pill: "bg-emerald-50 text-emerald-800 border-emerald-200",
-  },
-  won: {
-    dot: "bg-emerald-600",
-    leftBorder: "border-l-emerald-600",
-    rowBg: "",
-    pill: "bg-emerald-100 text-emerald-900 border-emerald-300",
-  },
-  lost: {
-    dot: "bg-rose-400",
-    leftBorder: "border-l-rose-300",
-    rowBg: "",
-    pill: "bg-rose-50 text-rose-700 border-rose-200",
-  },
-  cancelled: {
-    dot: "bg-neutral-400",
-    leftBorder: "border-l-neutral-200",
-    rowBg: "",
-    pill: "bg-neutral-100 text-neutral-600 border-neutral-200",
-  },
+// Palette atoms — mirror the mockup's --sx-* tokens.
+const NEUTRAL: StatusColor = {
+  dot: "bg-[#aeaaba]",
+  leftBorder: "border-l-[#dcdde1]",
+  rowBg: "",
+  pill: "bg-white text-[#2a2a2c] border-[#dcdde1]",
+};
+const INK: StatusColor = {
+  dot: "bg-[#0f0f0f]",
+  leftBorder: "border-l-[#0f0f0f]",
+  rowBg: "",
+  pill: "bg-white text-[#0f0f0f] border-[#0f0f0f]",
+};
+const AMBER: StatusColor = {
+  dot: "bg-[#e8870e]",
+  leftBorder: "border-l-[#e8870e]",
+  rowBg: "",
+  pill: "bg-[#fcf3e8] text-[#9a5a00] border-[#eac79b]",
+};
+const GREEN: StatusColor = {
+  dot: "bg-[#55ff7e]",
+  leftBorder: "border-l-[#55ff7e]",
+  rowBg: "",
+  pill: "bg-[#ecfff1] text-[#0f0f0f] border-[#a9f4be]",
+};
+// "Won" — the only filled badge (ink chip with a neon dot).
+const GREEN_FILL: StatusColor = {
+  dot: "bg-[#55ff7e]",
+  leftBorder: "border-l-[#55ff7e]",
+  rowBg: "",
+  pill: "bg-[#0f0f0f] text-white border-[#0f0f0f]",
 };
 
-const ARCHIVED: StatusColor = {
-  dot: "bg-neutral-400",
-  leftBorder: "border-l-neutral-200",
-  rowBg: "",
-  pill: "bg-neutral-100 text-neutral-600 border-neutral-200",
+export const PROJECT_REQUEST_STATUS_COLORS: Record<ProjectRequestStatus, StatusColor> = {
+  draft: NEUTRAL,
+  submitted: INK,
+  waiting_director_approval: AMBER,
+  waiting_factory_cost: INK, // "Operations in progress"
+  waiting_logistics: INK, // same stage, same accent
+  ready_for_pricing: INK,
+  priced: INK,
+  quotation_generated: GREEN,
+  won: GREEN_FILL,
+  lost: NEUTRAL,
+  cancelled: NEUTRAL,
 };
+
+const ARCHIVED: StatusColor = NEUTRAL;
 
 export function projectStatusColors(
   status: ProjectRequestStatus,

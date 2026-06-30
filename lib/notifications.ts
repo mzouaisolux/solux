@@ -32,10 +32,15 @@ import {
 } from "@/lib/events-shared";
 import type { EventRow, EventEntityType } from "@/lib/events-shared";
 import {
+  resolveNotificationChannel,
+  type NotificationChannel,
+} from "@/lib/notification-catalog";
+import {
   getUnreadEntityMessagesForUser,
   type UnreadEntityThread,
 } from "@/lib/entity-messages";
-import { isTechnicalRole, type Role } from "@/lib/types";
+import { type Role } from "@/lib/types";
+import { hasCapability } from "@/lib/permissions";
 
 /** What produced a bell item — drives how it renders. */
 export type NotificationSource = "event" | "comment" | "message" | "review";
@@ -87,6 +92,42 @@ const HARD_CAP_COUNT = 20;
  *   - m045 / m039 not applied (returns empty list)
  *   - DB errors (logged, swallowed)
  */
+/**
+ * Load this role's notification channel overrides into an event_key →
+ * channel map.
+ *
+ * Step 1 (m136): the bell is now ONE consumer of the unified event
+ * registry. Its per-role overrides live in event_routing where
+ * consumer='notification'; config.channel holds bell/feed/off.
+ *
+ * Defensive: a missing table (pre-m136) or any error ⇒ empty map ⇒ the
+ * legacy defaults (defaultChannel == eventRaisesBell), so the registry is
+ * invisible until a rule is added — identical to the m123 guarantee.
+ */
+async function loadNotificationRules(
+  supabase: ReturnType<typeof createClient>,
+  role: Role
+): Promise<Map<string, NotificationChannel>> {
+  const map = new Map<string, NotificationChannel>();
+  try {
+    const { data, error } = await supabase
+      .from("event_routing")
+      .select("event_key, config")
+      .eq("consumer", "notification")
+      .eq("role", role);
+    if (error) return map;
+    for (const r of (data ?? []) as any[]) {
+      const ch = r?.config?.channel;
+      if (r.event_key && (ch === "bell" || ch === "feed" || ch === "off")) {
+        map.set(r.event_key, ch as NotificationChannel);
+      }
+    }
+  } catch {
+    /* table absent or transient error → defaults */
+  }
+  return map;
+}
+
 export async function getNotificationSummary(
   userId: string | null,
   role: Role | null = null
@@ -100,6 +141,10 @@ export async function getNotificationSummary(
   // sorted list below.
   const review = await buildReviewNotification(role);
   const supabase = createClient();
+
+  // Phase 3C: per-role notification rules (read-time channel overrides).
+  // Empty map (default / pre-m123) ⇒ legacy eventRaisesBell behavior.
+  const rulesMap = role ? await loadNotificationRules(supabase, role) : new Map<string, NotificationChannel>();
 
   // Finalizer — merge review + event + note items into one list, newest first,
   // capped for the dropdown. The total counts every unread source.
@@ -157,7 +202,12 @@ export async function getNotificationSummary(
 
     surfacedEvents = events.filter((e) => {
       if (unreadMap.has(e.id)) return true; // unread comments
-      if (!eventRaisesBell(e) || e.status === "resolved") return false;
+      const channel = resolveNotificationChannel({
+        eventKey: e.event_type,
+        severity: e.severity,
+        rule: rulesMap.get(e.event_type) ?? null,
+      });
+      if (channel !== "bell" || e.status === "resolved") return false;
       const lastRead = lastReadMap.get(e.id);
       return (
         !lastRead ||
@@ -207,6 +257,7 @@ export async function getNotificationSummary(
     production_order: [],
     client: [],
     project_request: [],
+    affair: [],
     system: [],
   };
   for (const e of surfacedEvents) {
@@ -275,6 +326,20 @@ export async function getNotificationSummary(
       .from("project_requests")
       .select("id, name, clients:client_id(company_name)")
       .in("id", byType.project_request);
+    for (const r of (data ?? []) as any[]) {
+      labelByEntityId.set(r.id, {
+        number: r.name ?? null,
+        clientName: r.clients?.company_name ?? null,
+        affairName: r.name ?? null,
+      });
+    }
+  }
+  // Affairs (entity_id IS the affair; its name is the headline) — m103
+  if (byType.affair.length > 0) {
+    const { data } = await supabase
+      .from("affairs")
+      .select("id, name, clients:client_id(company_name)")
+      .in("id", byType.affair);
     for (const r of (data ?? []) as any[]) {
       labelByEntityId.set(r.id, {
         number: r.name ?? null,
@@ -375,7 +440,10 @@ export async function getNotificationSummary(
 async function buildReviewNotification(
   role: Role | null
 ): Promise<{ item: NotificationItem; count: number } | null> {
-  if (!isTechnicalRole(role)) return null;
+  // Capability-gated (NOT raw role): only reviewers who can actually validate
+  // get the "N task lists awaiting your review" bell item. Operations without
+  // task_list.validate no longer sees a review prompt it can't action.
+  if (!role || !(await hasCapability("task_list.validate", role))) return null;
   const supabase = createClient();
   const { data, error } = await supabase
     .from("production_task_lists")

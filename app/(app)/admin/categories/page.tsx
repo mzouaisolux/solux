@@ -189,8 +189,22 @@ export default async function CategoriesPage() {
                 <td className="px-4 py-3 text-right">
                   <div className="inline-flex items-center gap-3">
                     {/* Duplicate */}
-                    <form action={duplicateCategory} className="inline">
+                    <form
+                      action={duplicateCategory}
+                      className="inline-flex items-center gap-1.5"
+                    >
                       <input type="hidden" name="id" value={c.id} />
+                      <label
+                        className="inline-flex items-center gap-1 text-[11px] text-neutral-500"
+                        title="Also copy this family's factory mappings onto the copy (matched by option value)"
+                      >
+                        <input
+                          type="checkbox"
+                          name="copy_factory_mappings"
+                          className="h-3 w-3"
+                        />
+                        + mappings
+                      </label>
                       <button
                         type="submit"
                         className="text-xs text-neutral-600 hover:text-neutral-900 hover:underline"
@@ -233,7 +247,7 @@ export default async function CategoriesPage() {
 
       {/* ── Templates section ────────────────────────────────────────── */}
       {templates.length > 0 && (
-        <section className="space-y-3">
+        <section id="templates" className="space-y-3 scroll-mt-24">
           <div>
             <h2 className="text-base font-semibold">Templates</h2>
             <p className="text-xs text-neutral-500 mt-0.5">
@@ -267,8 +281,22 @@ export default async function CategoriesPage() {
                     <td className="px-4 py-3 text-right">
                       <div className="inline-flex items-center gap-3">
                         {/* Duplicate template */}
-                        <form action={duplicateCategory} className="inline">
+                        <form
+                          action={duplicateCategory}
+                          className="inline-flex items-center gap-1.5"
+                        >
                           <input type="hidden" name="id" value={t.id} />
+                          <label
+                            className="inline-flex items-center gap-1 text-[11px] text-neutral-500"
+                            title="Also copy this template's factory mappings onto the copy (matched by option value)"
+                          >
+                            <input
+                              type="checkbox"
+                              name="copy_factory_mappings"
+                              className="h-3 w-3"
+                            />
+                            + mappings
+                          </label>
                           <button
                             type="submit"
                             className="text-xs text-neutral-600 hover:text-neutral-900 hover:underline"

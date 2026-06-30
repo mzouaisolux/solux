@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import type { FactoryMapping } from "@/lib/types";
 import { deleteFactoryMapping, upsertFactoryMapping } from "./actions";
 
@@ -22,6 +23,7 @@ export default function MappingRow({
   optionValue: string;
   mapping: FactoryMapping | null;
 }) {
+  const router = useRouter();
   const [open, setOpen] = useState(false);
   const [pending, startTransition] = useTransition();
   const [savedAt, setSavedAt] = useState<number | null>(null);
@@ -32,6 +34,12 @@ export default function MappingRow({
       await upsertFactoryMapping(formData);
       setSavedAt(Date.now());
       setOpen(false);
+      // Re-fetch the server component so this row + the coverage counters
+      // (MAPPED / MISSING) reflect the save immediately. revalidatePath alone
+      // only marks the cache stale; without router.refresh the current view
+      // stays on the pre-save data until a manual reload. Mirrors
+      // CopyMappingsPanel's refresh after a cross-family copy.
+      router.refresh();
     });
   }
 
@@ -41,6 +49,11 @@ export default function MappingRow({
     fd.set("option_id", optionId);
     startTransition(async () => {
       await deleteFactoryMapping(fd);
+      // Collapse the editor too: after delete the mapping is gone, so leaving
+      // the form open would show the just-deleted (now re-saveable) text — a
+      // footgun. Mirror handleSave's close + refresh.
+      setOpen(false);
+      router.refresh();
     });
   }
 
@@ -99,6 +112,9 @@ export default function MappingRow({
     >
       <input type="hidden" name="field_id" value={fieldId} />
       <input type="hidden" name="option_id" value={optionId} />
+      {/* Marks that this form carries the Active control, so the server honors
+          an explicit uncheck instead of defaulting a missing field to active. */}
+      <input type="hidden" name="active_present" value="1" />
       <div className="flex items-center gap-3">
         <span className="inline-flex items-center gap-1.5 rounded-full bg-sky-50 px-2.5 py-1 text-xs font-medium text-sky-900">
           {optionValue}

@@ -8,11 +8,12 @@ import {
 import { CURRENCIES, type Currency, isAdminLike } from "@/lib/types";
 import { getEffectiveRole } from "@/lib/auth";
 import AccessDenied from "@/components/AccessDenied";
+import { canAccessOrAdmin } from "@/lib/permissions";
 
 export default async function BanksPage() {
   // Master data — admin-only. Access Denied (not a silent redirect) on miss.
   const { effectiveRole } = await getEffectiveRole();
-  if (!isAdminLike(effectiveRole)) {
+  if (!(await canAccessOrAdmin(["admin.manage_banks"]))) {
     return (
       <AccessDenied
         title="Administrators only"
@@ -41,186 +42,154 @@ export default async function BanksPage() {
   }
 
   return (
-    <div className="mx-auto max-w-screen-2xl px-6 py-8 space-y-8">
-      <div className="flex items-end justify-between pb-4 border-b border-neutral-200">
-        <div>
+    <div className="solux-pro sx-page">
+      <div className="sx-wrap">
+        <section className="card sec ad-section">
           <div className="eyebrow">Admin</div>
-          <h1 className="doc-title mt-1">Bank accounts</h1>
-          <p className="text-xs text-neutral-500 mt-2">
-            One default per currency. When a quotation is created in USD the
-            default USD account is auto-selected; same for EUR and CNY. The
-            sales rep can still override per quotation.
+          <h2 className="ad-doc-title">Bank accounts</h2>
+          <p className="ad-lead">
+            One default per currency. When a quotation is created in USD the default USD account is
+            auto-selected; same for EUR and CNY. The sales rep can still override per quotation.
           </p>
-        </div>
-      </div>
 
-      {/* New account */}
-      <section className="panel p-5 space-y-3">
-        <h2 className="text-lg font-semibold">New account</h2>
-        <form action={createBankAccount} className="space-y-3">
-          {/* Two distinct names:
+          {/* New account.
+              Two distinct names:
                 · Account name = internal label (shown in dropdowns / lists)
                 · Business account name = legal entity, printed on the PDF
               If the second is empty the PDF falls back to the first. */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            <label className="block">
-              <span className="text-xs text-neutral-500 mb-1 block">
-                Account name <span className="text-rose-600">*</span>{" "}
-                <span className="text-neutral-400">(internal label)</span>
-              </span>
-              <input
-                name="account_name"
-                placeholder="e.g. Solux China USD"
-                required
-                className="w-full rounded border border-neutral-200 px-3 py-2"
-              />
-            </label>
-            <label className="block">
-              <span className="text-xs text-neutral-500 mb-1 block">
-                Business account name{" "}
-                <span className="text-neutral-400">(printed on PDF)</span>
-              </span>
-              <input
-                name="business_account_name"
-                placeholder="e.g. CHANGZHOU SOLUX TECHNOLOGY CO., LTD"
-                className="w-full rounded border border-neutral-200 px-3 py-2"
-              />
-            </label>
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            <select
-              name="currency"
-              defaultValue="USD"
-              required
-              className="rounded border border-neutral-200 px-3 py-2"
-            >
-              {CURRENCIES.map((c) => (
-                <option key={c} value={c}>
-                  {c}
-                </option>
-              ))}
-            </select>
-            <input
-              name="bank_name"
-              placeholder="Bank name"
-              className="rounded border border-neutral-200 px-3 py-2"
-            />
-          </div>
-          <input
-            name="bank_address"
-            placeholder="Bank address"
-            className="w-full rounded border border-neutral-200 px-3 py-2"
-          />
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            <input
-              name="account_number"
-              placeholder="Account number / IBAN"
-              className="rounded border border-neutral-200 px-3 py-2 font-mono text-sm"
-            />
-            <input
-              name="swift"
-              placeholder="SWIFT / BIC"
-              className="rounded border border-neutral-200 px-3 py-2 font-mono text-sm uppercase"
-            />
-          </div>
-          <label className="flex items-center gap-2 text-sm">
-            <input type="checkbox" name="is_default" />
-            Set as default for the selected currency
-          </label>
-          <div>
-            <button className="rounded bg-solux px-4 py-2 text-white font-medium hover:bg-solux-dark">
-              Add account
-            </button>
-          </div>
-        </form>
-      </section>
-
-      {CURRENCIES.map((cur) => {
-        const list = groups.get(cur) ?? [];
-        if (list.length === 0) return null;
-        return (
-          <section key={cur} className="space-y-3">
-            <div className="flex items-baseline gap-3">
-              <div className="eyebrow">Currency</div>
-              <h2 className="text-lg font-semibold">{cur}</h2>
-              <span className="text-xs text-neutral-500">
-                {list.length} account{list.length === 1 ? "" : "s"}
-              </span>
+          <form action={createBankAccount} className="card ad-subform ad-form-narrow">
+            <div className="st">New account</div>
+            <div className="ad-field-grid">
+              <div className="ad-field">
+                <label className="ad-fl">
+                  Account name <span className="req">*</span> <span className="int">(internal label)</span>
+                </label>
+                <input name="account_name" type="text" placeholder="e.g. Solux China USD" required />
+              </div>
+              <div className="ad-field">
+                <label className="ad-fl">
+                  Business account name <span className="int">(printed on PDF)</span>
+                </label>
+                <input
+                  name="business_account_name"
+                  type="text"
+                  placeholder="e.g. CHANGZHOU SOLUX TECHNOLOGY CO., LTD"
+                />
+              </div>
             </div>
-            <div className="space-y-2">
-              {list.map((r) => (
-                <div key={r.id} className="panel p-4 space-y-1">
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <h3 className="font-semibold">{r.account_name}</h3>
-                        {r.is_default && (
-                          <span className="rounded bg-solux-accent px-2 py-0.5 text-[10px] font-semibold uppercase tracking-widerx text-neutral-700">
-                            Default {r.currency}
-                          </span>
+            <div className="ad-field-grid">
+              <div className="ad-field">
+                <label className="ad-fl">
+                  Currency <span className="req">*</span>
+                </label>
+                <select name="currency" defaultValue="USD" required>
+                  {CURRENCIES.map((c) => (
+                    <option key={c} value={c}>
+                      {c}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="ad-field">
+                <label className="ad-fl">Bank name</label>
+                <input name="bank_name" type="text" placeholder="Bank name" />
+              </div>
+            </div>
+            <div className="ad-field">
+              <label className="ad-fl">Bank address</label>
+              <input name="bank_address" type="text" placeholder="Bank address" />
+            </div>
+            <div className="ad-field-grid">
+              <div className="ad-field">
+                <label className="ad-fl">Account number / IBAN</label>
+                <input name="account_number" type="text" className="ad-mono" placeholder="Account number / IBAN" />
+              </div>
+              <div className="ad-field">
+                <label className="ad-fl">SWIFT / BIC</label>
+                <input
+                  name="swift"
+                  type="text"
+                  className="ad-mono"
+                  placeholder="SWIFT / BIC"
+                  style={{ textTransform: "uppercase" }}
+                />
+              </div>
+            </div>
+            <label
+              style={{ display: "flex", alignItems: "center", gap: 9, fontSize: 13, marginBottom: 13, cursor: "pointer" }}
+            >
+              <input type="checkbox" name="is_default" />
+              Set as default for the selected currency
+            </label>
+            <button className="sx-btn sx-btn-go">Add account</button>
+          </form>
+
+          {CURRENCIES.map((cur) => {
+            const list = groups.get(cur) ?? [];
+            if (list.length === 0) return null;
+            return (
+              <div key={cur}>
+                <div className="ad-cur-head">
+                  <div className="eyebrow">Currency</div>
+                  <h3>{cur}</h3>
+                  <span style={{ fontSize: 12, color: "var(--sx-mute)" }}>
+                    {list.length} account{list.length === 1 ? "" : "s"}
+                  </span>
+                </div>
+                {list.map((r) => (
+                  <div key={r.id} className="ad-bank-card">
+                    <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 14 }}>
+                      <div>
+                        <div className="ad-bank-top">
+                          <span className="ad-bank-name">{r.account_name}</span>
+                          {r.is_default && <span className="ad-tag dft">Default {r.currency}</span>}
+                        </div>
+                        {/* Business account name appears on the PDF; surface it here too so
+                            admin can spot accounts where it's missing (PDF then falls back
+                            to the internal account_name). */}
+                        {r.business_account_name ? (
+                          <div className="ad-bank-pdf">PDF: {r.business_account_name}</div>
+                        ) : (
+                          <div className="ad-bank-pdf warn">PDF: ⚠ missing business account name</div>
                         )}
+                        {r.bank_name && <div className="ad-bank-meta">{r.bank_name}</div>}
+                        {r.bank_address && (
+                          <div style={{ fontSize: 11, color: "var(--sx-mute)", marginTop: 3 }}>{r.bank_address}</div>
+                        )}
+                        <div className="ad-bank-mono">
+                          {r.account_number && <span>A/C {r.account_number}</span>}
+                          {r.swift && <span>SWIFT {r.swift}</span>}
+                        </div>
                       </div>
-                      {/* Business account name appears on the PDF; surface it
-                          here too so admin can spot accounts where it's
-                          missing (and the PDF would fall back to the
-                          internal account_name). */}
-                      {r.business_account_name ? (
-                        <p className="text-[11px] uppercase tracking-widerx text-neutral-500 font-mono">
-                          PDF: {r.business_account_name}
-                        </p>
-                      ) : (
-                        <p className="text-[11px] uppercase tracking-widerx text-amber-700 font-mono">
-                          PDF: ⚠ missing business account name
-                        </p>
-                      )}
-                      {r.bank_name && (
-                        <p className="text-sm text-neutral-700">{r.bank_name}</p>
-                      )}
-                      {r.bank_address && (
-                        <p className="text-xs text-neutral-500">
-                          {r.bank_address}
-                        </p>
-                      )}
-                      <div className="text-xs font-mono text-neutral-700 mt-1 space-x-3">
-                        {r.account_number && <span>A/C {r.account_number}</span>}
-                        {r.swift && <span>SWIFT {r.swift}</span>}
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2 text-sm">
-                      {!r.is_default && (
-                        <form action={setDefaultBankAccount}>
+                      <div className="ad-acts">
+                        {!r.is_default && (
+                          <form action={setDefaultBankAccount}>
+                            <input type="hidden" name="id" value={r.id} />
+                            <button className="sx-btn sx-btn-sm">Set default</button>
+                          </form>
+                        )}
+                        <Link href={`/admin/banks/${r.id}`} className="sx-btn sx-btn-sm">
+                          Edit
+                        </Link>
+                        <form action={deleteBankAccount}>
                           <input type="hidden" name="id" value={r.id} />
-                          <button className="rounded border border-neutral-200 px-3 py-1.5 hover:bg-neutral-50">
-                            Set default
-                          </button>
+                          <button className="sx-btn sx-btn-danger sx-btn-sm">Delete</button>
                         </form>
-                      )}
-                      <Link
-                        href={`/admin/banks/${r.id}`}
-                        className="rounded border border-neutral-200 px-3 py-1.5 hover:bg-neutral-50"
-                      >
-                        Edit
-                      </Link>
-                      <form action={deleteBankAccount}>
-                        <input type="hidden" name="id" value={r.id} />
-                        <button className="rounded border border-neutral-200 px-3 py-1.5 text-red-600 hover:bg-red-50">
-                          Delete
-                        </button>
-                      </form>
+                      </div>
                     </div>
                   </div>
-                </div>
-              ))}
-            </div>
-          </section>
-        );
-      })}
+                ))}
+              </div>
+            );
+          })}
 
-      {(!rows || rows.length === 0) && (
-        <div className="panel p-8 text-center text-sm text-neutral-500">
-          No bank accounts yet. Add one above.
-        </div>
-      )}
+          {(!rows || rows.length === 0) && (
+            <div className="ad-bank-card" style={{ textAlign: "center", color: "var(--sx-mute)", fontSize: 13 }}>
+              No bank accounts yet. Add one above.
+            </div>
+          )}
+        </section>
+      </div>
     </div>
   );
 }

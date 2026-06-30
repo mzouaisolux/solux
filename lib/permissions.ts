@@ -31,7 +31,7 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentUserRole, getEffectiveRole } from "@/lib/auth";
-import type { Role } from "@/lib/types";
+import { isAdminLike, type Role } from "@/lib/types";
 
 /* ===========================================================================
    CAPABILITY KEY CATALOG
@@ -82,10 +82,22 @@ export type Capability =
   | "project.generate_quotation"
   | "project.view_cost"
   | "project.override_cost"
+  // CRM sandbox (m104)
+  | "prospect.access"
+  // finance
+  | "finance.view"
   // admin
   | "admin.manage_permissions"
   | "admin.manage_users"
-  | "admin.diagnostics";
+  | "admin.diagnostics"
+  // admin master data (m122 — governance: was hardcoded requireAdmin)
+  | "admin.manage_products"
+  | "admin.manage_categories"
+  | "admin.manage_banks"
+  | "admin.manage_sales_conditions"
+  // pricing (m122 — was requireAdmin / requireAdminOrFinance)
+  | "pricing.manage"
+  | "pricing.manage_costs";
 
 /* ===========================================================================
    CACHE
@@ -224,6 +236,46 @@ export async function requireCapability(capability: Capability): Promise<void> {
  * in the running process. Other server instances still see the change
  * within the TTL window.
  */
+/**
+ * Throws unless the caller is admin/super_admin OR has `capability`.
+ *
+ * Anti-lockout migration helper (m122): admin & super_admin ALWAYS pass —
+ * exactly reproducing the old `requireAdmin()` floor, so the gate behaves
+ * identically the instant the code ships, whether or not the matrix seed
+ * migration has been applied yet. The capability is the DELEGATION lever:
+ * a super-admin can grant it to another role (e.g. finance → pricing) from
+ * /permissions WITHOUT touching code. Uses the REAL role (View-As can't
+ * grant real access).
+ */
+export async function requireCapabilityOrAdmin(capability: Capability): Promise<void> {
+  const { role } = await getCurrentUserRole();
+  if (isAdminLike(role)) return; // admin / super_admin floor (== old requireAdmin)
+  if (await hasCapability(capability)) return; // delegated via the matrix
+  throw new Error(
+    `Missing required capability: ${capability}. Ask a super-admin to enable this for your role in /permissions/actions.`
+  );
+}
+
+/**
+ * PAGE-ACCESS check (UI/View-As faithful, anti-lockout). True when the
+ * EFFECTIVE role is admin/super_admin, OR is finance (when opts.finance),
+ * OR holds ANY of `capabilities`. Mirrors requireCapabilityOrAdmin but
+ * for page guards + uses the effective role so View-As previews delegated
+ * access correctly. Security still lives in the server actions.
+ */
+export async function canAccessOrAdmin(
+  capabilities: Capability[],
+  opts?: { finance?: boolean }
+): Promise<boolean> {
+  const { effectiveRole } = await getEffectiveRole();
+  if (isAdminLike(effectiveRole)) return true;
+  if (opts?.finance && effectiveRole === "finance") return true;
+  for (const c of capabilities) {
+    if (await hasCapability(c, effectiveRole ?? undefined)) return true;
+  }
+  return false;
+}
+
 export function clearCapabilityCache(): void {
   CACHE.clear();
 }

@@ -3,6 +3,7 @@ import { getEffectiveRole } from "@/lib/auth";
 import { isAdminLike } from "@/lib/types";
 import { sortProductsByName } from "@/lib/product-sort";
 import AccessDenied from "@/components/AccessDenied";
+import { canAccessOrAdmin } from "@/lib/permissions";
 import ProductWorkspace from "./ProductWorkspace";
 
 export const dynamic = "force-dynamic";
@@ -17,7 +18,7 @@ export const dynamic = "force-dynamic";
  */
 export default async function ProductCatalogPage() {
   const { effectiveRole } = await getEffectiveRole();
-  if (!isAdminLike(effectiveRole)) {
+  if (!(await canAccessOrAdmin(["admin.manage_products", "admin.manage_categories"]))) {
     return (
       <AccessDenied
         title="Administrators only"

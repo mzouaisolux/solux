@@ -235,15 +235,22 @@ export default function ExportExcelButton({
           ` (×${l.quantity})`;
 
         if (l.rows.length === 0) {
+          // m135 — manual item: surface the free-text specs instead of the
+          // "no sales fields" note so the factory still gets the pole detail.
           taskRows.push([
             { value: sectionLabel, wrap: true },
+            { value: l.is_manual ? "Specifications" : "—" },
             { value: "—" },
             { value: "—" },
             { value: "—" },
+            { value: l.is_manual ? l.manual_specs ?? "—" : "—", wrap: true },
             { value: "—" },
-            { value: "—" },
-            { value: "—" },
-            { value: "No sales fields recorded for this line.", wrap: true },
+            {
+              value: l.is_manual
+                ? "Manual item — no catalog configuration."
+                : "No sales fields recorded for this line.",
+              wrap: true,
+            },
           ]);
         }
 

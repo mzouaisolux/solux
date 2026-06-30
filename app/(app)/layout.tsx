@@ -3,9 +3,11 @@ import { Suspense } from "react";
 import { createClient } from "@/lib/supabase/server";
 import { getEffectiveRole } from "@/lib/auth";
 import { Nav } from "@/components/Nav";
-import { ConversationLauncher } from "@/components/chat/ConversationLauncher";
+import NoRoleNotice from "@/components/NoRoleNotice";
 import { Toaster } from "@/components/feedback/Toaster";
 import { redirect } from "next/navigation";
+import { getLocale } from "@/lib/i18n/server";
+import { I18nProvider } from "@/components/i18n/I18nProvider";
 
 export default async function AppLayout({
   children,
@@ -23,8 +25,22 @@ export default async function AppLayout({
   // action and RLS policy still uses the REAL role independently.
   const { realRole, effectiveRole, isSuperAdmin, isSimulating } =
     await getEffectiveRole();
+  const locale = getLocale();
+
+  // S1.5 — an authenticated user with NO role (no user_roles row) used to get a
+  // silently-degraded default shell. Show an explicit "account not configured"
+  // state instead, so they know to contact an admin instead of wondering why
+  // everything is empty/denied. (super_admins always have a role.)
+  if (!realRole && !isSuperAdmin) {
+    return (
+      <I18nProvider locale={locale}>
+        <NoRoleNotice email={user.email ?? null} />
+      </I18nProvider>
+    );
+  }
 
   return (
+    <I18nProvider locale={locale}>
     <div className="min-h-screen flex flex-col">
       <Nav
         userId={user.id}
@@ -33,6 +49,7 @@ export default async function AppLayout({
         effectiveRole={effectiveRole}
         isSuperAdmin={isSuperAdmin}
         isSimulating={isSimulating}
+        locale={locale}
       />
       {/* `po-premium` applies the validated design language (Plus Jakarta Sans,
           sharp 0px corners, ink + Flash-Green palette, disciplined de-rainbow,
@@ -40,16 +57,15 @@ export default async function AppLayout({
           the whole product reads as one design system. Page-level po-premium
           wrappers (added earlier) are harmless no-ops under this. */}
       <main className="flex-1 po-premium">{children}</main>
-      {/* Persistent conversation layer — floating button bottom-right
-          appears on every workspace route that maps to an entity
-          (document / task list / production order / client). Stays
-          mounted across navigations so the chat feels like part of
-          the shell, not a section on each page. */}
-      <ConversationLauncher />
+      {/* Global floating "Messages" launcher removed (Sprint 1 polish) — a
+          persistent bottom-right chat bubble on every page read like a SaaS
+          support widget and offered "Pick something to discuss" with no
+          context. Conversations stay available where embedded per record. */}
       {/* Global action feedback — toasts + one-shot ?flash confirmations. */}
       <Suspense fallback={null}>
         <Toaster />
       </Suspense>
     </div>
+    </I18nProvider>
   );
 }

@@ -8,11 +8,12 @@ import {
 import { getEffectiveRole } from "@/lib/auth";
 import { isAdminLike } from "@/lib/types";
 import AccessDenied from "@/components/AccessDenied";
+import { canAccessOrAdmin } from "@/lib/permissions";
 
 export default async function SalesConditionsPage() {
   // Master data — admin-only. Access Denied (not a silent redirect) on miss.
   const { effectiveRole } = await getEffectiveRole();
-  if (!isAdminLike(effectiveRole)) {
+  if (!(await canAccessOrAdmin(["admin.manage_sales_conditions"]))) {
     return (
       <AccessDenied
         title="Administrators only"
@@ -29,97 +30,78 @@ export default async function SalesConditionsPage() {
     .order("title");
 
   return (
-    <div className="mx-auto max-w-screen-2xl px-6 py-8 space-y-8">
-      <div className="flex items-end justify-between pb-4 border-b border-neutral-200">
-        <div>
+    <div className="solux-pro sx-page">
+      <div className="sx-wrap">
+        <section className="card sec ad-section">
           <div className="eyebrow">Admin</div>
-          <h1 className="doc-title mt-1">Sales conditions</h1>
-          <p className="text-xs text-neutral-500 mt-2">
-            Reusable paragraphs appended to quotations when the sales rep ticks
-            "Include sales conditions". The <b>default</b> is auto-selected.
+          <h2 className="ad-doc-title">Sales conditions</h2>
+          <p className="ad-lead">
+            Reusable paragraphs appended to quotations when the sales rep ticks "Include sales conditions".
+            The <b>default</b> is auto-selected.
           </p>
-        </div>
-      </div>
 
-      <section className="panel p-5 space-y-3">
-        <h2 className="text-lg font-semibold">New template</h2>
-        <form action={createSalesCondition} className="space-y-3">
-          <input
-            name="title"
-            placeholder="Title (e.g. Standard export terms)"
-            required
-            className="w-full rounded border border-neutral-200 px-3 py-2"
-          />
-          <textarea
-            name="content"
-            placeholder="Full text of the sales conditions. Newlines are preserved on the PDF."
-            rows={8}
-            required
-            className="w-full rounded border border-neutral-200 px-3 py-2 font-sans"
-          />
-          <label className="flex items-center gap-2 text-sm">
-            <input type="checkbox" name="is_default" />
-            Set as default
-          </label>
-          <div>
-            <button className="rounded bg-solux px-4 py-2 text-white font-medium hover:bg-solux-dark">
-              Add template
-            </button>
-          </div>
-        </form>
-      </section>
-
-      <section className="space-y-3">
-        {(rows ?? []).map((r) => (
-          <div key={r.id} className="panel p-5 space-y-2">
-            <div className="flex items-start justify-between gap-4">
-              <div className="flex-1">
-                <div className="flex items-center gap-2">
-                  <h3 className="font-semibold">{r.title}</h3>
-                  {r.is_default && (
-                    <span className="rounded bg-solux-accent px-2 py-0.5 text-[10px] font-semibold uppercase tracking-widerx text-neutral-700">
-                      Default
-                    </span>
-                  )}
-                </div>
-                <p className="text-xs text-neutral-500">
-                  Created {new Date(r.created_at).toLocaleDateString("en-GB")}
-                </p>
-              </div>
-              <div className="flex items-center gap-2 text-sm">
-                {!r.is_default && (
-                  <form action={setDefaultSalesCondition}>
-                    <input type="hidden" name="id" value={r.id} />
-                    <button className="rounded border border-neutral-200 px-3 py-1.5 hover:bg-neutral-50">
-                      Set default
-                    </button>
-                  </form>
-                )}
-                <Link
-                  href={`/admin/sales-conditions/${r.id}`}
-                  className="rounded border border-neutral-200 px-3 py-1.5 hover:bg-neutral-50"
-                >
-                  Edit
-                </Link>
-                <form action={deleteSalesCondition}>
-                  <input type="hidden" name="id" value={r.id} />
-                  <button className="rounded border border-neutral-200 px-3 py-1.5 text-red-600 hover:bg-red-50">
-                    Delete
-                  </button>
-                </form>
-              </div>
+          {/* New template */}
+          <form action={createSalesCondition} className="card ad-subform ad-form-narrow">
+            <div className="st">New template</div>
+            <div className="ad-field">
+              <input name="title" type="text" placeholder="Title (e.g. Standard export terms)" required />
             </div>
-            <pre className="whitespace-pre-wrap text-xs text-neutral-700 font-sans bg-neutral-50 rounded p-3 border border-neutral-100">
-              {r.content}
-            </pre>
-          </div>
-        ))}
-        {(!rows || rows.length === 0) && (
-          <div className="panel p-8 text-center text-sm text-neutral-500">
-            No templates yet. Create one above.
-          </div>
-        )}
-      </section>
+            <div className="ad-field">
+              <textarea
+                name="content"
+                placeholder="Full text of the sales conditions. Newlines are preserved on the PDF."
+                required
+                style={{ minHeight: 120 }}
+              />
+            </div>
+            <label
+              style={{ display: "flex", alignItems: "center", gap: 9, fontSize: 13, marginBottom: 13, cursor: "pointer" }}
+            >
+              <input type="checkbox" name="is_default" />
+              Set as default
+            </label>
+            <button className="sx-btn sx-btn-go">Add template</button>
+          </form>
+
+          {/* Templates */}
+          {(rows ?? []).map((r) => (
+            <div key={r.id} className="ad-cond-card">
+              <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 14 }}>
+                <div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <span style={{ fontSize: 14, fontWeight: 700 }}>{r.title}</span>
+                    {r.is_default && <span className="ad-tag dft">Default</span>}
+                  </div>
+                  <div style={{ fontSize: 11, color: "var(--sx-mute)", marginTop: 4 }}>
+                    Created {new Date(r.created_at).toLocaleDateString("en-GB")}
+                  </div>
+                </div>
+                <div className="ad-acts">
+                  {!r.is_default && (
+                    <form action={setDefaultSalesCondition}>
+                      <input type="hidden" name="id" value={r.id} />
+                      <button className="sx-btn sx-btn-sm">Set default</button>
+                    </form>
+                  )}
+                  <Link href={`/admin/sales-conditions/${r.id}`} className="sx-btn sx-btn-sm">
+                    Edit
+                  </Link>
+                  <form action={deleteSalesCondition}>
+                    <input type="hidden" name="id" value={r.id} />
+                    <button className="sx-btn sx-btn-danger sx-btn-sm">Delete</button>
+                  </form>
+                </div>
+              </div>
+              <div className="ad-cond-body">{r.content}</div>
+            </div>
+          ))}
+          {(!rows || rows.length === 0) && (
+            <div className="ad-cond-card" style={{ textAlign: "center", color: "var(--sx-mute)", fontSize: 13 }}>
+              No templates yet. Create one above.
+            </div>
+          )}
+        </section>
+      </div>
     </div>
   );
 }

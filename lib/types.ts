@@ -29,6 +29,14 @@ export const isTechnicalRole = (role: Role | null): boolean =>
   role === "task_list_manager" ||
   role === "operations";
 
+/** True for roles that SUPERVISE commercial workflows — approve quote
+ *  validations, reassign deal / account / affair ownership — WITHOUT being a
+ *  technical admin. Sales Director sits here alongside admin / super_admin.
+ *  Deliberately separate from isAdminLike (no admin/system powers) and
+ *  isTechnicalRole (no production powers): a commercial-supervision lever. */
+export const canSupervise = (role: Role | null): boolean =>
+  isAdminLike(role) || role === "sales_director";
+
 export const ROLE_LABEL: Record<Role, string> = {
   super_admin: "Super admin",
   admin: "Admin",
@@ -625,14 +633,41 @@ export type ResolvedFactoryInstruction = {
 };
 
 /**
+ * Normalized key for the option lookup map: `${category_id}|${field_name}|${value}`.
+ *
+ * MUST be CATEGORY-SCOPED. config_field field names are only unique WITHIN a
+ * category, so two families that share a field+value (notably a family and the
+ * copy produced by duplicateCategory — identical field names AND values) would
+ * collide on a bare `${field_name}|${value}` key. A global, last-wins map then
+ * points the key at ONE category's option_id, and a mapping bound to the OTHER
+ * category's option_id resolves to "missing" even though it exists and is
+ * active. Prefixing with category_id makes the key globally unique so every
+ * line resolves against its own family's options. Field name verbatim; value
+ * lower-cased (case-insensitive value match — same convention as before).
+ *
+ * Every builder of an `optionIdByFieldValue` map AND `resolveFactoryInstruction`
+ * use THIS helper — one source of truth so the key format can never drift.
+ */
+export function optionLookupKey(
+  categoryId: string | null | undefined,
+  fieldName: string,
+  value: string
+): string {
+  return `${categoryId ?? ""}|${fieldName}|${String(value).toLowerCase()}`;
+}
+
+/**
  * Resolves a single sales (field_name, sales_value) into a factory
  * instruction using overrides → global mapping → missing fallback.
  *
- * `optionLookup` maps a normalized `${field_name}|${value}` key to the
+ * `optionIdByFieldValue` maps the CATEGORY-SCOPED `optionLookupKey` to the
  * option_id, so the caller can pre-compute it from a flat list of
- * config_field_options.
+ * config_field_options across any number of categories without cross-family
+ * collisions.
  */
 export function resolveFactoryInstruction(args: {
+  /** The line's product category — disambiguates field names shared by other families. */
+  categoryId: string | null;
   fieldName: string;
   salesValue: string;
   overrides: Record<string, string> | null | undefined;
@@ -640,10 +675,11 @@ export function resolveFactoryInstruction(args: {
   clientOverrides?: Record<string, string> | null;
   /** Map of option_id → FactoryMapping. */
   mappingsByOption: Map<string, FactoryMapping>;
-  /** Map of `${field_name}|${sales_value}` → option_id (case-insensitive value). */
+  /** Map of `optionLookupKey(category_id, field_name, value)` → option_id. */
   optionIdByFieldValue: Map<string, string>;
 }): ResolvedFactoryInstruction {
   const {
+    categoryId,
     fieldName,
     salesValue,
     overrides,
@@ -657,7 +693,7 @@ export function resolveFactoryInstruction(args: {
   // Look up the canonical mapping so we can attach mapping_id/code even when
   // an override is present (useful for "reset to mapping" actions).
   const optionId = optionIdByFieldValue.get(
-    `${fieldName}|${salesValue.toLowerCase()}`
+    optionLookupKey(categoryId, fieldName, salesValue)
   );
   const mapping = optionId ? mappingsByOption.get(optionId) : undefined;
 
@@ -1009,6 +1045,16 @@ export type ProductionOrder = {
   balance_received_amount: number;
   balance_received_at: string | null;
   payment_notes: string | null;
+  // Cash-collection tracking (m114, audit Phase 1). OPTIONAL because the
+  // migration may not be applied yet — readers must tolerate undefined.
+  // balance_due_date is the MANUAL override; when null/absent the
+  // effective due date is derived at read time by
+  // computeEffectiveBalanceDueDate (one source of truth — it follows
+  // deadline/ETA changes automatically until someone freezes it).
+  balance_due_date?: string | null;
+  // Letter of Credit validity end — alerts fire when it approaches or
+  // passes while the balance is still outstanding.
+  lc_expiry_date?: string | null;
   // Deposit override (migration 025) — admin-only escape hatch to
   // launch production before the deposit lands. When set, the row
   // reads "Started without deposit" across the app.
@@ -1124,6 +1170,87 @@ export const PRODUCTION_PAYMENT_STATE_LABEL: Record<
   paid_in_full: "Paid in full",
   no_deposit_required: "No deposit",
 };
+
+/* ---------------------------------------------------------------------
+   Balance due date (m114, audit Phase 1 — cash)
+   ---------------------------------------------------------------------
+   The due date is DERIVED at read time unless explicitly overridden, so
+   it follows deadline/ETA changes automatically (Règle Produit #0 — a
+   view displays, it never owns a copy). Rules, in order:
+
+     1. manual    — production_orders.balance_due_date set → wins as-is.
+     2. deadline  — deposit_balance + "before_shipment": the balance must
+                    be in before goods leave → due = current production
+                    deadline (the shipment can't happen earlier anyway).
+     3. eta_lc    — lc / hybrid with usance days: documents are presented
+                    at shipment and the LC pays N days later → ETA + N.
+     4. eta       — everything else that settles around arrival documents
+                    (against_documents, LC at sight) → ETA when known.
+     5. null      — no anchor yet (no deadline, no ETA): no due date, no
+                    overdue alert. Honest absence beats a fake date.
+   ------------------------------------------------------------------ */
+
+export type BalanceDueSource = "manual" | "deadline" | "eta_lc" | "eta";
+
+/** UI labels explaining where the effective due date comes from. */
+export const BALANCE_DUE_SOURCE_LABEL: Record<BalanceDueSource, string> = {
+  manual: "set manually",
+  deadline: "auto · production deadline",
+  eta_lc: "auto · ETA + LC days",
+  eta: "auto · ETA",
+};
+
+/** Calendar-day add on a YYYY-MM-DD string (UTC, no DST surprises). */
+function addCalendarDays(iso: string, days: number): string | null {
+  const t = Date.parse(iso + "T00:00:00Z");
+  if (!Number.isFinite(t)) return null;
+  const d = new Date(t);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+export function computeEffectiveBalanceDueDate(args: {
+  /** Explicit override (production_orders.balance_due_date, m114). */
+  balanceDueDate?: string | null;
+  paymentMode: PaymentMode | null;
+  paymentTerms: PaymentTerms | null;
+  currentProductionDeadline: string | null;
+  eta: string | null;
+}): { date: string | null; source: BalanceDueSource | null } {
+  const {
+    balanceDueDate,
+    paymentMode,
+    paymentTerms,
+    currentProductionDeadline,
+    eta,
+  } = args;
+
+  if (balanceDueDate) return { date: balanceDueDate, source: "manual" };
+  if (!paymentMode || !paymentTerms) return { date: null, source: null };
+
+  if (
+    paymentMode === "deposit_balance" &&
+    paymentTerms.balance_condition === "before_shipment"
+  ) {
+    return currentProductionDeadline
+      ? { date: currentProductionDeadline, source: "deadline" }
+      : { date: null, source: null };
+  }
+
+  const lcDays = Number(paymentTerms.lc_days ?? 0);
+  if (
+    (paymentMode === "lc" || paymentMode === "hybrid") &&
+    eta &&
+    Number.isFinite(lcDays) &&
+    lcDays > 0
+  ) {
+    const due = addCalendarDays(eta, lcDays);
+    return due ? { date: due, source: "eta_lc" } : { date: null, source: null };
+  }
+
+  if (eta) return { date: eta, source: "eta" };
+  return { date: null, source: null };
+}
 
 export type ProductionDeadlineChange = {
   id: string;
@@ -1313,6 +1440,12 @@ export type DocumentLine = {
   discount_type: DiscountType | null;
   discount_value: number;
   client_product_name?: string | null;
+  /**
+   * Line-level product family (m133). The factory-mapping resolver scopes by
+   * category — not product_id — so a free-text / Service-Request line
+   * (product_id null) stays resolvable as long as it carries its category here.
+   */
+  category_id?: string | null;
   /** Dynamic per-family configuration values, keyed by field_name. */
   config_values?: Record<string, string>;
   // UI-only (not persisted): set when a line was pre-filled from a previous quotation

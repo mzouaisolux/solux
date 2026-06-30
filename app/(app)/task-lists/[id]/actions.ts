@@ -310,10 +310,40 @@ export async function updateTaskListLine(formData: FormData) {
     }
   }
 
-  const { error } = await supabase
+  // m135 — manual item (pole/mast/non-catalog): the name + free-text specs are
+  // editable here (catalog lines have neither). unit_price is intentionally NOT
+  // accepted from the client: it's a read-only reference, so we never let the
+  // task list diverge from the commercial source of truth.
+  const update: Record<string, unknown> = {
+    quantity,
+    config_values,
+    internal_notes,
+  };
+  if (String(formData.get("is_manual") ?? "") === "1") {
+    update.product_name =
+      (formData.get("product_name") &&
+        String(formData.get("product_name")).trim()) ||
+      "Manual item";
+    update.manual_specs =
+      (formData.get("manual_specs") &&
+        String(formData.get("manual_specs")).trim()) ||
+      null;
+  }
+
+  let { error } = await supabase
     .from("production_task_list_lines")
-    .update({ quantity, config_values, internal_notes })
+    .update(update)
     .eq("id", id);
+  // Resilience: manual_specs is an m135 column — if it isn't migrated yet, retry
+  // without it so saving a line still works (product_name is m089, already
+  // present). The free-text specs persist once m135 is applied.
+  if (error && /manual_specs/i.test(error.message)) {
+    const { manual_specs, ...rest } = update;
+    ({ error } = await supabase
+      .from("production_task_list_lines")
+      .update(rest)
+      .eq("id", id));
+  }
   if (error) throw new Error(error.message);
 
   revalidatePath(`/task-lists/${task_list_id}`);

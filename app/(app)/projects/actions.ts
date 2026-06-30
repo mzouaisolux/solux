@@ -71,11 +71,108 @@ export async function createProjectRequest(formData: FormData): Promise<void> {
     data: { user },
   } = await supabase.auth.getUser();
 
-  const name = reqStr(formData, "name");
   // P9 (preferred A): client is mandatory at creation so the workflow can
   // never reach pricing/quotation without one.
+  //
+  // m109 EXCEPTION — tender-sourced requests: most tenders are identified
+  // before the local partner (distributor / EPC / installer) is known, so
+  // a request created FROM a tender may start clientless. The existing
+  // "No client set — required before pricing" banner on the detail page
+  // still enforces P9 before pricing.
+  const sourceTenderId = str(formData, "source_tender_id");
   const clientId = str(formData, "client_id");
-  if (!clientId) throw new Error("Select a client to create a project request.");
+  if (!clientId && !sourceTenderId) {
+    throw new Error("Select a client to create a service request.");
+  }
+  // m112 maturity gate — a study request from a tender only makes sense
+  // once the local partner has CONFIRMED interest. Blocks the direct-URL
+  // path (/projects/new?tender=…) the same way the pipeline UI does.
+  if (sourceTenderId) {
+    const { data: tender } = await supabase
+      .from("tenders")
+      .select("commercial_status")
+      .eq("id", sourceTenderId)
+      .maybeSingle();
+    if (!tender) throw new Error("Source tender not found.");
+    if (!["interested", "project_request"].includes(tender.commercial_status)) {
+      throw new Error(
+        "The partner must confirm interest first — a service request unlocks at the “Interested” stage."
+      );
+    }
+  }
+  // CRM refactor (2026-06-17): a project request is identified by its AFFAIRE,
+  // never a separate project name. The form sends exactly ONE of:
+  //   • affair_id        — an existing affaire of this client, or
+  //   • new_affair_name  — the name of a new affaire to create.
+  // (m124 enforces affair_id NOT NULL — the hierarchy is mandatory.)
+  let affairId = str(formData, "affair_id");
+  const newAffairName = str(formData, "new_affair_name");
+  if (affairId && newAffairName) {
+    throw new Error(
+      "Veuillez sélectionner une affaire existante OU saisir une nouvelle affaire."
+    );
+  }
+
+  let affairName: string | null = null;
+  if (affairId) {
+    // Existing affaire — must belong to the same client (never file under
+    // another client's deal). Tender flow: clientless both-null is fine.
+    const { data: affair } = await supabase
+      .from("affairs")
+      .select("id, client_id, name")
+      .eq("id", affairId)
+      .maybeSingle();
+    if (!affair || (affair.client_id ?? null) !== (clientId ?? null)) {
+      throw new Error("The selected affair does not belong to the selected client.");
+    }
+    affairName = (affair as { name?: string | null }).name ?? null;
+  } else {
+    // No existing affaire → create one. A name is required, EXCEPT for a
+    // tender-sourced request (auto-named — partner/affaire may be unknown).
+    if (!newAffairName && !sourceTenderId) {
+      throw new Error("Une affaire est obligatoire pour créer une Service Request.");
+    }
+    let createName = newAffairName;
+    if (!createName) {
+      if (clientId) {
+        const { data: client } = await supabase
+          .from("clients")
+          .select("company_name")
+          .eq("id", clientId)
+          .maybeSingle();
+        createName = `New Opportunity - ${client?.company_name ?? "Unknown client"}`;
+      } else {
+        createName = "New Opportunity";
+      }
+    }
+    // Source inherited from context (m125): 'tender' for a tender-sourced
+    // request, else 'direct_request'. Defensive retry-without-source mirrors
+    // createAffair in case m125 isn't live yet.
+    const affairRow = {
+      client_id: clientId,
+      name: createName,
+      status: "lead",
+      owner_id: user?.id ?? null,
+      created_by: user?.id ?? null,
+    };
+    let { data: newAffair, error: affairErr } = await supabase
+      .from("affairs")
+      .insert({ ...affairRow, source: sourceTenderId ? "tender" : "direct_request" })
+      .select("id")
+      .single();
+    if (affairErr && /source/i.test(affairErr.message)) {
+      ({ data: newAffair, error: affairErr } = await supabase
+        .from("affairs")
+        .insert(affairRow)
+        .select("id")
+        .single());
+    }
+    if (affairErr) throw new Error(affairErr.message);
+    if (!newAffair) throw new Error("Failed to create the affair.");
+    affairId = newAffair.id;
+    affairName = createName;
+    revalidatePath("/affairs");
+  }
   const quantity = intOrNull(formData, "quantity");
   const reqPacking = bool(formData, "req_packing_list");
   const reqFreight = bool(formData, "req_freight");
@@ -90,11 +187,17 @@ export async function createProjectRequest(formData: FormData): Promise<void> {
     throw new Error("Transport mode and destination are required when requesting a freight estimate.");
   }
 
+  // The request's name IS the affaire's name — no separate "project name".
+  // (Older entry points may still post a `name`; honour it if present.)
+  const name = str(formData, "name") ?? affairName ?? "Service request";
+
   const { data: created, error } = await supabase
     .from("project_requests")
     .insert({
       name,
       client_id: clientId,
+      affair_id: affairId,
+      source_tender_id: sourceTenderId,
       product_category_id: str(formData, "product_category_id"),
       country: str(formData, "country"),
       quantity,
@@ -130,12 +233,85 @@ export async function createProjectRequest(formData: FormData): Promise<void> {
     entity_type: "project_request",
     entity_id: created.id,
     event_type: "pr.created",
-    message: `Project request "${name}" created`,
+    message: `Service request "${name}" created`,
     payload: { name },
     bestEffort: true,
   });
+
+  // m112 — Tender Pipeline auto-advance: creating the technical request
+  // moves Interested → Project Request. Only that transition: the maturity
+  // gate above already refused every earlier stage.
+  if (sourceTenderId) {
+    await supabase
+      .from("tenders")
+      .update({ commercial_status: "project_request", updated_at: now() })
+      .eq("id", sourceTenderId)
+      .eq("commercial_status", "interested");
+    revalidatePath("/prospects");
+    revalidatePath("/prospects/pipeline");
+  }
+
   revalidate();
-  redirect(`/projects/${created.id}?flash=${encodeURIComponent("Project request created")}`);
+  redirect(`/projects/${created.id}?flash=${encodeURIComponent("Service request created")}`);
+}
+
+/**
+ * Edit a DRAFT service request (BUG-2). Lets Sales revise the specs after a
+ * Director "Request info" bounce (or any time before submitting). Mirrors the
+ * field handling of createProjectRequest but only updates the config/spec
+ * fields — client + affaire stay fixed once the request exists. Gated to
+ * status = "draft" via the .eq filter (a no-op update on any other status) on
+ * top of the owner/admin RLS write policy.
+ */
+export async function updateProjectRequest(formData: FormData): Promise<void> {
+  await requireCapability("project.create");
+  const id = reqStr(formData, "id");
+  const supabase = createClient();
+
+  const quantity = intOrNull(formData, "quantity");
+  const reqPacking = bool(formData, "req_packing_list");
+  const reqFreight = bool(formData, "req_freight");
+  if ((reqPacking || reqFreight) && (quantity == null || quantity <= 0)) {
+    throw new Error("Quantity is required before requesting Packing List or Freight Cost.");
+  }
+  const transportMode = str(formData, "freight_transport_mode");
+  const freightDestination = str(formData, "freight_destination");
+  if (reqFreight && (!transportMode || !freightDestination)) {
+    throw new Error("Transport mode and destination are required when requesting a freight estimate.");
+  }
+
+  const { error } = await supabase
+    .from("project_requests")
+    .update({
+      product_category_id: str(formData, "product_category_id"),
+      country: str(formData, "country"),
+      quantity,
+      opportunity_value: numOrNull(formData, "opportunity_value"),
+      led_power: str(formData, "led_power"),
+      solar_panel_size: str(formData, "solar_panel_size"),
+      battery_spec: str(formData, "battery_spec"),
+      controller: str(formData, "controller"),
+      iot_required: bool(formData, "iot_required"),
+      additional_notes: str(formData, "additional_notes"),
+      pole_required: bool(formData, "pole_required"),
+      pole_quantity: intOrNull(formData, "pole_quantity"),
+      pole_height: str(formData, "pole_height"),
+      arm_length: str(formData, "arm_length"),
+      pole_notes: str(formData, "pole_notes"),
+      freight_transport_mode: transportMode,
+      freight_destination: freightDestination,
+      freight_notes: str(formData, "freight_notes"),
+      req_product_pricing: bool(formData, "req_product_pricing"),
+      req_packing_list: reqPacking,
+      req_freight: reqFreight,
+      updated_at: now(),
+    })
+    .eq("id", id)
+    .eq("status", "draft");
+  if (error) throw new Error(error.message);
+
+  revalidate();
+  redirect(`/projects/${id}?flash=${encodeURIComponent("Service request updated")}`);
 }
 
 export async function submitProjectRequest(formData: FormData): Promise<void> {
@@ -860,12 +1036,39 @@ export async function generateQuotationFromProject(formData: FormData): Promise<
   ].filter(Boolean);
   const productName =
     pr?.commercial_description ?? (fallbackSpecs.length ? `${p.name} — ${fallbackSpecs.join(", ")}` : p.name);
+  // m135 manual-item name carries the pole's FULL spec so it survives end to
+  // end (quotation → proforma → task-list manual item → factory export) instead
+  // of collapsing to just the height. The manual-item name field is meant to be
+  // descriptive (placeholder: "Pole 8m, hot-dip galvanized, arm 1.5m"), so the
+  // factory sees height + arm + notes without anyone re-typing them.
   const poleHeight = pr?.pole_height ?? p.pole_height;
-  const poleName = poleHeight ? `Pole — ${poleHeight}` : "Pole";
+  const poleArm = pr?.arm_length ?? p.arm_length;
+  const poleNotes = typeof p.pole_notes === "string" ? p.pole_notes.trim() : "";
+  const poleName =
+    [
+      poleHeight ? `Pole — ${poleHeight}` : "Pole",
+      poleArm ? `arm ${poleArm}` : null,
+      poleNotes || null,
+    ]
+      .filter(Boolean)
+      .join(" · ");
 
   const round2 = (n: number) => Math.round(n * 100) / 100;
-  const mkLine = (name: string, unit: number, q: number): DocumentLine => ({
+  // m133 — the request's product family, carried onto the PRODUCT line so the
+  // generated quotation (and the task list it spawns) stays resolvable for
+  // factory mappings without a catalog product_id. The Pole line gets no
+  // category (the request carries no pole family; borrowing the product's would
+  // inject the wrong config fields).
+  const productCategoryId: string | null =
+    pr?.product_category_id ?? p.product_category_id ?? null;
+  const mkLine = (
+    name: string,
+    unit: number,
+    q: number,
+    categoryId: string | null = null
+  ): DocumentLine => ({
     product_id: null as unknown as string, // free-text line (product_id nullable, m089)
+    category_id: categoryId, // m133 — product family for the factory-mapping resolver
     quantity: q,
     selected_options: {},
     unit_price: round2(unit),
@@ -883,7 +1086,7 @@ export async function generateQuotationFromProject(formData: FormData): Promise<
 
   // PRODUCTS — Project Product + Pole only (Logistics handled below).
   const lines: DocumentLine[] = [];
-  if (includeProduct && productUnit > 0) lines.push(mkLine(productName, productUnit, qty));
+  if (includeProduct && productUnit > 0) lines.push(mkLine(productName, productUnit, qty, productCategoryId));
   if (includePole && poleAllowed && poleUnit > 0) lines.push(mkLine(poleName, poleUnit, poleQty));
 
   // LOGISTICS — freight goes into the document Shipping section as containers
@@ -937,6 +1140,34 @@ export async function generateQuotationFromProject(formData: FormData): Promise<
     }
   }
 
+  // m134 — the original spec ("cahier des charges") captured at the Service
+  // Request: category + entered specs + the client's free-text demand. Stored
+  // read-only and carried through the whole chain; never auto-parsed into config.
+  let srCatName: string | null = null;
+  if (p.product_category_id) {
+    const { data: srCat } = await supabase
+      .from("product_categories")
+      .select("name")
+      .eq("id", p.product_category_id)
+      .maybeSingle();
+    srCatName = (srCat as any)?.name ?? null;
+  }
+  const srNeed =
+    [
+      srCatName ? `Category: ${srCatName}` : null,
+      p.led_power && `LED ${p.led_power}`,
+      p.solar_panel_size && `Panel ${p.solar_panel_size}`,
+      p.battery_spec && `Battery ${p.battery_spec}`,
+      p.controller && `Controller ${p.controller}`,
+      p.pole_height && `Pole ${p.pole_height}`,
+      p.arm_length && `Arm ${p.arm_length}`,
+      p.iot_required ? "IoT required" : null,
+      p.additional_notes?.trim()
+        ? `Specific request: ${p.additional_notes.trim()}`
+        : null,
+    ]
+      .filter(Boolean)
+      .join("\n") || null;
   const input: SaveDocumentInput = {
     type: "quotation",
     client_id: p.client_id,
@@ -950,6 +1181,9 @@ export async function generateQuotationFromProject(formData: FormData): Promise<
     payment_terms: { deposit_percent: 30, balance_condition: "before_shipment" },
     production_time: null,
     affair_name: p.name,
+    // m124 — generated quotations inherit the request's mandatory affaire.
+    affair_id: p.affair_id ?? null,
+    original_sales_request: srNeed, // m134 — read-only reminder
     include_sales_conditions: false,
     sales_conditions_id: null,
     bank_account_id: null,
@@ -988,7 +1222,10 @@ export async function generateQuotationFromProject(formData: FormData): Promise<
   // show immediately (not a stale render from a previous visit).
   revalidatePath(`/documents/${doc.id}`);
   revalidatePath(`/documents/new`);
-  redirect(`/documents/${doc.id}?flash=${encodeURIComponent("Quotation generated from project")}`);
+  // Land the sales rep straight in the builder (Edit Quotation) so they pick the
+  // exact model + complete the commercial configuration immediately — with the
+  // original sales request visible — instead of having to find the doc manually.
+  redirect(`/documents/new?edit=${doc.id}`);
 }
 
 // ---------------------------- outcome / archive / files ----------------------------
@@ -1011,6 +1248,68 @@ export async function setProjectOutcome(formData: FormData): Promise<void> {
     message: `Project ${outcome}`,
     bestEffort: true,
   });
+  revalidate(id);
+}
+
+/**
+ * CRM step 1 (m100) — create an affair inline from the project form.
+ * Zero-friction adoption: name only, the client is already known. Returns the
+ * new affair so the form can auto-select it. Mirrors affairs/createAffair
+ * (status "lead", owner = creator; affairs RLS gates the insert).
+ */
+export async function createAffairInline(
+  clientId: string,
+  name: string
+): Promise<{ id: string; name: string }> {
+  await requireCapability("project.create");
+  const trimmed = (name ?? "").trim();
+  if (!trimmed) throw new Error("Affair name is required");
+  if (!clientId) throw new Error("Select a client first");
+  const supabase = createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  const { data, error } = await supabase
+    .from("affairs")
+    .insert({
+      name: trimmed,
+      client_id: clientId,
+      owner_id: user?.id ?? null,
+      status: "lead",
+      created_by: user?.id ?? null,
+    })
+    .select("id, name")
+    .single();
+  if (error) throw new Error(error.message);
+  revalidatePath("/affairs");
+  return { id: data.id, name: data.name };
+}
+
+/** CRM step 1 (m100) — link an affair to an existing project (optional field). */
+export async function setProjectAffair(formData: FormData): Promise<void> {
+  await requireCapability("project.create");
+  const id = reqStr(formData, "id");
+  const affairId = reqStr(formData, "affair_id");
+  const supabase = createClient();
+  const { data: project } = await supabase
+    .from("project_requests")
+    .select("client_id")
+    .eq("id", id)
+    .maybeSingle();
+  if (!project) throw new Error("Project not found");
+  const { data: affair } = await supabase
+    .from("affairs")
+    .select("id, client_id")
+    .eq("id", affairId)
+    .maybeSingle();
+  if (!affair || (project.client_id && affair.client_id !== project.client_id)) {
+    throw new Error("The selected affair does not belong to this project's client.");
+  }
+  const { error } = await supabase
+    .from("project_requests")
+    .update({ affair_id: affairId, updated_at: now() })
+    .eq("id", id);
+  if (error) throw new Error(error.message);
   revalidate(id);
 }
 

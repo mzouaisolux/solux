@@ -145,7 +145,16 @@ export default function DocQuickActions({
       <div className="flex items-center gap-2 flex-wrap">
         <button
           type="button"
-          onClick={() => flipStatus("won")}
+          onClick={() => {
+            // Confirm — marking Won records revenue and unlocks Launch Production;
+            // a mis-click here has real commercial consequences.
+            if (
+              window.confirm(
+                "Mark this quotation as WON?\n\nThis records the deal as revenue and unlocks Launch Production."
+              )
+            )
+              flipStatus("won");
+          }}
           disabled={pending}
           className={`${base} bg-solux text-white hover:bg-solux-dark`}
           title="Mark this quotation as won"

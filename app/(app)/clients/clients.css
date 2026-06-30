@@ -374,3 +374,186 @@
     gap: 14px;
   }
 }
+
+/* =====================================================================
+   SOLUX CRM CARDS — clients command center (solux-clients-crm-offline.html)
+   Scoped under .solux-crm. Vars are local so they can't leak into the
+   rest of the app. The global Nav stays; only the page body is skinned.
+   ===================================================================== */
+.solux-crm{
+  --ink:#0F0F0F; --ink-soft:#2A2A2C; --mute:#67646F; --mute-2:#AEAABA; --on-dark:#ECEAF2;
+  --line:#E7E7EA; --line-2:#DCDDE1; --canvas:#EEEEF0; --card:#FFFFFF;
+  --green:#55FF7E; --green-tint:rgba(85,255,126,.14); --green-deep:#0B7A39;
+  --amber:#E8870E; --amber-tint:rgba(232,135,14,.10); --amber-line:rgba(232,135,14,.42); --amber-deep:#9A5A00;
+  --shadow:0 1px 2px rgba(15,15,15,.05),0 1px 0 rgba(15,15,15,.02);
+  --shadow-lift:0 12px 30px -14px rgba(15,15,15,.22);
+  font-family:var(--font-jakarta),'Plus Jakarta Sans',system-ui,sans-serif;
+  background:var(--canvas); color:var(--ink);
+  -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility;
+  min-height:100vh;
+}
+.solux-crm .crm-wrap{max-width:1440px;margin:0 auto;padding:28px 28px 90px;}
+.solux-crm .micro{font-size:11px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:var(--mute);}
+.solux-crm .eyebrow{font-size:11px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:var(--mute);}
+.solux-crm .tnum{font-variant-numeric:tabular-nums;}
+
+/* buttons */
+.solux-crm .btn{font-family:inherit;font-size:13px;font-weight:600;padding:10px 15px;cursor:pointer;border:1px solid var(--line-2);background:#fff;color:var(--ink);display:inline-flex;align-items:center;gap:8px;text-decoration:none;white-space:nowrap;border-radius:0;}
+.solux-crm .btn:hover{border-color:var(--ink);}
+.solux-crm .btn.primary{background:var(--ink);color:#fff;border-color:var(--ink);}
+.solux-crm .btn.primary:hover{background:#000;}
+.solux-crm .btn .plus{color:var(--green);font-weight:700;}
+.solux-crm .btn.sm{padding:7px 11px;font-size:12px;}
+
+/* header */
+.solux-crm .head{display:flex;align-items:flex-start;justify-content:space-between;gap:24px;}
+.solux-crm h1.title{font-size:32px;font-weight:700;letter-spacing:-.02em;margin:6px 0 0;}
+.solux-crm .sub{font-size:13.5px;color:var(--mute);line-height:1.55;max-width:560px;margin-top:10px;}
+.solux-crm .head-actions{display:flex;gap:10px;flex:none;}
+
+/* KPI dashboard */
+.solux-crm .kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-top:24px;}
+@media(max-width:1080px){.solux-crm .kpis{grid-template-columns:repeat(2,1fr);}}
+@media(max-width:560px){.solux-crm .kpis{grid-template-columns:1fr;}}
+.solux-crm .kpi{background:var(--card);border:1px solid var(--line);box-shadow:var(--shadow);padding:18px 20px;position:relative;overflow:hidden;}
+.solux-crm .kpi::before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--line-2);}
+.solux-crm .kpi.accent::before{background:var(--green);}
+.solux-crm .kpi .k{font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--mute);}
+.solux-crm .kpi .v{font-size:30px;font-weight:700;letter-spacing:-.02em;margin-top:8px;line-height:1;font-variant-numeric:tabular-nums;}
+.solux-crm .kpi .v.green{color:var(--green-deep);}
+.solux-crm .kpi .d{font-size:11.5px;color:var(--mute);margin-top:9px;display:flex;align-items:center;gap:7px;}
+.solux-crm .kpi .trend{display:inline-flex;align-items:center;gap:4px;font-weight:700;font-size:11px;padding:1px 7px;background:var(--green-tint);color:var(--green-deep);border:1px solid rgba(85,255,126,.45);}
+.solux-crm .kpi .trend svg{width:10px;height:10px;}
+.solux-crm .spark{display:flex;align-items:flex-end;gap:3px;height:24px;margin-top:12px;}
+.solux-crm .spark i{flex:1;background:var(--line-2);}
+.solux-crm .spark i.hi{background:var(--green);}
+
+/* sticky toolbar: scope + view + sort */
+.solux-crm .toolbar{position:sticky;top:0;z-index:30;background:var(--canvas);padding:18px 0 14px;margin-top:30px;}
+.solux-crm .tb-row{display:flex;align-items:center;gap:14px;flex-wrap:wrap;}
+.solux-crm .seg{display:inline-flex;border:1px solid var(--line-2);background:#fff;}
+.solux-crm .seg a{font-family:inherit;font-size:12.5px;font-weight:600;color:var(--mute);padding:7px 13px;background:none;border:none;cursor:pointer;display:flex;align-items:center;gap:7px;border-right:1px solid var(--line);text-decoration:none;}
+.solux-crm .seg a:last-child{border-right:none;}
+.solux-crm .seg a.on{background:var(--ink);color:#fff;}
+.solux-crm .seg a .c{font-size:10px;font-weight:700;padding:0 5px;background:var(--line);color:var(--mute);}
+.solux-crm .seg a.on .c{background:rgba(255,255,255,.22);color:#fff;}
+.solux-crm .viewas{display:flex;align-items:center;gap:9px;font-size:12.5px;color:var(--mute);}
+.solux-crm .viewas .vl{font-weight:600;color:var(--mute-2);}
+.solux-crm .viewas a{color:var(--mute);text-decoration:none;font-weight:600;}
+.solux-crm .viewas a.on{color:var(--ink);border-bottom:2px solid var(--ink);padding-bottom:2px;}
+.solux-crm .sortby{margin-left:auto;display:flex;align-items:center;gap:9px;font-size:12.5px;color:var(--mute);}
+.solux-crm .sortby select{font-family:inherit;font-size:12.5px;font-weight:600;padding:7px 28px 7px 11px;border:1px solid var(--line-2);background:#fff;color:var(--ink);appearance:none;background-image:url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 12 12'%3e%3cpath stroke='%236b7280' stroke-width='1.5' d='m3 5 3 3 3-3'/%3e%3c/svg%3e");background-repeat:no-repeat;background-position:right 10px center;background-size:.7em;cursor:pointer;border-radius:0;}
+
+.solux-crm .filterbar{display:flex;align-items:center;gap:10px;margin-top:12px;flex-wrap:wrap;}
+.solux-crm .search{flex:1;min-width:260px;position:relative;}
+.solux-crm .search input{width:100%;font-family:inherit;font-size:13.5px;padding:11px 14px 11px 40px;border:1px solid var(--line-2);background:#fff;color:var(--ink);border-radius:0;}
+.solux-crm .search input::placeholder{color:var(--mute-2);}
+.solux-crm .search svg{position:absolute;left:14px;top:50%;transform:translateY(-50%);width:16px;height:16px;color:var(--mute-2);}
+.solux-crm .fdrop{font-family:inherit;font-size:12.5px;font-weight:600;padding:10px 30px 10px 13px;border:1px solid var(--line-2);background:#fff;color:var(--ink-soft);appearance:none;background-image:url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 12 12'%3e%3cpath stroke='%236b7280' stroke-width='1.5' d='m3 5 3 3 3-3'/%3e%3c/svg%3e");background-repeat:no-repeat;background-position:right 11px center;background-size:.7em;cursor:pointer;border-radius:0;}
+
+/* attention strip */
+.solux-crm .attention{display:flex;align-items:center;gap:12px;border:1px solid var(--amber-line);background:var(--amber-tint);padding:12px 16px;margin-top:14px;font-size:13px;color:var(--amber-deep);}
+.solux-crm .attention .ai{width:8px;height:8px;background:var(--amber);flex:none;}
+.solux-crm .attention b{font-weight:700;}
+.solux-crm .attention a{margin-left:auto;color:var(--amber-deep);font-weight:700;text-decoration:none;white-space:nowrap;}
+
+/* CARD GRID */
+.solux-crm .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-top:18px;}
+@media(max-width:1180px){.solux-crm .grid{grid-template-columns:repeat(2,1fr);}}
+@media(max-width:720px){.solux-crm .grid{grid-template-columns:1fr;}}
+
+.solux-crm .ccard{background:var(--card);border:1px solid var(--line);box-shadow:var(--shadow);display:flex;flex-direction:column;transition:box-shadow .14s,border-color .14s,transform .14s;position:relative;border-radius:0;min-width:0;overflow:hidden;}
+.solux-crm .ccard:hover{box-shadow:var(--shadow-lift);border-color:var(--line-2);transform:translateY(-2px);}
+.solux-crm .ccard .top-accent{height:3px;background:var(--line);}
+.solux-crm .ccard.health-strong .top-accent{background:var(--green);}
+.solux-crm .ccard.health-watch .top-accent{background:var(--amber);}
+
+/* card header */
+.solux-crm .cc-head{display:flex;align-items:flex-start;gap:13px;padding:18px 20px 14px;}
+.solux-crm .cc-flag{width:42px;height:42px;flex:none;background:var(--ink);color:#fff;display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:700;letter-spacing:.02em;}
+.solux-crm .cc-id{min-width:0;flex:1;}
+.solux-crm .cc-name-row{display:flex;align-items:center;gap:9px;min-width:0;}
+.solux-crm .cc-name{font-size:18px;font-weight:700;letter-spacing:-.01em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;}
+.solux-crm .cc-code{font-size:10px;font-weight:700;letter-spacing:.05em;background:var(--ink);color:#fff;padding:2px 7px;flex:none;}
+.solux-crm .cc-loc{font-size:12.5px;color:var(--mute);margin-top:5px;display:flex;align-items:center;gap:6px;min-width:0;}
+.solux-crm .cc-loc .ctry{font-weight:600;color:var(--ink-soft);flex:none;}
+.solux-crm .cc-loc .cc-aff{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.solux-crm .health-badge{display:inline-flex;align-items:center;gap:6px;font-size:10.5px;font-weight:700;letter-spacing:.03em;text-transform:uppercase;padding:3px 9px;flex:none;align-self:flex-start;}
+.solux-crm .health-badge .hd{width:6px;height:6px;border-radius:50%;}
+.solux-crm .health-badge.strong{background:var(--green-tint);border:1px solid rgba(85,255,126,.5);color:var(--green-deep);}
+.solux-crm .health-badge.strong .hd{background:var(--green-deep);}
+.solux-crm .health-badge.watch{background:var(--amber-tint);border:1px solid var(--amber-line);color:var(--amber-deep);}
+.solux-crm .health-badge.watch .hd{background:var(--amber);}
+.solux-crm .health-badge.steady{background:#F2F2F4;border:1px solid var(--line-2);color:var(--mute);}
+.solux-crm .health-badge.steady .hd{background:var(--mute-2);}
+
+/* portfolio value block */
+.solux-crm .cc-value{padding:2px 20px 16px;}
+.solux-crm .cc-value .pv-label{font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--mute);}
+.solux-crm .cc-value .pv-row{display:flex;align-items:baseline;gap:10px;margin-top:5px;}
+.solux-crm .cc-value .pv{font-size:25px;font-weight:700;letter-spacing:-.02em;color:var(--green-deep);font-variant-numeric:tabular-nums;line-height:1;}
+.solux-crm .cc-value .pv-trend{font-size:11px;font-weight:700;display:inline-flex;align-items:center;gap:3px;color:var(--green-deep);}
+.solux-crm .cc-value .pv-trend.down{color:var(--mute);}
+.solux-crm .cc-value .pv-trend svg{width:11px;height:11px;}
+.solux-crm .spark-sm{display:flex;align-items:flex-end;gap:2px;height:18px;margin-top:10px;}
+.solux-crm .spark-sm i{flex:1;background:var(--line-2);min-height:2px;}
+.solux-crm .spark-sm i.hi{background:var(--green);}
+
+/* stat row */
+.solux-crm .cc-stats{display:grid;grid-template-columns:1fr 1fr;border-top:1px solid var(--line);}
+.solux-crm .cc-stat{padding:13px 20px;}
+.solux-crm .cc-stat:first-child{border-right:1px solid var(--line);}
+.solux-crm .cc-stat .s-v{font-size:17px;font-weight:700;font-variant-numeric:tabular-nums;display:flex;align-items:center;gap:7px;}
+.solux-crm .cc-stat .s-v .won{color:var(--green-deep);}
+.solux-crm .cc-stat .s-k{font-size:11px;color:var(--mute);margin-top:3px;}
+
+/* pipeline mini bar */
+.solux-crm .cc-pipe{padding:13px 20px;border-top:1px solid var(--line);}
+.solux-crm .cc-pipe .pl{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:10.5px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--mute);margin-bottom:8px;}
+.solux-crm .cc-pipe .pl span{white-space:nowrap;}
+.solux-crm .pipe-bar{display:flex;height:7px;gap:2px;}
+.solux-crm .pipe-bar i{background:var(--line-2);}
+.solux-crm .pipe-bar i.quote{background:var(--mute-2);}
+.solux-crm .pipe-bar i.prod{background:var(--ink);}
+.solux-crm .pipe-bar i.won{background:var(--green);}
+.solux-crm .cc-pipe .pk{display:flex;gap:14px;margin-top:9px;font-size:11px;color:var(--mute);flex-wrap:wrap;}
+.solux-crm .cc-pipe .pk span{display:inline-flex;align-items:center;gap:5px;}
+.solux-crm .cc-pipe .pk .dot{width:7px;height:7px;border-radius:50%;}
+.solux-crm .cc-pipe .pk .dot.quote{background:var(--mute-2);}
+.solux-crm .cc-pipe .pk .dot.prod{background:var(--ink);}
+.solux-crm .cc-pipe .pk .dot.won{background:var(--green);}
+
+/* alert chips */
+.solux-crm .cc-alerts{padding:0 20px 14px;display:flex;gap:8px;flex-wrap:wrap;}
+.solux-crm .achip{display:inline-flex;align-items:center;gap:6px;font-size:11px;font-weight:600;padding:4px 9px;border:1px solid var(--line-2);background:#fff;color:var(--ink-soft);}
+.solux-crm .achip.amber{border-color:var(--amber-line);background:var(--amber-tint);color:var(--amber-deep);}
+.solux-crm .achip .n{font-weight:700;font-variant-numeric:tabular-nums;}
+
+/* last activity */
+.solux-crm .cc-last{padding:0 20px 16px;font-size:11.5px;color:var(--mute-2);display:flex;align-items:center;gap:7px;}
+.solux-crm .cc-last .ld{width:6px;height:6px;border-radius:50%;background:var(--green);flex:none;}
+.solux-crm .cc-last .ld.cold{background:var(--mute-2);}
+
+/* footer: contact + quick actions */
+.solux-crm .cc-foot{margin-top:auto;border-top:1px solid var(--line);padding:14px 20px;display:flex;align-items:center;gap:12px;}
+.solux-crm .cc-contact{display:flex;align-items:center;gap:10px;min-width:0;}
+.solux-crm .cc-avatar{width:30px;height:30px;border-radius:50%;background:var(--canvas);border:1px solid var(--line-2);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:var(--ink-soft);flex:none;}
+.solux-crm .cc-contact .ci{min-width:0;}
+.solux-crm .cc-contact .cn{font-size:12.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.solux-crm .cc-contact .cr{font-size:11px;color:var(--mute);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.solux-crm .cc-foot .acts{margin-left:auto;display:flex;gap:7px;flex:none;}
+.solux-crm .icon-btn{width:34px;height:34px;border:1px solid var(--line-2);background:#fff;display:flex;align-items:center;justify-content:center;cursor:pointer;color:var(--mute);text-decoration:none;}
+.solux-crm .icon-btn:hover{border-color:var(--ink);color:var(--ink);}
+.solux-crm .icon-btn svg{width:15px;height:15px;}
+
+/* full CTA */
+.solux-crm .cc-cta{display:flex;align-items:center;justify-content:center;gap:8px;background:var(--ink);color:#fff;font-size:13px;font-weight:600;padding:13px;text-decoration:none;border-top:1px solid var(--ink);}
+.solux-crm .cc-cta:hover{background:#000;}
+.solux-crm .cc-cta .ar{color:var(--green);font-weight:700;}
+
+/* new client card */
+.solux-crm .ccard.new-card{border:1px dashed var(--line-2);background:transparent;box-shadow:none;align-items:center;justify-content:center;text-align:center;min-height:340px;cursor:pointer;color:var(--mute);padding:24px;text-decoration:none;}
+.solux-crm .ccard.new-card:hover{border-color:var(--ink);color:var(--ink);transform:none;box-shadow:none;}
+.solux-crm .new-card .plus-circle{width:46px;height:46px;border:1.5px solid currentColor;display:flex;align-items:center;justify-content:center;font-size:22px;font-weight:300;margin-bottom:14px;}
+.solux-crm .new-card .nt{font-size:14px;font-weight:600;}
+.solux-crm .new-card .ns{font-size:12px;color:var(--mute-2);margin-top:6px;max-width:200px;line-height:1.45;}

@@ -65,9 +65,9 @@ export default async function NewDocumentPage({
     // Full select first; fall back to a legacy shape if a newer column
     // (m037 sales terms / m056 affair) is missing in this env.
     const fullCols =
-      "id, number, type, client_id, incoterm, currency, freight_cost, freight_type, purchase_order_number, affair_name, commission_enabled, commission_percentage, commission_description, show_commission_in_pdf, port_of_loading, port_of_destination, payment_mode, payment_terms, production_mode, production_days, production_date, include_sales_conditions, sales_conditions_id, bank_account_id, warranty_years, offer_validity_products_days, offer_validity_transport_days, version, root_document_id, created_by, sales_owner_id";
+      "id, number, type, client_id, incoterm, currency, freight_cost, freight_type, purchase_order_number, affair_name, commission_enabled, commission_percentage, commission_description, show_commission_in_pdf, port_of_loading, port_of_destination, payment_mode, payment_terms, production_mode, production_days, production_date, include_sales_conditions, sales_conditions_id, bank_account_id, warranty_years, offer_validity_products_days, offer_validity_transport_days, version, root_document_id, created_by, sales_owner_id, original_sales_request";
     const legacyCols =
-      "id, number, type, client_id, incoterm, currency, freight_cost, freight_type, purchase_order_number, commission_enabled, commission_percentage, commission_description, show_commission_in_pdf, port_of_loading, port_of_destination, payment_mode, payment_terms, production_mode, production_days, production_date, include_sales_conditions, sales_conditions_id, bank_account_id, created_by";
+      "id, number, type, client_id, incoterm, currency, freight_cost, freight_type, purchase_order_number, commission_enabled, commission_percentage, commission_description, show_commission_in_pdf, port_of_loading, port_of_destination, payment_mode, payment_terms, production_mode, production_days, production_date, include_sales_conditions, sales_conditions_id, bank_account_id, created_by, original_sales_request";
     let srcRes = await supabase
       .from("documents")
       .select(fullCols)
@@ -87,7 +87,7 @@ export default async function NewDocumentPage({
         supabase
           .from("document_lines")
           .select(
-            "product_id, quantity, selected_options, unit_price, total_price, pricing_mode, pricing_tier, original_unit_price, discount_type, discount_value, client_product_name, config_values"
+            "product_id, category_id, quantity, selected_options, unit_price, total_price, pricing_mode, pricing_tier, original_unit_price, discount_type, discount_value, client_product_name, config_values"
           )
           .eq("document_id", sourceId),
         // Resilient to a missing wooden_box_cost column (migration 007).
@@ -111,6 +111,7 @@ export default async function NewDocumentPage({
         source_version: src.version ?? 1,
         lines: (srcLines ?? []).map((l: any) => ({
           product_id: l.product_id,
+          category_id: l.category_id ?? null, // m133 — preserve family across revise/edit
           quantity: Number(l.quantity ?? 1),
           selected_options: l.selected_options ?? {},
           unit_price: Number(l.unit_price ?? 0),

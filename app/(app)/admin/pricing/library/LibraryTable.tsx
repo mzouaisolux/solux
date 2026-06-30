@@ -27,17 +27,7 @@ export type LibraryRow = {
 };
 
 function StatusBadge({ status }: { status: PriceListStatus }) {
-  const cls =
-    status === "published"
-      ? "bg-emerald-100 text-emerald-800"
-      : status === "archived"
-        ? "bg-neutral-200 text-neutral-500"
-        : "bg-amber-100 text-amber-800";
-  return (
-    <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase ${cls}`}>
-      {status}
-    </span>
-  );
+  return <span className={`px-sbadge ${status}`}>{status}</span>;
 }
 
 /**
@@ -88,31 +78,21 @@ export default function LibraryTable({
   }
 
   const none = selected.size === 0;
-  // Permanent action toolbar: always visible so the page reads as a management
-  // workspace, not a passive list. Actions are disabled until ≥1 row is picked.
-  const actionBtn =
-    "rounded px-2 py-1 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:text-neutral-300 disabled:hover:bg-transparent";
 
   return (
     <div className="space-y-2">
       {/* PERMANENT ACTION TOOLBAR */}
-      <div className="flex flex-wrap items-center gap-1.5 rounded-md border border-neutral-200 bg-white px-3 py-2 text-sm">
-        <span className="text-[10px] font-semibold uppercase tracking-widerx text-neutral-500">
-          Actions
-        </span>
-        <span
-          className={`ml-1 rounded-full px-2 py-0.5 text-[11px] ${
-            none ? "bg-neutral-100 text-neutral-400" : "bg-sky-100 text-sky-800 font-medium"
-          }`}
-        >
+      <div className="card px-toolbar">
+        <span className="px-tllabel">Actions</span>
+        <span className={`px-selcount ${none ? "" : "some"}`}>
           {none ? "none selected" : `${selected.size} selected`}
         </span>
-        <span className="mx-1 text-neutral-200">|</span>
+        <span className="px-sep">|</span>
 
         <button
           onClick={() => runBulk(() => bulkPublishPriceLists(ids))}
           disabled={pending || none}
-          className={`${actionBtn} text-emerald-700 hover:bg-emerald-50`}
+          className="px-tact pub"
         >
           Publish
         </button>
@@ -123,7 +103,7 @@ export default function LibraryTable({
             value={assignSeller}
             onChange={(e) => setAssignSeller(e.target.value)}
             disabled={none}
-            className="rounded border border-neutral-300 px-1.5 py-1 text-xs disabled:bg-neutral-50 disabled:text-neutral-300"
+            className="mini"
           >
             <option value="">Seller…</option>
             {sellers.map((s) => (
@@ -138,24 +118,16 @@ export default function LibraryTable({
               if (s) runBulk(() => bulkAssignSeller(ids, s.id, s.name));
             }}
             disabled={pending || none || !assignSeller}
-            className={`${actionBtn} text-neutral-700 hover:bg-neutral-100`}
+            className="px-tact neutral"
           >
             Assign
           </button>
         </span>
 
-        <button
-          onClick={() => runBulk(() => bulkDuplicatePriceLists(ids))}
-          disabled={pending || none}
-          className={`${actionBtn} text-neutral-700 hover:bg-neutral-100`}
-        >
+        <button onClick={() => runBulk(() => bulkDuplicatePriceLists(ids))} disabled={pending || none} className="px-tact neutral">
           Duplicate
         </button>
-        <button
-          onClick={() => runBulk(() => bulkArchivePriceLists(ids))}
-          disabled={pending || none}
-          className={`${actionBtn} text-neutral-700 hover:bg-neutral-100`}
-        >
+        <button onClick={() => runBulk(() => bulkArchivePriceLists(ids))} disabled={pending || none} className="px-tact neutral">
           Archive
         </button>
         <button
@@ -164,103 +136,78 @@ export default function LibraryTable({
               runBulk(() => bulkDeletePriceLists(ids));
           }}
           disabled={pending || none}
-          className={`${actionBtn} text-rose-600 hover:bg-rose-50`}
+          className="px-tact del"
         >
           Delete
         </button>
 
         {none ? (
-          <span className="ml-auto text-xs text-neutral-400">
+          <span className="px-spacer" style={{ cursor: "default", textDecoration: "none" }}>
             Select one or more price lists to enable these actions.
           </span>
         ) : (
-          <button
-            onClick={() => setSelected(new Set())}
-            disabled={pending}
-            className="ml-auto text-xs text-neutral-400 hover:text-neutral-700"
-          >
+          <button onClick={() => setSelected(new Set())} disabled={pending} className="px-spacer">
             Clear selection
           </button>
         )}
-        {err && <span className="w-full text-rose-700">{err}</span>}
+        {err && <span style={{ width: "100%", color: "var(--sx-amber-deep)" }}>{err}</span>}
       </div>
 
-      <div className="panel overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="bg-solux-accent text-left">
-              <th className="px-3 py-2 w-8">
-                <input
-                  type="checkbox"
-                  checked={allSelected}
-                  onChange={toggleAll}
-                  aria-label="Select all"
-                  className="h-3.5 w-3.5"
-                />
-              </th>
-              <th className="px-3 py-2 text-xs font-semibold text-neutral-700">Price list</th>
-              <th className="px-3 py-2 text-xs font-semibold text-neutral-700">Category</th>
-              <th className="px-3 py-2 text-xs font-semibold text-neutral-700">Status</th>
-              <th className="px-3 py-2 text-xs font-semibold text-neutral-700 text-right">T1/T2/T3</th>
-              <th className="px-3 py-2 text-xs font-semibold text-neutral-700">Effective</th>
-              <th className="px-3 py-2 text-xs font-semibold text-neutral-700">Created</th>
-              <th className="px-3 py-2 text-xs font-semibold text-neutral-700">Created by</th>
-              <th className="px-3 py-2 text-xs font-semibold text-neutral-700">Assigned to</th>
-              <th className="px-3 py-2 text-xs font-semibold text-neutral-700 text-right">Products</th>
-              <th className="px-3 py-2 text-xs font-semibold text-neutral-700">Updated</th>
-              <th className="px-3 py-2"></th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.length === 0 ? (
+      <div className="card" style={{ marginTop: 14, padding: 0 }}>
+        <div style={{ overflowX: "auto" }}>
+          <table className="px-grid">
+            <thead>
               <tr>
-                <td colSpan={12} className="px-3 py-6 text-center text-neutral-500">
-                  No price lists match the filters.
-                </td>
+                <th style={{ width: 34 }}>
+                  <input type="checkbox" checked={allSelected} onChange={toggleAll} aria-label="Select all" />
+                </th>
+                <th>Price list</th>
+                <th>Category</th>
+                <th>Status</th>
+                <th className="num">T1/T2/T3</th>
+                <th>Effective</th>
+                <th>Created</th>
+                <th>Created by</th>
+                <th>Assigned to</th>
+                <th className="num">Products</th>
+                <th>Updated</th>
+                <th></th>
               </tr>
-            ) : (
-              rows.map((l) => (
-                <tr
-                  key={l.id}
-                  className={`border-t border-neutral-100 hover:bg-neutral-50/60 ${
-                    selected.has(l.id) ? "bg-sky-50/60" : ""
-                  }`}
-                >
-                  <td className="px-3 py-2">
-                    <input
-                      type="checkbox"
-                      checked={selected.has(l.id)}
-                      onChange={() => toggle(l.id)}
-                      aria-label={`Select ${l.name}`}
-                      className="h-3.5 w-3.5"
-                    />
-                  </td>
-                  <td className="px-3 py-2 font-medium">
-                    <Link href={`/admin/pricing/${l.id}`} className="hover:underline">
-                      {l.name}
-                    </Link>
-                  </td>
-                  <td className="px-3 py-2 text-neutral-600">{l.categoryName ?? "All"}</td>
-                  <td className="px-3 py-2">
-                    <StatusBadge status={l.status} />
-                  </td>
-                  <td className="px-3 py-2 text-right tabular-nums text-neutral-600">{l.margins}</td>
-                  <td className="px-3 py-2 text-xs text-neutral-500">{l.effectiveDate ?? "—"}</td>
-                  <td className="px-3 py-2 text-xs text-neutral-500">{l.createdDate ?? "—"}</td>
-                  <td className="px-3 py-2 text-xs text-neutral-500">{l.createdBy}</td>
-                  <td className="px-3 py-2 text-xs text-neutral-500">{l.assignedTo}</td>
-                  <td className="px-3 py-2 text-right tabular-nums text-neutral-600">{l.productCount}</td>
-                  <td className="px-3 py-2 text-xs text-neutral-500">{l.lastUpdated ?? "—"}</td>
-                  <td className="px-3 py-2 text-right whitespace-nowrap">
-                    <Link href={`/admin/pricing/${l.id}`} className="row-link text-xs">
-                      Open →
-                    </Link>
+            </thead>
+            <tbody>
+              {rows.length === 0 ? (
+                <tr>
+                  <td colSpan={12} style={{ textAlign: "center", padding: "28px 12px", color: "var(--sx-mute)" }}>
+                    No price lists match the filters.
                   </td>
                 </tr>
-              ))
-            )}
-          </tbody>
-        </table>
+              ) : (
+                rows.map((l) => (
+                  <tr key={l.id} className={selected.has(l.id) ? "sel" : ""}>
+                    <td>
+                      <input type="checkbox" checked={selected.has(l.id)} onChange={() => toggle(l.id)} aria-label={`Select ${l.name}`} />
+                    </td>
+                    <td>
+                      <Link href={`/admin/pricing/${l.id}`} className="px-namelink">{l.name}</Link>
+                    </td>
+                    <td className="px-sub">{l.categoryName ?? "All"}</td>
+                    <td><StatusBadge status={l.status} /></td>
+                    <td className="num px-sub">{l.margins}</td>
+                    <td className="px-sub">{l.effectiveDate ?? "—"}</td>
+                    <td className="px-sub">{l.createdDate ?? "—"}</td>
+                    <td className="px-sub">{l.createdBy}</td>
+                    <td className="px-sub">{l.assignedTo}</td>
+                    <td className="num px-sub">{l.productCount}</td>
+                    <td className="px-sub">{l.lastUpdated ?? "—"}</td>
+                    <td className="num">
+                      <Link href={`/admin/pricing/${l.id}`} className="px-rowlink">Open →</Link>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
   );

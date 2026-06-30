@@ -38,16 +38,11 @@ function severityFor(count: number, criticalAt = 1): SeverityTier {
   return "warn";
 }
 
-const TIER_CLASSES: Record<SeverityTier, string> = {
-  ok: "border-emerald-200 bg-emerald-50/40",
-  warn: "border-amber-300 bg-amber-50/60",
-  crit: "border-rose-300 bg-rose-50/60",
-};
-
-const TIER_DOT: Record<SeverityTier, string> = {
-  ok: "bg-emerald-500",
-  warn: "bg-amber-500",
-  crit: "bg-rose-500",
+/** Severity → mockup health-card class (ok = green left-bar, warn/bad = amber). */
+const SEV_CLASS: Record<SeverityTier, string> = {
+  ok: "ok",
+  warn: "warn",
+  crit: "bad",
 };
 
 export function HealthSection({
@@ -59,16 +54,16 @@ export function HealthSection({
 }) {
   if (error || !payload) {
     return (
-      <section className="panel p-5 space-y-3">
-        <div className="eyebrow">Health · cross-table sanity</div>
-        <div className="rounded-md border border-amber-300 bg-amber-50/60 px-3 py-3 text-xs text-amber-900">
-          <div className="font-semibold mb-1">Health data unavailable</div>
-          <p className="text-amber-800">
-            {error ??
-              "RPC admin_diagnostics_health() returned no data. Apply migration 034 in Supabase and reload."}
-          </p>
+      <>
+        <div className="sx-micro" style={{ margin: "18px 0 8px" }}>
+          Health · cross-table sanity
         </div>
-      </section>
+        <div className="ad-callout warn">
+          <b>Health data unavailable</b> ·{" "}
+          {error ??
+            "RPC admin_diagnostics_health() returned no data. Apply migration 034 in Supabase and reload."}
+        </div>
+      </>
     );
   }
 
@@ -152,69 +147,33 @@ export function HealthSection({
   );
 
   return (
-    <section className="panel p-5 space-y-4">
-      <div className="flex items-baseline justify-between gap-3 flex-wrap">
-        <div>
-          <div className="eyebrow">Health · cross-table sanity</div>
-          <h2 className="text-base font-semibold text-neutral-900 mt-0.5">
-            Drift, orphans, late deliveries
-          </h2>
-        </div>
-        <div className="text-[11px] text-neutral-500 flex items-center gap-2">
-          <span
-            className={`inline-block w-2 h-2 rounded-full ${
-              totalCritical === 0 ? "bg-emerald-500" : "bg-rose-500"
-            }`}
-            aria-hidden
-          />
+    <>
+      <div
+        className="sx-micro"
+        style={{ margin: "18px 0 8px", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}
+      >
+        Health · cross-table sanity
+        <span style={{ fontWeight: 600, textTransform: "none", letterSpacing: 0, color: "var(--sx-mute-2)" }}>
           {totalCritical === 0
-            ? "All clear · nothing requires attention"
-            : `${totalCritical} item${totalCritical === 1 ? "" : "s"} to look at`}
-        </div>
+            ? "· all clear"
+            : `· ${totalCritical} item${totalCritical === 1 ? "" : "s"} to look at`}
+        </span>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+      <div className="ad-health-grid">
         {cards.map((c) => (
-          <article
-            key={c.title}
-            className={`rounded-lg border p-4 space-y-2 ${TIER_CLASSES[c.tier]}`}
-          >
-            <header className="flex items-start gap-2">
-              <span
-                className={`inline-block w-2 h-2 rounded-full mt-1.5 ${TIER_DOT[c.tier]}`}
-                aria-hidden
-              />
-              <div className="flex-1 min-w-0">
-                <h3 className="text-sm font-semibold text-neutral-900 leading-snug">
-                  {c.title}
-                </h3>
-                <p className="text-[11px] text-neutral-600 mt-0.5">{c.blurb}</p>
-              </div>
-              <span
-                className={`tabular-nums text-lg font-bold ${
-                  c.tier === "ok"
-                    ? "text-emerald-700"
-                    : c.tier === "warn"
-                      ? "text-amber-700"
-                      : "text-rose-700"
-                }`}
-              >
-                {c.section.count}
-              </span>
-            </header>
-
+          <div key={c.title} className={`ad-health ${SEV_CLASS[c.tier]}`}>
+            <div className="hn">{c.section.count}</div>
+            <div className="ht">{c.title}</div>
             {c.section.samples.length > 0 && (
-              <ul className="space-y-1 mt-1 pl-4">
-                {c.section.samples.slice(0, 5).map((s) => {
+              <ul style={{ listStyle: "none", display: "flex", flexDirection: "column", gap: 2, margin: 0 }}>
+                {c.section.samples.slice(0, 4).map((s) => {
                   const label = c.formatSample(s);
                   const href = c.linkFor?.(s) ?? null;
                   return (
-                    <li key={s.id} className="text-[11px] text-neutral-700">
+                    <li key={s.id} style={{ fontSize: 11, color: "var(--sx-mute)" }}>
                       {href ? (
-                        <Link
-                          href={href}
-                          className="hover:underline hover:text-neutral-900"
-                        >
+                        <Link href={href} className="sx-link" style={{ fontWeight: 500 }}>
                           {label}
                         </Link>
                       ) : (
@@ -223,33 +182,21 @@ export function HealthSection({
                     </li>
                   );
                 })}
-                {c.section.count > 5 && (
-                  <li className="text-[10px] text-neutral-500 italic">
-                    + {c.section.count - 5} more…
+                {c.section.count > 4 && (
+                  <li style={{ fontSize: 10, color: "var(--sx-mute-2)", fontStyle: "italic" }}>
+                    + {c.section.count - 4} more…
                   </li>
                 )}
               </ul>
             )}
-
             {c.deepLink && c.section.count > 0 && (
-              <div className="pt-1">
-                <Link
-                  href={c.deepLink.href}
-                  className="text-[11px] font-medium text-neutral-700 hover:text-neutral-900 hover:underline"
-                >
-                  {c.deepLink.label}
-                </Link>
-              </div>
+              <Link href={c.deepLink.href} className="ha">
+                {c.deepLink.label}
+              </Link>
             )}
-          </article>
+          </div>
         ))}
       </div>
-
-      <p className="text-[10px] text-neutral-400 italic">
-        Counts and samples are read via SECURITY DEFINER RPC — they
-        reflect company-wide truth regardless of the viewer&apos;s RLS
-        scope. Samples capped at 10 per category for performance.
-      </p>
-    </section>
+    </>
   );
 }

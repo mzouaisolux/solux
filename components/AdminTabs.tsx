@@ -18,21 +18,13 @@ export type AdminTab = { href: string; label: string };
 export default function AdminTabs({ tabs }: { tabs: AdminTab[] }) {
   const pathname = usePathname() ?? "";
   return (
-    <div className="border-b border-neutral-200 bg-white">
-      <div className="mx-auto max-w-6xl px-6">
-        <nav className="flex gap-6 h-11 items-end">
+    <div className="solux-pro">
+      <div className="ad-tabs-wrap">
+        <nav className="ad-tabs">
           {tabs.map((t) => {
             const active = pathname === t.href || pathname.startsWith(t.href + "/");
             return (
-              <Link
-                key={t.href}
-                href={t.href}
-                className={`pb-2 text-[13px] font-medium border-b-2 transition-colors ${
-                  active
-                    ? "border-neutral-900 text-neutral-900"
-                    : "border-transparent text-neutral-500 hover:text-neutral-900"
-                }`}
-              >
+              <Link key={t.href} href={t.href} className={`ad-tab${active ? " active" : ""}`}>
                 {t.label}
               </Link>
             );

@@ -1,7 +1,7 @@
 "use server";
 
 import { createClient } from "@/lib/supabase/server";
-import { requireAdmin } from "@/lib/auth";
+import { requireCapabilityOrAdmin } from "@/lib/permissions";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import type { Currency } from "@/lib/types";
@@ -31,7 +31,7 @@ async function clearDefaultForCurrency(
 }
 
 export async function createBankAccount(formData: FormData) {
-  await requireAdmin();
+  await requireCapabilityOrAdmin("admin.manage_banks");
   const supabase = createClient();
 
   const account_name = str(formData, "account_name");
@@ -70,7 +70,7 @@ export async function createBankAccount(formData: FormData) {
 }
 
 export async function updateBankAccount(formData: FormData) {
-  await requireAdmin();
+  await requireCapabilityOrAdmin("admin.manage_banks");
   const id = String(formData.get("id"));
   if (!id) throw new Error("Missing id");
 
@@ -114,7 +114,7 @@ export async function updateBankAccount(formData: FormData) {
 }
 
 export async function deleteBankAccount(formData: FormData) {
-  await requireAdmin();
+  await requireCapabilityOrAdmin("admin.manage_banks");
   const id = String(formData.get("id"));
   if (!id) throw new Error("Missing id");
 
@@ -126,7 +126,7 @@ export async function deleteBankAccount(formData: FormData) {
 }
 
 export async function setDefaultBankAccount(formData: FormData) {
-  await requireAdmin();
+  await requireCapabilityOrAdmin("admin.manage_banks");
   const id = String(formData.get("id"));
   if (!id) throw new Error("Missing id");
 

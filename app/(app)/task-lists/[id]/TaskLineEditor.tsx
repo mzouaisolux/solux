@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition, type ReactNode } from "react";
 import Link from "next/link";
 import {
   CUSTOM_OPTION_SENTINEL,
@@ -28,6 +28,7 @@ import {
   setClientExtraOverride,
 } from "./actions";
 import { useDirty } from "./DirtyContext";
+import { pushToast } from "@/components/feedback/toast-store";
 
 /**
  * Resolves what a raw stored value should be displayed as in the live
@@ -91,13 +92,125 @@ function buildSummary(
   return rows;
 }
 
+/**
+ * Factory-instruction save button. Three layers of confirmation so the user is
+ * CERTAIN the save reached the server (not just "I clicked something"):
+ *   1. idle → spinner "Saving…" (disabled, blocks double-clicks)
+ *           → green "✓ Saved" on the button (held ~2.4 s, pop animation)
+ *           → back to the normal label.
+ *   2. a green success TOAST ("✓ Saved to this order / for this client").
+ *   3. a PERSISTENT green badge on the row ("✓ Saved … · HH:MM") that stays
+ *      until the field is edited again (see savedRows).
+ * On failure: the button restores, an inline error shows, AND a red error toast
+ * fires — so a failed save can never look like a success. Module-level so its
+ * state survives parent re-renders.
+ */
+function SaveButton({
+  onSave,
+  children,
+  className = "btn sm",
+  title,
+  disabled = false,
+  successMessage,
+}: {
+  onSave: () => Promise<void>;
+  children: ReactNode;
+  className?: string;
+  title?: string;
+  disabled?: boolean;
+  /** Shown in the green success toast (e.g. "✓ Saved to this order"). */
+  successMessage?: string;
+}) {
+  const [status, setStatus] = useState<"idle" | "saving" | "saved">("idle");
+  const [err, setErr] = useState<string | null>(null);
+  async function handle() {
+    if (status !== "idle" || disabled) return; // block double-clicks + empty
+    setErr(null);
+    setStatus("saving");
+    try {
+      await onSave();
+      setStatus("saved");
+      pushToast(successMessage ?? "Saved", "success");
+      setTimeout(() => setStatus("idle"), 2400);
+    } catch (e: any) {
+      const msg = e?.message ?? "Save failed — try again.";
+      setErr(msg);
+      pushToast(msg, "error");
+      setStatus("idle");
+    }
+  }
+  return (
+    <span className="fi-savewrap">
+      <button
+        type="button"
+        onClick={handle}
+        disabled={status !== "idle" || disabled}
+        aria-busy={status === "saving"}
+        className={`${className} fi-savebtn fi-st-${status}`}
+        title={title}
+      >
+        {status === "saving" ? (
+          <>
+            <span className="fi-spin" aria-hidden /> Saving…
+          </>
+        ) : status === "saved" ? (
+          <>
+            <span className="fi-tick" aria-hidden>
+              ✓
+            </span>{" "}
+            Saved
+          </>
+        ) : (
+          children
+        )}
+      </button>
+      {err && (
+        <span className="fi-saveerr" role="alert">
+          {err}
+        </span>
+      )}
+    </span>
+  );
+}
+
+/**
+ * Persistent confirmation that a row's value is saved — stays visible (with the
+ * exact save time) until the field is edited again, so the user can glance back
+ * and be sure the value was committed. Complements the transient button ✓/toast.
+ */
+function SavedBadge({
+  saved,
+}: {
+  saved: { mode: "order" | "client"; at: number };
+}) {
+  const time = new Date(saved.at).toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+  return (
+    <span className="fi-saved" role="status">
+      <span className="fi-saved-ck" aria-hidden>
+        ✓
+      </span>
+      Saved {saved.mode === "client" ? "for this client" : "to this order"}
+      <span className="fi-saved-at"> · {time}</span>
+    </span>
+  );
+}
+
 export default function TaskLineEditor({
   lineId,
   taskListId,
   clientId,
   productId,
   categoryId,
+  isManual,
   productName,
+  initialName,
+  initialSpecs,
+  salesSpec,
+  unitPrice,
+  currency,
   initialQty,
   initialConfig,
   initialTechnical,
@@ -119,7 +232,25 @@ export default function TaskLineEditor({
   productId: string;
   /** The line's product category — scopes the option lookup to this family. */
   categoryId: string | null;
+  /**
+   * m135 — manual item (pole/mast/non-catalog): no Product reference. The name
+   * + specifications are editable here and the unit price is a read-only
+   * reference copied from the quotation. Catalog lines render unchanged.
+   */
+  isManual: boolean;
   productName: string;
+  /** Manual items only — the editable item name/description (→ product_name). */
+  initialName: string;
+  /** Manual items only — free-text specifications (→ manual_specs). */
+  initialSpecs: string | null;
+  /** BUG-6 — the captured Service-Request spec ("cahier des charges"), shown
+   *  inline above the catalog config so whoever fills it sees exactly what
+   *  sales specified, right next to the fields (not just in the page header). */
+  salesSpec?: string | null;
+  /** Manual items only — read-only reference unit price (quoted), or null. */
+  unitPrice: number | null;
+  /** Currency code for the reference price display (from the linked quote). */
+  currency: string | null;
   initialQty: number;
   initialConfig: Record<string, string>;
   initialTechnical: Record<string, string>;
@@ -159,6 +290,10 @@ export default function TaskLineEditor({
     Record<string, string>
   >(initialFactoryOverrides ?? {});
   const [notes, setNotes] = useState(initialNotes ?? "");
+  // m135 — manual item: editable name + free-text specifications. Unused for
+  // catalog lines (isManual === false), where the name is the static label.
+  const [name, setName] = useState(initialName ?? "");
+  const [specs, setSpecs] = useState(initialSpecs ?? "");
   // CLIENT layer (field-level deltas) — kept as local optimistic state so a
   // per-field "Save / Remove for client" updates the badges immediately.
   // Seeded from the server props; the server persists each delta.
@@ -182,7 +317,7 @@ export default function TaskLineEditor({
   // Sales rows key on field_name; extras key on `extra:${key}`. Cleared when
   // the row is edited again so the chip never lies about unsaved changes.
   const [savedRows, setSavedRows] = useState<
-    Record<string, "order" | "client">
+    Record<string, { mode: "order" | "client"; at: number }>
   >({});
   const [pendingSales, startSales] = useTransition();
   const [pendingTech, startTech] = useTransition();
@@ -206,6 +341,13 @@ export default function TaskLineEditor({
       fd.set("quantity", String(qty));
       fd.set("config_values", JSON.stringify(config));
       if (notes) fd.set("internal_notes", notes);
+      if (isManual) {
+        // Manual item: persist the editable name + specs (product_name +
+        // manual_specs). unit_price stays server-side read-only.
+        fd.set("is_manual", "1");
+        fd.set("product_name", name);
+        fd.set("manual_specs", specs);
+      }
       await updateTaskListLine(fd);
       setSavedAt(Date.now());
       setIsDirty(false);
@@ -214,7 +356,7 @@ export default function TaskLineEditor({
     return () => dirty.unregisterSaveFn(lineId);
     // Intentionally wide deps — save fn captures latest state values.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lineId, taskListId, qty, config, notes, isDirty]);
+  }, [lineId, taskListId, qty, config, notes, isManual, name, specs, isDirty]);
 
   // Push dirty state to context whenever it changes.
   useEffect(() => {
@@ -224,7 +366,7 @@ export default function TaskLineEditor({
   }, [isDirty, isTechDirty, lineId]);
 
   function markRowSaved(rowKey: string, mode: "order" | "client") {
-    setSavedRows((prev) => ({ ...prev, [rowKey]: mode }));
+    setSavedRows((prev) => ({ ...prev, [rowKey]: { mode, at: Date.now() } }));
   }
   function clearRowSaved(rowKey: string) {
     setSavedRows((prev) => {
@@ -278,6 +420,11 @@ export default function TaskLineEditor({
     fd.set("quantity", String(qty));
     fd.set("config_values", JSON.stringify(config));
     if (notes) fd.set("internal_notes", notes);
+    if (isManual) {
+      fd.set("is_manual", "1");
+      fd.set("product_name", name);
+      fd.set("manual_specs", specs);
+    }
     startSales(async () => {
       await updateTaskListLine(fd);
       setSavedAt(Date.now());
@@ -313,7 +460,7 @@ export default function TaskLineEditor({
 
   /** [Order only] — persist this field's value as an order override (this
    *  line only). Does NOT touch the client preset. */
-  function saveFieldForOrder(fieldName: string, value: string) {
+  async function saveFieldForOrder(fieldName: string, value: string) {
     const text = value.trim();
     if (!text) return;
     setFactoryOverride(fieldName, text);
@@ -322,16 +469,16 @@ export default function TaskLineEditor({
     fd.set("field_name", fieldName);
     fd.set("text", text);
     fd.set("task_list_id", taskListId);
-    startFactory(async () => {
-      await setLineFieldOverride(fd);
-      markRowSaved(fieldName, "order");
-    });
+    // Awaited directly (not via a transition) so the SaveButton can show its
+    // own saving → saved → idle feedback and surface errors.
+    await setLineFieldOverride(fd);
+    markRowSaved(fieldName, "order");
   }
 
   /** [Save for client] — promote ONE field to the client preset (delta) and
    *  clear its order override so the row resolves as "Client preset". Other
    *  fields keep inheriting the global default. */
-  function saveFieldForClient(fieldName: string, value: string) {
+  async function saveFieldForClient(fieldName: string, value: string) {
     if (!clientId || !productId || !value.trim()) return;
     const text = value.trim();
     setClientFieldOverrides((prev) => ({ ...prev, [fieldName]: text }));
@@ -347,10 +494,8 @@ export default function TaskLineEditor({
     fd.set("text", text);
     fd.set("line_id", lineId);
     fd.set("task_list_id", taskListId);
-    startPreset(async () => {
-      await setClientFieldOverride(fd);
-      markRowSaved(fieldName, "client");
-    });
+    await setClientFieldOverride(fd);
+    markRowSaved(fieldName, "client");
   }
 
   /** Discard this order's edit → fall back to client preset / global mapping
@@ -393,7 +538,7 @@ export default function TaskLineEditor({
 
   /** [Order only] — persist ONE additional attribute to this line's order
    *  layer. */
-  function saveExtraForOrder(ex: ResolvedFactoryExtra) {
+  async function saveExtraForOrder(ex: ResolvedFactoryExtra) {
     if (!ex.value.trim()) return;
     setExtras((prev) =>
       prev.map((e) => (e.key === ex.key ? { ...e, source: "order" } : e))
@@ -404,15 +549,13 @@ export default function TaskLineEditor({
     fd.set("label", ex.label);
     fd.set("value", ex.value);
     fd.set("task_list_id", taskListId);
-    startFactory(async () => {
-      await setLineExtraOverride(fd);
-      markRowSaved(`extra:${ex.key}`, "order");
-    });
+    await setLineExtraOverride(fd);
+    markRowSaved(`extra:${ex.key}`, "order");
   }
 
   /** [Save for client] — promote ONE additional attribute to the client
    *  preset (delta) and clear it from this line's order layer. */
-  function saveExtraForClient(ex: ResolvedFactoryExtra) {
+  async function saveExtraForClient(ex: ResolvedFactoryExtra) {
     if (!clientId || !productId || !ex.value.trim()) return;
     setClientExtrasBase((prev) => {
       const without = prev.filter((e) => e.key !== ex.key);
@@ -429,10 +572,8 @@ export default function TaskLineEditor({
     fd.set("value", ex.value);
     fd.set("line_id", lineId);
     fd.set("task_list_id", taskListId);
-    startPreset(async () => {
-      await setClientExtraOverride(fd);
-      markRowSaved(`extra:${ex.key}`, "client");
-    });
+    await setClientExtraOverride(fd);
+    markRowSaved(`extra:${ex.key}`, "client");
   }
 
   /** Remove ONE additional attribute's client override (stays on this order
@@ -538,10 +679,37 @@ export default function TaskLineEditor({
     <div className="panel p-4 space-y-5">
       {/* Header: line + quantity (mockup .cfg-line) */}
       <div className="cfg-line">
-        <div>
-          <div className="lk">Line</div>
-          <div className="lv">{productName}</div>
-        </div>
+        {isManual ? (
+          /* m135 — manual item: the name IS editable (no catalog product). */
+          <div className="min-w-0 flex-1">
+            <div className="lk flex items-center gap-2">
+              <span>Manual item</span>
+              <span
+                className="inline-flex items-center rounded-full bg-violet-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-violet-700"
+                title="Non-catalog line (e.g. pole/mast). Edit it freely — no Product reference required."
+              >
+                Manual
+              </span>
+            </div>
+            <input
+              type="text"
+              value={name}
+              onChange={(e) => {
+                setName(e.target.value);
+                setIsDirty(true);
+              }}
+              disabled={!salesEditable}
+              placeholder="Item name / description — e.g. Pole 8m, hot-dip galvanized, arm 1.5m"
+              aria-label="Item name"
+              className="mt-1 w-full rounded-md border border-neutral-200 px-3 py-1.5 text-sm font-medium disabled:bg-neutral-50"
+            />
+          </div>
+        ) : (
+          <div>
+            <div className="lk">Line</div>
+            <div className="lv">{productName}</div>
+          </div>
+        )}
         <div className="qwrap">
           <div className="lk">Quantity</div>
           {/* Dirty / Saved status for this line */}
@@ -571,6 +739,50 @@ export default function TaskLineEditor({
           </label>
         </div>
       </div>
+
+      {/* ---------- MANUAL ITEM (pole/mast/non-catalog) ----------
+          m135. No catalog Product → free-text specifications + a read-only
+          reference price copied from the quotation. Replaces the catalog
+          configurator (there is no category to drive fields/mappings). */}
+      {isManual && (
+        <section className="rounded-lg border border-violet-200 bg-violet-50/40 p-4 space-y-3">
+          <div>
+            <div className="eyebrow text-violet-900">Specifications</div>
+            <p className="text-[11px] text-neutral-500 mt-0.5">
+              Free-text specs for this manual item — height, thickness, arm,
+              wind load, galvanization, etc. Shown to the production team and on
+              the factory export.
+            </p>
+          </div>
+          <textarea
+            value={specs}
+            onChange={(e) => {
+              setSpecs(e.target.value);
+              setIsDirty(true);
+            }}
+            disabled={!salesEditable}
+            placeholder={
+              "e.g.\nHeight: 8 m\nThickness: 4 mm\nArm: 1.5 m\nWind load: 150 km/h\nGalvanization: hot-dip"
+            }
+            rows={5}
+            className="w-full rounded-md border border-neutral-200 px-3 py-2 text-sm disabled:bg-neutral-50"
+          />
+          {unitPrice != null && (
+            <div className="flex items-center justify-between rounded-md border border-neutral-200 bg-white px-3 py-2">
+              <span className="text-[11px] font-medium uppercase tracking-wide text-neutral-500">
+                Quoted unit price <span className="normal-case">(reference)</span>
+              </span>
+              <span className="text-sm font-semibold tabular-nums text-neutral-800">
+                {currency ? `${currency} ` : ""}
+                {unitPrice.toLocaleString(undefined, {
+                  minimumFractionDigits: 0,
+                  maximumFractionDigits: 2,
+                })}
+              </span>
+            </div>
+          )}
+        </section>
+      )}
 
       {/* ---------- SALES SECTION ---------- */}
       {salesFields.length > 0 && (
@@ -606,6 +818,20 @@ export default function TaskLineEditor({
             >
               <div className="micro">Sales configuration</div>
               <div className="hint">What the sales team specified.</div>
+              {/* BUG-6 — surface the service-request spec right at the config so
+                  the catalog options are matched deliberately to what sales
+                  sold (the fields start empty because the SR captures free-text,
+                  not catalog enums — auto-guessing would risk a wrong build). */}
+              {!isManual && salesSpec?.trim() && (
+                <div
+                  className="mb-3 rounded-md border border-sky-200 bg-sky-50/70 px-3 py-2 text-[12px] leading-relaxed text-sky-900"
+                  style={{ whiteSpace: "pre-line" }}
+                >
+                  <b>From the service request — match these specs:</b>
+                  {"\n"}
+                  {salesSpec}
+                </div>
+              )}
               {salesFields.map((f) => (
                 <ConfigFieldInput
                   key={f.id}
@@ -628,8 +854,9 @@ export default function TaskLineEditor({
       {/* ---------- FACTORY INSTRUCTIONS ----------
           Two parts: (1) instructions resolved per sales dropdown
           (global mapping → client preset → this order), and (2) additional
-          factory-only attributes that don't exist in the sales config. */}
-      {technicalEditable && (
+          factory-only attributes that don't exist in the sales config.
+          Skipped for manual items (no category → no mappings; m135). */}
+      {technicalEditable && !isManual && (
         <section className="space-y-3">
           <div className="sec-head">
             <div className="lhs">
@@ -698,12 +925,7 @@ export default function TaskLineEditor({
                       </span>
                     )}
                     {savedRows[row.field_name] && (
-                      <span className="fi-saved">
-                        ✓ Saved{" "}
-                        {savedRows[row.field_name] === "client"
-                          ? "for client"
-                          : "to this order"}
-                      </span>
+                      <SavedBadge saved={savedRows[row.field_name]!} />
                     )}
                   </span>
                   {row.source === "missing" && (
@@ -757,29 +979,23 @@ export default function TaskLineEditor({
                   if (!effective.trim()) return null;
                   return (
                     <div className="fi-save">
-                      <button
-                        type="button"
-                        onClick={() =>
-                          saveFieldForOrder(row.field_name, effective)
-                        }
-                        disabled={pendingFactory}
+                      <SaveButton
+                        onSave={() => saveFieldForOrder(row.field_name, effective)}
                         className="btn sm primary"
+                        successMessage="Saved to this order"
                         title="Save this value for THIS order only — does not change the client preset or global mapping."
                       >
                         Save · Order only
-                      </button>
+                      </SaveButton>
                       {clientId && (
-                        <button
-                          type="button"
-                          onClick={() =>
-                            saveFieldForClient(row.field_name, effective)
-                          }
-                          disabled={pendingPreset}
+                        <SaveButton
+                          onSave={() => saveFieldForClient(row.field_name, effective)}
                           className="btn sm"
+                          successMessage="Saved for this client"
                           title="Save just this field as a client override — auto-loads on every future order for this client. All other fields keep following the global default."
                         >
                           Save · For client
-                        </button>
+                        </SaveButton>
                       )}
                       {row.source === "override" && (
                         <button
@@ -839,12 +1055,7 @@ export default function TaskLineEditor({
                           <span className="fi-src order">This order</span>
                         )}
                         {savedRows[`extra:${ex.key}`] && (
-                          <span className="fi-saved">
-                            ✓ Saved{" "}
-                            {savedRows[`extra:${ex.key}`] === "client"
-                              ? "for client"
-                              : "to this order"}
-                          </span>
+                          <SavedBadge saved={savedRows[`extra:${ex.key}`]!} />
                         )}
                       </span>
                       <button
@@ -868,25 +1079,25 @@ export default function TaskLineEditor({
                     />
                     {/* Field-local save modes, same as the sales rows. */}
                     <div className="fi-save">
-                      <button
-                        type="button"
-                        onClick={() => saveExtraForOrder(ex)}
-                        disabled={pendingFactory || !ex.value.trim()}
+                      <SaveButton
+                        onSave={() => saveExtraForOrder(ex)}
+                        disabled={!ex.value.trim()}
                         className="btn sm primary"
+                        successMessage="Saved to this order"
                         title="Save this field for THIS order only."
                       >
                         Save · Order only
-                      </button>
+                      </SaveButton>
                       {clientId && (
-                        <button
-                          type="button"
-                          onClick={() => saveExtraForClient(ex)}
-                          disabled={pendingPreset || !ex.value.trim()}
+                        <SaveButton
+                          onSave={() => saveExtraForClient(ex)}
+                          disabled={!ex.value.trim()}
                           className="btn sm"
+                          successMessage="Saved for this client"
                           title="Save just this field as a client override — auto-loads on every future order for this client."
                         >
                           Save · For client
-                        </button>
+                        </SaveButton>
                       )}
                       {clientId && ex.source === "client" && (
                         <button

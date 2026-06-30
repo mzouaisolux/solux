@@ -54,7 +54,7 @@ create table if not exists documents (
   number text unique,
   client_id uuid references clients(id),
   type text check (type in ('quotation','proforma')) not null,
-  date timestamptz default now(),
+  date timestamptz default now(),       -- creation timestamp (DB default; never user-edited) — order documents by THIS
   total_price numeric default 0,
   status text default 'draft',
   incoterm text,
@@ -63,6 +63,13 @@ create table if not exists documents (
   manual_pricing boolean default false,
   pdf_url text,
   created_by uuid references auth.users(id)
+  -- GUARD: `documents` has NO `created_at` column (unlike products/clients),
+  -- and never has — in any environment. Use `date` above for creation time
+  -- and for ordering. The Supabase client in this app is untyped (no
+  -- <Database> generic, no generated types), so `.order('created_at')` /
+  -- `.select('...created_at...')` on documents COMPILES but fails at RUNTIME
+  -- with Postgres 42703 ("column documents.created_at does not exist").
+  -- Verified against prod 2026-06-18. See launch-production-won-flow.
 );
 
 create table if not exists document_lines (

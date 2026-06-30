@@ -210,3 +210,986 @@ body {
     @apply animate-pulse rounded-md bg-neutral-200/60;
   }
 }
+
+
+/* =====================================================================
+   SOLUX PROJECTS — scoped design system
+   ---------------------------------------------------------------------
+   A faithful port of the `solux-projects-offline.html` mockup: Plus
+   Jakarta Sans, the neon-green / ink / amber palette, sharp corners and
+   flat shadowed cards. Everything is namespaced under `.solux-pro` so it
+   never leaks into the rest of the app (which stays on Inter + rounded
+   neutrals). Wrap a page section in `.solux-pro` to opt that subtree in;
+   add `.sx-page` on the page-level wrapper for the canvas + green hairline.
+   ===================================================================== */
+.solux-pro {
+  --sx-ink: #0f0f0f;
+  --sx-ink-soft: #2a2a2c;
+  --sx-mute: #67646f;
+  --sx-mute-2: #aeaaba;
+  --sx-line: #e7e7ea;
+  --sx-line-2: #dcdde1;
+  --sx-canvas: #eeeef0;
+  --sx-card: #ffffff;
+  --sx-green: #55ff7e;
+  --sx-green-tint: rgba(85, 255, 126, 0.14);
+  --sx-green-deep: #0b7a39;
+  --sx-amber: #e8870e;
+  --sx-amber-tint: rgba(232, 135, 14, 0.1);
+  --sx-amber-line: rgba(232, 135, 14, 0.42);
+  --sx-amber-deep: #9a5a00;
+  --sx-shadow: 0 1px 2px rgba(15, 15, 15, 0.05), 0 1px 0 rgba(15, 15, 15, 0.02);
+  font-family: var(--font-jakarta), "Plus Jakarta Sans", system-ui, sans-serif;
+  color: var(--sx-ink);
+}
+
+/* Page-level wrapper. The app <body> already paints the grey canvas (#EEEEF0)
+   and the green top hairline, so we DON'T re-draw them here — doing so would
+   double the green line under the nav. Kept as a hook for page-scoped tweaks. */
+.solux-pro.sx-page {
+  min-height: 100%;
+}
+.solux-pro .sx-wrap {
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 28px 28px 90px;
+}
+
+/* labels */
+.solux-pro .sx-eyebrow {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--sx-mute);
+}
+.solux-pro .sx-micro {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--sx-mute);
+}
+.solux-pro .sx-tnum {
+  font-variant-numeric: tabular-nums;
+}
+
+/* header */
+.solux-pro .sx-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+}
+.solux-pro .sx-h1 {
+  font-size: 32px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  margin: 6px 0 0;
+}
+.solux-pro .sx-sub {
+  font-size: 14px;
+  color: var(--sx-mute);
+  margin-top: 11px;
+  max-width: 680px;
+  line-height: 1.6;
+}
+
+/* buttons */
+.solux-pro .sx-btn {
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 9px 14px;
+  border: 1px solid var(--sx-line-2);
+  background: #fff;
+  color: var(--sx-ink);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.solux-pro .sx-btn:hover {
+  border-color: var(--sx-ink);
+}
+.solux-pro .sx-btn-go {
+  background: var(--sx-green);
+  border-color: var(--sx-green);
+  color: #0f0f0f;
+}
+.solux-pro .sx-btn-go:hover {
+  background: #46e96d;
+}
+.solux-pro .sx-link {
+  color: var(--sx-green-deep);
+  font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  font-weight: 600;
+}
+.solux-pro .sx-link:hover { text-decoration: underline; }
+.solux-pro .sx-muted-link {
+  color: var(--sx-mute);
+  cursor: pointer;
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  font-weight: 600;
+}
+.solux-pro .sx-muted-link:hover { color: var(--sx-amber-deep); text-decoration: underline; }
+
+/* status filter tabs */
+.solux-pro .sx-stabs {
+  display: flex;
+  gap: 7px;
+  flex-wrap: wrap;
+  margin-top: 24px;
+}
+.solux-pro .sx-stab {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid var(--sx-line-2);
+  background: #fff;
+  padding: 7px 12px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--sx-ink-soft);
+  cursor: pointer;
+  text-decoration: none;
+}
+.solux-pro .sx-stab:hover {
+  border-color: var(--sx-ink);
+}
+.solux-pro .sx-stab.active {
+  background: var(--sx-ink);
+  border-color: var(--sx-ink);
+  color: #fff;
+}
+.solux-pro .sx-stab .n {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 1px 6px;
+  background: var(--sx-canvas);
+  color: var(--sx-mute);
+}
+.solux-pro .sx-stab.active .n {
+  background: rgba(255, 255, 255, 0.2);
+  color: #fff;
+}
+.solux-pro .sx-stab .dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex: none;
+}
+.solux-pro .sx-d-neutral { background: var(--sx-mute-2); }
+.solux-pro .sx-d-ink { background: var(--sx-ink); }
+.solux-pro .sx-d-amber { background: var(--sx-amber); }
+.solux-pro .sx-d-green { background: var(--sx-green-deep); }
+
+/* section title */
+.solux-pro .sx-sectitle {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 42px 0 14px;
+}
+.solux-pro .sx-sectitle h2 {
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+.solux-pro .sx-sectitle .rhs {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 12px;
+  color: var(--sx-mute);
+}
+.solux-pro .sx-sectitle .rhs .sx-clear {
+  text-decoration: underline;
+  cursor: pointer;
+  color: var(--sx-mute);
+}
+
+/* action-required tiles */
+.solux-pro .sx-argrid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+}
+@media (max-width: 1100px) {
+  .solux-pro .sx-argrid { grid-template-columns: repeat(2, 1fr); }
+}
+.solux-pro .sx-tile {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  border: 1px solid var(--sx-line);
+  background: #fff;
+  padding: 18px 20px;
+  text-decoration: none;
+  color: inherit;
+  box-shadow: var(--sx-shadow);
+  position: relative;
+}
+.solux-pro .sx-tile:hover {
+  border-color: var(--sx-ink);
+}
+.solux-pro .sx-tile.act {
+  border-color: var(--sx-amber-line);
+  background: var(--sx-amber-tint);
+}
+.solux-pro .sx-tile.act::before,
+.solux-pro .sx-tile.pos::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+}
+.solux-pro .sx-tile.act::before { background: var(--sx-amber); }
+.solux-pro .sx-tile.pos::before { background: var(--sx-green); }
+.solux-pro .sx-tile .arn {
+  font-size: 28px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+.solux-pro .sx-tile.act .arn { color: var(--sx-amber-deep); }
+.solux-pro .sx-tile .arl {
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.35;
+  color: var(--sx-ink-soft);
+}
+
+/* buckets */
+.solux-pro .sx-bgrid {
+  display: grid;
+  gap: 10px;
+}
+.solux-pro .sx-bgrid.c8 { grid-template-columns: repeat(4, 1fr); }
+.solux-pro .sx-bgrid.c4 { grid-template-columns: repeat(4, 1fr); }
+.solux-pro .sx-bgrid.c3 { grid-template-columns: repeat(3, 1fr); }
+@media (min-width: 1100px) {
+  .solux-pro .sx-bgrid.c8 { grid-template-columns: repeat(8, 1fr); }
+}
+@media (max-width: 760px) {
+  .solux-pro .sx-bgrid.c4,
+  .solux-pro .sx-bgrid.c3,
+  .solux-pro .sx-bgrid.c8 { grid-template-columns: repeat(2, 1fr); }
+}
+.solux-pro .sx-bucket {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border: 1px solid var(--sx-line);
+  background: #fff;
+  padding: 16px;
+  text-decoration: none;
+  color: inherit;
+  box-shadow: var(--sx-shadow);
+}
+.solux-pro .sx-bucket:hover { border-color: var(--sx-ink); }
+.solux-pro .sx-bucket.act { border-left: 3px solid var(--sx-amber); }
+.solux-pro .sx-bucket .bl {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--sx-ink-soft);
+}
+.solux-pro .sx-bucket .bn {
+  font-size: 20px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+/* recent activity */
+.solux-pro .sx-recent {
+  border: 1px solid var(--sx-line);
+  background: #fff;
+  padding: 13px 16px;
+  margin-top: 10px;
+  box-shadow: var(--sx-shadow);
+}
+.solux-pro .sx-recent .r {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  font-size: 12.5px;
+  margin-top: 9px;
+  line-height: 1.4;
+  align-items: baseline;
+}
+.solux-pro .sx-recent .r:first-of-type { margin-top: 8px; }
+.solux-pro .sx-recent .r b { font-weight: 600; }
+.solux-pro .sx-recent .r .t {
+  color: var(--sx-mute-2);
+  white-space: nowrap;
+}
+.solux-pro .sx-recent .r a {
+  color: var(--sx-ink);
+  text-decoration: none;
+  min-width: 0;
+}
+.solux-pro .sx-recent .r a:hover { text-decoration: underline; }
+
+/* projects table */
+.solux-pro .sx-panel {
+  margin-top: 12px;
+  overflow-x: auto;
+  border: 1px solid var(--sx-line);
+  box-shadow: var(--sx-shadow);
+  background: #fff;
+}
+.solux-pro table.sx-list {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13.5px;
+  background: #fff;
+}
+.solux-pro table.sx-list thead tr {
+  background: #fafafa;
+  border-bottom: 1px solid var(--sx-line);
+}
+.solux-pro table.sx-list th {
+  text-align: left;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--sx-mute);
+  padding: 13px 18px;
+  white-space: nowrap;
+}
+.solux-pro table.sx-list th.r,
+.solux-pro table.sx-list td.r { text-align: right; }
+.solux-pro table.sx-list td {
+  padding: 16px 18px;
+  border-top: 1px solid var(--sx-line);
+  vertical-align: middle;
+  color: var(--sx-ink-soft);
+}
+.solux-pro table.sx-list tbody tr { cursor: pointer; }
+.solux-pro table.sx-list tbody tr:hover { background: #fafafa; }
+.solux-pro table.sx-list .pname {
+  font-weight: 700;
+  color: var(--sx-ink);
+  text-decoration: none;
+}
+.solux-pro table.sx-list .pname:hover { text-decoration: underline; }
+.solux-pro table.sx-list .open {
+  color: var(--sx-mute-2);
+  font-weight: 600;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.solux-pro table.sx-list tbody tr:hover .open { color: var(--sx-ink); }
+.solux-pro .sx-empty {
+  padding: 42px 12px;
+  text-align: center;
+  color: var(--sx-mute);
+  font-size: 13.5px;
+}
+.solux-pro .sx-empty a {
+  color: var(--sx-green-deep);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+/* ---------------------------------------------------------------------
+   DETAIL VIEW + CREATE FORM (ported from the mockup, scoped)
+   Bare descriptive class names are safe here — nothing outside
+   `.solux-pro` can match them.
+   --------------------------------------------------------------------- */
+
+/* scoped overrides so the app's existing component classes (used by child
+   form components we don't rewrite) adopt the mockup look automatically */
+.solux-pro .eyebrow { color: var(--sx-mute); font-weight: 700; letter-spacing: 0.07em; }
+.solux-pro .btn-primary {
+  border-radius: 0; background: var(--sx-ink); border: 1px solid var(--sx-ink);
+  color: #fff; box-shadow: none; font-weight: 600;
+}
+.solux-pro .btn-primary:hover { background: #000; transform: none; }
+.solux-pro .btn-secondary {
+  border-radius: 0; border: 1px solid var(--sx-line-2); background: #fff;
+  color: var(--sx-ink); box-shadow: none; font-weight: 600;
+}
+.solux-pro .btn-secondary:hover { border-color: var(--sx-ink); background: #fff; }
+.solux-pro .input, .solux-pro .input-sm, .solux-pro .select {
+  border-radius: 0; border: 1px solid var(--sx-line-2);
+}
+
+/* buttons (mockup variants) */
+.solux-pro .sx-btn-ink { background: var(--sx-ink); border-color: var(--sx-ink); color: #fff; }
+.solux-pro .sx-btn-ink:hover { background: #000; }
+.solux-pro .sx-btn-ink .ar { color: var(--sx-green); }
+.solux-pro .sx-btn-sm { padding: 7px 12px; font-size: 12px; }
+.solux-pro .sx-btn-danger { color: var(--sx-amber-deep); border-color: var(--sx-amber-line); }
+.solux-pro .sx-btn-danger:hover { border-color: var(--sx-amber); }
+
+/* form controls — square inputs (checkboxes excluded by type selectors) */
+.solux-pro select,
+.solux-pro input:not([type]),
+.solux-pro input[type="text"],
+.solux-pro input[type="number"],
+.solux-pro input[type="date"],
+.solux-pro input[type="email"],
+.solux-pro textarea {
+  width: 100%; font-family: inherit; font-size: 13.5px; padding: 9px 11px;
+  border: 1px solid var(--sx-line-2); background: #fff; color: var(--sx-ink);
+  border-radius: 0;
+}
+.solux-pro textarea { resize: vertical; min-height: 54px; line-height: 1.5; }
+.solux-pro ::placeholder { color: var(--sx-mute-2); }
+.solux-pro select {
+  appearance: none;
+  background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 12 12'%3e%3cpath stroke='%236b7280' stroke-width='1.5' d='m3 5 3 3 3-3'/%3e%3c/svg%3e");
+  background-repeat: no-repeat; background-position: right 11px center; background-size: 0.7em; padding-right: 28px;
+}
+.solux-pro input[type="checkbox"] { accent-color: var(--sx-ink); width: 16px; height: 16px; }
+
+/* card + sections */
+.solux-pro .card { background: var(--sx-card); border: 1px solid var(--sx-line); box-shadow: var(--sx-shadow); }
+.solux-pro .sec { margin-top: 18px; padding: 24px 26px; }
+/* detail flow — even 18px gaps; neutralize per-card top margins inside it */
+.solux-pro .sx-detail { display: flex; flex-direction: column; gap: 18px; }
+.solux-pro .sx-detail > .card { margin-top: 0; }
+.solux-pro .sechead { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-bottom: 16px; }
+.solux-pro .sechead .right { font-size: 12px; color: var(--sx-mute-2); white-space: nowrap; display: flex; align-items: center; gap: 8px; }
+.solux-pro .sx-backlink { display: inline-block; margin-top: 4px; font-size: 13px; color: var(--sx-green-deep); font-weight: 600; text-decoration: none; }
+.solux-pro .sx-backlink:hover { text-decoration: underline; }
+.solux-pro .sx-detail-title { margin: 0; font-size: 26px; font-weight: 700; letter-spacing: -0.01em; }
+
+/* spec sheet */
+.solux-pro .spec-list { display: grid; grid-template-columns: 1fr 1fr; gap: 0 44px; }
+@media (max-width: 760px) { .solux-pro .spec-list { grid-template-columns: 1fr; } }
+.solux-pro .spec-row { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; padding: 10px 0; border-bottom: 1px solid var(--sx-line); }
+.solux-pro .spec-row .sk { font-size: 12.5px; color: var(--sx-mute); white-space: nowrap; }
+.solux-pro .spec-row .sv { font-size: 14.5px; font-weight: 700; color: var(--sx-ink); text-align: right; }
+
+/* stepper */
+.solux-pro .stepper { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 8px; padding: 20px 24px; }
+.solux-pro .step { display: flex; align-items: center; gap: 8px; }
+.solux-pro .step .scir { width: 22px; height: 22px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; background: #efeff1; color: var(--sx-mute-2); }
+.solux-pro .step .scir svg { width: 11px; height: 11px; }
+.solux-pro .step.done .scir { background: var(--sx-ink); color: #fff; }
+.solux-pro .step.active .scir { background: var(--sx-green); color: #0f0f0f; box-shadow: 0 0 0 4px var(--sx-green-tint); }
+.solux-pro .step .sl { font-size: 12.5px; color: var(--sx-mute); }
+.solux-pro .step.done .sl { color: var(--sx-ink-soft); }
+.solux-pro .step.active .sl { font-weight: 700; color: var(--sx-ink); }
+.solux-pro .step .arr { color: var(--sx-mute-2); font-size: 12px; }
+
+/* next-step gated blocks */
+.solux-pro .cta-block { border: 1px solid var(--sx-line); background: #fafafa; padding: 18px 20px; margin-top: 14px; }
+.solux-pro .cta-block:first-of-type { margin-top: 0; }
+.solux-pro .cta-block .ctitle { font-size: 10.5px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: var(--sx-mute); margin-bottom: 13px; display: flex; align-items: center; gap: 8px; }
+.solux-pro .cta-block .ctitle .role { color: var(--sx-amber-deep); }
+.solux-pro .cta-row { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.solux-pro .cta-check { display: flex; align-items: center; gap: 7px; font-size: 13px; color: var(--sx-ink-soft); }
+
+/* workflow summary */
+.solux-pro .wf-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 20px 24px; }
+@media (max-width: 760px) { .solux-pro .wf-grid { grid-template-columns: repeat(2, 1fr); } }
+.solux-pro .wf .wk { font-size: 10px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: var(--sx-mute); }
+.solux-pro .wf .wv { font-size: 13.5px; font-weight: 600; margin-top: 5px; display: inline-flex; align-items: center; gap: 6px; }
+.solux-pro .wf .wv.ok { color: var(--sx-green-deep); }
+.solux-pro .wf .wv.pending { color: var(--sx-amber-deep); }
+.solux-pro .wf .wv.ready { color: var(--sx-ink); }
+.solux-pro .wf .wv.na { color: var(--sx-mute-2); }
+
+/* full-width detail; activity is a full-width footer (v2) */
+.solux-pro .detail-cols { display: flex; flex-direction: column; gap: 18px; margin-top: 18px; }
+.solux-pro .detail-main { display: flex; flex-direction: column; gap: 18px; }
+.solux-pro .activity-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 36px; }
+@media (max-width: 760px) { .solux-pro .activity-grid { grid-template-columns: 1fr; } }
+
+/* compact activity — terse one-liner rows; history is support data */
+.solux-pro .sx-act-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
+.solux-pro .sx-act-count { font-size: 11px; font-weight: 600; color: var(--sx-mute-2); white-space: nowrap; }
+.solux-pro .sx-act-list { list-style: none; margin: 0; padding: 0; }
+.solux-pro .sx-act-row { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; padding: 7px 0; border-top: 1px solid var(--sx-line); font-size: 13px; }
+.solux-pro .sx-act-row:first-child { border-top: none; }
+.solux-pro .sx-act-label { display: flex; align-items: center; gap: 9px; font-weight: 600; color: var(--sx-ink-soft); min-width: 0; }
+.solux-pro .sx-act-label .d { width: 6px; height: 6px; border-radius: 50%; background: var(--sx-mute-2); flex: none; }
+.solux-pro .sx-act-meta { font-size: 12px; color: var(--sx-mute-2); white-space: nowrap; }
+.solux-pro .sx-act-more { margin-top: 10px; border-top: 1px solid var(--sx-line); padding-top: 10px; }
+.solux-pro .sx-act-more > summary { cursor: pointer; font-size: 12.5px; font-weight: 600; color: var(--sx-green-deep); list-style: none; display: inline-flex; align-items: center; gap: 6px; }
+.solux-pro .sx-act-more > summary::-webkit-details-marker { display: none; }
+.solux-pro .sx-act-more > summary::before { content: "▸"; font-size: 10px; }
+.solux-pro .sx-act-more[open] > summary::before { content: "▾"; }
+.solux-pro .sx-act-more[open] > summary { margin-bottom: 6px; }
+
+/* note (amber) */
+.solux-pro .note-amber { border: 1px solid var(--sx-amber-line); background: var(--sx-amber-tint); color: var(--sx-amber-deep); padding: 10px 14px; font-size: 12.5px; }
+.solux-pro .note-amber b { color: var(--sx-amber-deep); }
+
+/* form grids */
+.solux-pro .fgrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 13px 16px; }
+.solux-pro .fgrid.two { grid-template-columns: repeat(2, 1fr); }
+@media (max-width: 760px) { .solux-pro .fgrid, .solux-pro .fgrid.two { grid-template-columns: 1fr; } }
+.solux-pro .fcol.span2 { grid-column: span 2; }
+.solux-pro .fcol.span3 { grid-column: 1 / -1; }
+.solux-pro .fcol .fl { font-size: 11px; font-weight: 600; color: var(--sx-ink-soft); display: block; margin-bottom: 6px; }
+.solux-pro .fcol .fl .req { color: var(--sx-amber-deep); }
+.solux-pro .savebar { display: flex; justify-content: flex-start; gap: 10px; margin-top: 14px; }
+
+/* cost grid */
+.solux-pro .cost-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; font-size: 14px; line-height: 1.6; }
+.solux-pro .cost-grid b { font-variant-numeric: tabular-nums; }
+.solux-pro .cost-grid .usd { color: var(--sx-mute-2); font-size: 12px; }
+.solux-pro .audit-list { margin-top: 12px; border-top: 1px solid var(--sx-line); padding-top: 12px; list-style: none; }
+.solux-pro .audit-list li { font-size: 12px; color: var(--sx-mute); padding: 3px 0; }
+.solux-pro .audit-list li b { color: var(--sx-ink-soft); }
+
+/* finance table */
+.solux-pro .fintab { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 12px; border: 1px solid var(--sx-line); }
+.solux-pro .fintab th { background: #fafafa; font-size: 10px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--sx-mute); padding: 11px 13px; text-align: right; }
+.solux-pro .fintab th:first-child { text-align: left; }
+.solux-pro .fintab td { padding: 12px 13px; border-top: 1px solid var(--sx-line); text-align: right; font-variant-numeric: tabular-nums; }
+.solux-pro .fintab td:first-child { text-align: left; font-weight: 600; }
+.solux-pro .fintab .mg { color: var(--sx-green-deep); }
+.solux-pro .fintab tr.total td { border-top: 2px solid var(--sx-line-2); background: #fafafa; font-weight: 700; }
+.solux-pro .price-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 10px; border: 1px solid rgba(85, 255, 126, 0.5); background: var(--sx-green-tint); padding: 13px 16px; margin-top: 14px; }
+.solux-pro .price-head .big { font-size: 24px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.solux-pro .price-head .lg { font-size: 17px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.solux-pro .price-head .gl { color: var(--sx-green-deep); }
+.solux-pro .controls-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 6px; }
+@media (max-width: 600px) { .solux-pro .controls-grid { grid-template-columns: 1fr; } }
+.solux-pro .ctrl { border: 1px solid var(--sx-line-2); padding: 12px 14px; }
+.solux-pro .ctrl .ct { font-size: 12px; font-weight: 700; color: var(--sx-ink-soft); }
+.solux-pro .ctrl .cc { font-size: 11px; color: var(--sx-mute-2); float: right; }
+.solux-pro .ctrl-inputs { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px; clear: both; }
+.solux-pro .ctrl-inputs label { font-size: 9px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--sx-mute); display: block; margin-bottom: 4px; }
+
+/* documents */
+.solux-pro .docrow { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 0; border-top: 1px solid var(--sx-line); font-size: 13.5px; }
+.solux-pro .docrow:first-of-type { border-top: none; }
+.solux-pro .docrow .dn { font-weight: 600; }
+.solux-pro .docrow .dm { font-size: 11.5px; color: var(--sx-mute-2); margin-left: 6px; font-weight: 400; }
+.solux-pro .docrow .x { color: var(--sx-mute-2); cursor: pointer; background: none; border: none; font-size: 15px; }
+
+/* activity rail */
+.solux-pro .tl-row { display: flex; gap: 12px; padding: 12px 0; border-top: 1px solid var(--sx-line); }
+.solux-pro .tl-row:nth-child(-n + 2) { border-top: none; }
+.solux-pro .tl-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--sx-ink); margin-top: 5px; flex: none; }
+.solux-pro .tl-title { font-size: 13.5px; font-weight: 600; }
+.solux-pro .tl-msg { font-size: 12.5px; color: var(--sx-mute); margin-top: 3px; line-height: 1.5; }
+.solux-pro .tl-time { font-size: 11.5px; color: var(--sx-mute-2); margin-top: 5px; }
+.solux-pro .tl-body { min-width: 0; }
+
+/* meta (summary tiles) */
+.solux-pro .meta .mk { font-size: 10.5px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: var(--sx-mute); }
+.solux-pro .meta .mv { font-size: 15px; font-weight: 600; margin-top: 6px; color: var(--sx-ink); }
+.solux-pro .selling-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
+@media (max-width: 760px) { .solux-pro .selling-grid { grid-template-columns: repeat(2, 1fr); } }
+
+/* packing + freight two-up (collapses on small screens) */
+.solux-pro .sx-pf-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+@media (max-width: 860px) { .solux-pro .sx-pf-grid { grid-template-columns: 1fr; } }
+
+/* create form */
+.solux-pro .form-card { margin-top: 18px; padding: 24px; }
+.solux-pro .form-sec { padding: 18px 0; border-top: 1px solid var(--sx-line); }
+.solux-pro .form-sec:first-of-type { border-top: none; padding-top: 4px; }
+.solux-pro .form-sec h3 { font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--sx-mute); margin-bottom: 14px; }
+.solux-pro .req-checks { display: flex; flex-wrap: wrap; gap: 12px 24px; }
+.solux-pro .req-checks label { display: flex; align-items: center; gap: 9px; font-size: 13px; color: var(--sx-ink-soft); cursor: pointer; }
+.solux-pro .warn-text { font-size: 11.5px; color: var(--sx-amber-deep); margin-top: 10px; }
+.solux-pro .form-summary { border: 1px solid var(--sx-line); background: #fafafa; padding: 16px 18px; margin-top: 8px; }
+.solux-pro .form-summary .sg { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 12px; }
+@media (max-width: 760px) { .solux-pro .form-summary .sg { grid-template-columns: repeat(2, 1fr); } }
+.solux-pro .form-foot { display: flex; align-items: center; gap: 14px; border-top: 1px solid var(--sx-line); padding-top: 16px; margin-top: 8px; }
+.solux-pro .form-foot .note { font-size: 11.5px; color: var(--sx-mute-2); }
+
+/* ---------------------------------------------------------------------
+   SOLUX-PRO COMPATIBILITY SKIN
+   When `.solux-pro` wraps a Tailwind-utility-styled subtree (e.g. the
+   quotation editor, NewDocumentForm), translate the common utilities to
+   the mockup look — sharp corners + mockup hairlines + flat shadow —
+   without rewriting hundreds of inline classNames. `rounded-full` is left
+   alone so status dots / avatars stay circular.
+   --------------------------------------------------------------------- */
+.solux-pro .rounded,
+.solux-pro .rounded-sm,
+.solux-pro .rounded-md,
+.solux-pro .rounded-lg,
+.solux-pro .rounded-xl,
+.solux-pro .rounded-2xl { border-radius: 0; }
+.solux-pro .border-neutral-100,
+.solux-pro .border-neutral-200,
+.solux-pro .border-neutral-300 { border-color: var(--sx-line); }
+.solux-pro .shadow-sm,
+.solux-pro .shadow,
+.solux-pro .shadow-soft,
+.solux-pro .shadow-card,
+.solux-pro .shadow-card-hover { box-shadow: var(--sx-shadow); }
+/* section headings in editor (text-lg font-semibold) read as mockup h2 */
+.solux-pro h2.text-lg { font-size: 17px; font-weight: 700; letter-spacing: -0.01em; color: var(--sx-ink); }
+
+/* ---------------------------------------------------------------------
+   PRICING — price-list classes for the faithful mockup rebuild (scoped).
+   Prefixed `px-` to avoid any collision with existing scoped classes.
+   --------------------------------------------------------------------- */
+.solux-pro .px-sbadge { display:inline-flex; align-items:center; gap:6px; padding:3px 10px; font-size:10px; font-weight:700; letter-spacing:.04em; text-transform:uppercase; border:1px solid var(--sx-line-2); background:#fff; color:var(--sx-ink-soft); white-space:nowrap; }
+.solux-pro .px-sbadge.published, .solux-pro .px-sbadge.ok { background:var(--sx-green-tint); border-color:rgba(85,255,126,.5); color:var(--sx-green-deep); }
+.solux-pro .px-sbadge.draft, .solux-pro .px-sbadge.thin, .solux-pro .px-sbadge.missing { background:var(--sx-amber-tint); border-color:var(--sx-amber-line); color:var(--sx-amber-deep); }
+.solux-pro .px-sbadge.archived { background:#f2f2f4; border-color:var(--sx-line-2); color:var(--sx-mute); }
+
+.solux-pro .px-meta-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:20px 28px; margin-top:16px; }
+@media (max-width:760px){ .solux-pro .px-meta-grid { grid-template-columns:repeat(2,1fr); } }
+
+.solux-pro .px-notice { padding:14px 16px; font-size:13px; line-height:1.6; }
+.solux-pro .px-notice.amber { border:1px solid var(--sx-amber-line); background:var(--sx-amber-tint); color:var(--sx-amber-deep); }
+.solux-pro .px-notice b { color:var(--sx-amber-deep); }
+
+.solux-pro .px-preview { font-size:12.5px; color:var(--sx-mute); margin-top:14px; line-height:1.6; }
+.solux-pro .px-preview.ok { color:var(--sx-green-deep); }
+.solux-pro .px-preview .warn { color:var(--sx-amber-deep); }
+
+.solux-pro .px-tblhead { padding:14px 18px; background:#fafafa; border-bottom:1px solid var(--sx-line); display:flex; align-items:center; justify-content:space-between; gap:12px; }
+.solux-pro table.px-grid { width:100%; border-collapse:collapse; font-size:13px; }
+.solux-pro table.px-grid thead th { background:#fafafa; text-align:left; font-size:10px; font-weight:700; letter-spacing:.04em; text-transform:uppercase; color:var(--sx-mute); padding:12px 13px; border-bottom:1px solid var(--sx-line); white-space:nowrap; }
+.solux-pro table.px-grid th.num, .solux-pro table.px-grid td.num { text-align:right; font-variant-numeric:tabular-nums; }
+.solux-pro table.px-grid tbody td { padding:13px 13px; border-top:1px solid var(--sx-line); vertical-align:middle; }
+.solux-pro table.px-grid tbody tr:hover { background:#fafafa; }
+.solux-pro .px-pname { font-weight:700; }
+.solux-pro .px-sku { font-weight:700; font-size:11px; color:var(--sx-mute); margin-left:8px; font-variant-numeric:tabular-nums; }
+.solux-pro .px-cellprice { font-weight:700; font-variant-numeric:tabular-nums; }
+.solux-pro .px-cellprice .mg { display:block; font-size:10px; color:var(--sx-mute); font-weight:500; margin-top:2px; }
+.solux-pro table.px-grid td.thincell { background:var(--sx-amber-tint); }
+.solux-pro .px-muteit { color:var(--sx-mute-2); font-style:italic; }
+
+.solux-pro .px-collap > summary { font-size:14px; font-weight:700; color:var(--sx-ink); cursor:pointer; display:flex; align-items:center; gap:9px; list-style:none; }
+.solux-pro .px-collap > summary::-webkit-details-marker { display:none; }
+.solux-pro .px-collap > summary::before { content:'\25B8'; color:var(--sx-mute-2); font-size:11px; }
+.solux-pro .px-collap[open] > summary::before { content:'\25BE'; }
+.solux-pro .px-flabel { font-size:11px; font-weight:700; letter-spacing:.04em; text-transform:uppercase; color:var(--sx-mute); display:block; margin-bottom:7px; }
+.solux-pro .px-editrow { display:flex; flex-wrap:wrap; align-items:flex-end; gap:14px; margin-top:18px; }
+.solux-pro .px-editrow .fcol { display:flex; flex-direction:column; gap:6px; }
+.solux-pro .px-editrow input { width:auto; }
+.solux-pro .px-editrow .w20 { width:90px; text-align:right; }
+.solux-pro .px-editrow .wname { width:300px; max-width:100%; }
+.solux-pro .px-editrow .grow { flex:1; min-width:240px; }
+.solux-pro .px-editrow .grow input { width:100%; }
+.solux-pro .px-settings-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:18px; margin-top:18px; max-width:760px; }
+@media (max-width:760px){ .solux-pro .px-settings-grid { grid-template-columns:1fr; } }
+.solux-pro .px-fhint { font-size:11px; color:var(--sx-mute-2); margin-top:10px; }
+
+.solux-pro .px-chips { display:flex; flex-wrap:wrap; gap:9px; margin-top:14px; }
+.solux-pro .px-chip { display:inline-flex; align-items:center; gap:8px; background:#fafafa; border:1px solid var(--sx-line); padding:6px 12px; font-size:12.5px; }
+.solux-pro .px-chip .k { color:var(--sx-mute); font-weight:600; }
+.solux-pro .px-chip .x { color:var(--sx-mute-2); cursor:pointer; font-weight:700; background:none; border:none; font-size:13px; }
+.solux-pro .px-assignform { display:flex; flex-wrap:wrap; align-items:flex-end; gap:14px; border-top:1px solid var(--sx-line); margin-top:16px; padding-top:16px; }
+.solux-pro .px-assignform .fcol { display:flex; flex-direction:column; gap:6px; }
+.solux-pro .px-assignform select { min-width:180px; width:auto; }
+
+.solux-pro .px-micro { font-size:11px; font-weight:600; letter-spacing:.07em; text-transform:uppercase; color:var(--sx-mute); }
+.solux-pro .px-link-amber { color:var(--sx-amber-deep); font-weight:600; cursor:pointer; background:none; border:none; padding:0; font:inherit; font-weight:600; }
+.solux-pro .px-divider { display:flex; align-items:center; gap:14px; margin:40px 0 0; }
+.solux-pro .px-divider .ln { flex:1; height:1px; background:var(--sx-line-2); }
+.solux-pro .px-divider .tx { font-size:11px; font-weight:700; letter-spacing:.14em; text-transform:uppercase; color:var(--sx-mute-2); }
+
+/* ---------------------------------------------------------------------
+   PRICING — library + main-page classes (filterbar, toolbar, grid
+   selection, workflow banner, tabs, recent rows). Scoped, px- prefixed.
+   --------------------------------------------------------------------- */
+.solux-pro .px-filterbar { display:flex; flex-wrap:wrap; align-items:flex-end; gap:14px; }
+.solux-pro .px-filterbar .fcol { display:flex; flex-direction:column; gap:6px; }
+.solux-pro .px-filterbar select, .solux-pro .px-filterbar input { min-width:150px; width:auto; }
+.solux-pro .px-reset { font-size:12.5px; color:var(--sx-mute); align-self:center; text-decoration:underline; cursor:pointer; background:none; border:none; padding:0; }
+
+.solux-pro .px-toolbar { display:flex; flex-wrap:wrap; align-items:center; gap:10px; padding:12px 18px; font-size:13px; }
+.solux-pro .px-tllabel { font-size:10px; font-weight:700; letter-spacing:.06em; text-transform:uppercase; color:var(--sx-mute); }
+.solux-pro .px-selcount { padding:2px 10px; font-size:11px; font-weight:700; background:var(--sx-canvas); color:var(--sx-mute); }
+.solux-pro .px-selcount.some { background:var(--sx-green-tint); border:1px solid rgba(85,255,126,.5); color:var(--sx-green-deep); }
+.solux-pro .px-sep { color:var(--sx-line-2); }
+.solux-pro .px-tact { font-family:inherit; font-size:12.5px; font-weight:600; padding:6px 10px; border:none; background:transparent; cursor:pointer; }
+.solux-pro .px-tact:disabled { color:var(--sx-mute-2); cursor:not-allowed; }
+.solux-pro .px-tact.pub { color:var(--sx-green-deep); } .solux-pro .px-tact.pub:not(:disabled):hover { background:var(--sx-green-tint); }
+.solux-pro .px-tact.neutral { color:var(--sx-ink-soft); } .solux-pro .px-tact.neutral:not(:disabled):hover { background:var(--sx-canvas); }
+.solux-pro .px-tact.del { color:var(--sx-amber-deep); } .solux-pro .px-tact.del:not(:disabled):hover { background:var(--sx-amber-tint); }
+.solux-pro .px-spacer { margin-left:auto; font-size:12px; color:var(--sx-mute); text-decoration:underline; cursor:pointer; background:none; border:none; }
+.solux-pro .px-toolbar select.mini { min-width:130px; width:auto; padding:7px 10px; font-size:12px; }
+
+.solux-pro table.px-grid tbody tr.sel, .solux-pro table.px-grid tbody tr.sel:hover { background:var(--sx-green-tint); }
+.solux-pro .px-rowlink { color:var(--sx-green-deep); font-weight:600; font-size:12px; text-decoration:none; white-space:nowrap; }
+.solux-pro table.px-grid tbody tr:hover .px-rowlink { color:var(--sx-ink); }
+.solux-pro .px-sub { font-size:12px; color:var(--sx-mute); }
+.solux-pro .px-namelink { font-weight:700; color:var(--sx-ink); text-decoration:none; }
+.solux-pro .px-namelink:hover { text-decoration:underline; }
+
+.solux-pro .px-banner { background:#fff; border:1px solid var(--sx-line); border-left:3px solid var(--sx-ink); display:flex; align-items:center; justify-content:space-between; gap:18px; padding:18px 20px; box-shadow:var(--sx-shadow); }
+.solux-pro .px-banner p { font-size:13px; color:var(--sx-ink-soft); line-height:1.6; max-width:880px; margin-top:6px; }
+.solux-pro .px-banner p b { color:var(--sx-ink); }
+.solux-pro .px-tabs { display:flex; align-items:center; gap:4px; border-bottom:1px solid var(--sx-line); }
+.solux-pro .px-tab { display:inline-flex; align-items:center; gap:8px; padding:11px 16px 12px; font-size:13px; font-weight:600; color:var(--sx-mute); cursor:pointer; border-bottom:2px solid transparent; margin-bottom:-1px; text-decoration:none; }
+.solux-pro .px-tab.active { color:var(--sx-ink); border-bottom-color:var(--sx-ink); }
+.solux-pro .px-tab:hover { color:var(--sx-ink); }
+.solux-pro .px-tab .cnt { font-size:11px; font-weight:700; padding:1px 7px; background:var(--sx-canvas); color:var(--sx-mute); }
+.solux-pro .px-tab.active .cnt { background:var(--sx-ink); color:#fff; }
+.solux-pro .px-pill { display:inline-flex; align-items:center; gap:7px; border:1px solid var(--sx-line-2); padding:4px 11px; font-size:11.5px; font-weight:600; background:#fff; }
+.solux-pro .px-pill .d { width:7px; height:7px; border-radius:50%; background:var(--sx-ink); }
+.solux-pro .px-recent-row { display:flex; align-items:center; gap:14px; padding:13px 8px; text-decoration:none; color:inherit; border-top:1px solid var(--sx-line); }
+.solux-pro .px-recent-row:first-of-type { border-top:none; }
+.solux-pro .px-recent-row:hover { background:#fafafa; }
+.solux-pro .px-recent-row .nm { flex:1; min-width:0; font-weight:700; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.solux-pro .px-recent-row .rc { font-size:12px; color:var(--sx-mute-2); width:150px; flex:none; text-align:right; }
+.solux-pro .px-dot { width:8px; height:8px; border-radius:50%; flex:none; }
+.solux-pro .px-dot.published { background:var(--sx-green-deep); }
+.solux-pro .px-dot.draft { background:var(--sx-amber); }
+.solux-pro .px-dot.archived { background:var(--sx-mute-2); }
+
+/* =====================================================================
+   Cost entry (finance) — solux-cost-entry-offline.html reconstruction
+   ===================================================================== */
+.solux-pro .ce-h2 { font-size:18px; font-weight:700; letter-spacing:-.01em; margin:38px 0 0; color:var(--sx-ink); }
+
+/* header */
+.solux-pro .ce-label-row { display:flex; align-items:center; gap:10px; margin-bottom:8px; }
+.solux-pro .ce-lead { font-size:14px; color:var(--sx-ink); font-weight:600; margin-top:8px; }
+.solux-pro .ce-ref-line { font-size:12.5px; color:var(--sx-mute); margin-top:6px; line-height:1.55; max-width:760px; }
+.solux-pro .ce-head-actions { display:flex; flex-direction:column; align-items:flex-end; gap:10px; flex:none; }
+.solux-pro .ce-head-actions .row { display:flex; gap:10px; }
+
+/* version banner (reuses .px-banner shell) */
+.solux-pro .ce-ver-banner { padding:16px 20px; flex-wrap:wrap; }
+.solux-pro .ce-ver-left { display:flex; align-items:center; gap:13px; flex-wrap:wrap; }
+.solux-pro .ce-ver-tag { background:var(--sx-ink); color:#fff; font-size:12px; font-weight:700; padding:4px 11px; }
+.solux-pro .ce-ver-text { font-size:13px; color:var(--sx-ink-soft); }
+.solux-pro .ce-ver-text b { font-weight:600; }
+.solux-pro .ce-ver-text .muted { color:var(--sx-mute); }
+
+/* category tabs */
+.solux-pro .ce-cat-tabs { display:flex; flex-wrap:wrap; gap:8px; }
+.solux-pro .ce-cat-tab { font-family:inherit; font-size:13px; border:1px solid var(--sx-line-2); background:#fff; color:var(--sx-mute); padding:7px 13px; cursor:pointer; white-space:nowrap; display:inline-flex; align-items:center; gap:7px; }
+.solux-pro .ce-cat-tab:hover { border-color:var(--sx-ink); color:var(--sx-ink); }
+.solux-pro .ce-cat-tab.on { background:var(--sx-ink); border-color:var(--sx-ink); color:#fff; font-weight:600; }
+.solux-pro .ce-cat-tab .ct-count { color:var(--sx-mute-2); font-weight:500; }
+.solux-pro .ce-cat-tab.on .ct-count { color:rgba(255,255,255,.65); }
+.solux-pro .ce-editing-line { font-size:13px; color:var(--sx-mute); margin-top:14px; }
+.solux-pro .ce-editing-line b { color:var(--sx-ink); font-weight:700; }
+
+/* toolbar */
+.solux-pro .ce-toolbar { display:flex; flex-wrap:wrap; align-items:flex-end; gap:14px; }
+.solux-pro .ce-tb-field { display:flex; flex-direction:column; gap:6px; }
+.solux-pro .ce-tb-field .ce-tbl { font-size:10.5px; font-weight:700; letter-spacing:.04em; text-transform:uppercase; color:var(--sx-mute); }
+.solux-pro input.ce-tb-search { width:240px; }
+.solux-pro .ce-tb-note { flex:1; min-width:240px; }
+.solux-pro .ce-tb-right { margin-left:auto; display:flex; align-items:center; gap:14px; }
+.solux-pro .ce-unsaved-pill { font-size:12px; font-weight:700; color:var(--sx-amber-deep); background:var(--sx-amber-tint); border:1px solid var(--sx-amber-line); padding:4px 10px; }
+.solux-pro .ce-saved-msg { font-size:13px; color:var(--sx-green-deep); font-weight:600; display:inline-flex; align-items:center; gap:7px; }
+.solux-pro .ce-saved-msg svg { width:14px; height:14px; }
+.solux-pro .ce-err-msg { font-size:13px; color:#b42318; font-weight:600; }
+
+/* cost grid */
+.solux-pro .ce-grid-wrap { overflow-x:auto; }
+.solux-pro table.ce-cost { width:100%; border-collapse:collapse; font-size:13px; }
+.solux-pro table.ce-cost thead th { background:#fafafa; text-align:left; font-size:10px; font-weight:700; letter-spacing:.04em; color:var(--sx-mute); text-transform:uppercase; padding:12px 14px; border-bottom:1px solid var(--sx-line); white-space:nowrap; }
+.solux-pro table.ce-cost th.num, .solux-pro table.ce-cost td.num { text-align:right; }
+.solux-pro table.ce-cost tbody td { padding:10px 14px; border-top:1px solid var(--sx-line); vertical-align:middle; }
+.solux-pro table.ce-cost tbody tr.dirty { background:var(--sx-amber-tint); }
+.solux-pro .ce-pname { font-weight:700; color:var(--sx-ink); }
+.solux-pro .ce-psku { font-weight:600; font-size:11.5px; color:var(--sx-mute); font-variant-numeric:tabular-nums; letter-spacing:.02em; }
+.solux-pro .ce-pcat { font-size:12px; color:var(--sx-mute); }
+.solux-pro .ce-cur-rmb { color:var(--sx-mute); font-variant-numeric:tabular-nums; font-weight:600; }
+.solux-pro .ce-cell-empty { color:var(--sx-mute-2); }
+.solux-pro input.ce-cost-input { width:130px; text-align:right; font-weight:600; font-variant-numeric:tabular-nums; padding:8px 11px; }
+.solux-pro input.ce-cost-input:focus { outline:none; border-color:var(--sx-ink); }
+.solux-pro input.ce-cost-input.dirty { border-color:var(--sx-amber); background:#fffdf6; }
+.solux-pro .ce-delta { font-size:12.5px; font-weight:700; font-variant-numeric:tabular-nums; display:inline-flex; align-items:center; gap:4px; }
+.solux-pro .ce-delta.up { color:var(--sx-amber-deep); }
+.solux-pro .ce-delta.down { color:var(--sx-green-deep); }
+.solux-pro .ce-delta.flat { color:var(--sx-mute-2); }
+.solux-pro .ce-delta.new { color:var(--sx-ink); background:var(--sx-green-tint); border:1px solid rgba(85,255,126,.5); padding:1px 7px; font-size:10px; letter-spacing:.04em; text-transform:uppercase; }
+.solux-pro .ce-updated { font-size:11.5px; color:var(--sx-mute-2); font-variant-numeric:tabular-nums; }
+.solux-pro table.ce-cost tr.ce-grid-empty td { padding:36px 14px; text-align:center; color:var(--sx-mute); font-size:13.5px; border-top:1px solid var(--sx-line); }
+.solux-pro .ce-grid-foot { font-size:11.5px; color:var(--sx-mute-2); margin-top:12px; line-height:1.5; }
+
+/* version history */
+.solux-pro .ce-vh-head { display:flex; align-items:flex-start; justify-content:space-between; gap:14px; margin-bottom:6px; }
+.solux-pro .ce-seclead { font-size:12.5px; color:var(--sx-mute); line-height:1.55; max-width:760px; margin-top:6px; }
+.solux-pro .ce-vh-count { font-size:12px; color:var(--sx-mute); white-space:nowrap; }
+.solux-pro .ce-vh-empty { font-size:13px; color:var(--sx-mute); padding:14px 0 2px; }
+.solux-pro .ce-vh-row { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:13px 0; border-top:1px solid var(--sx-line); }
+.solux-pro .ce-vh-left { display:flex; align-items:center; gap:14px; }
+.solux-pro .ce-vh-num { background:#fafafa; border:1px solid var(--sx-line-2); font-size:11px; font-weight:700; color:var(--sx-ink-soft); padding:4px 10px; min-width:36px; text-align:center; }
+.solux-pro .ce-vh-num.current { background:var(--sx-green-tint); border-color:rgba(85,255,126,.5); color:var(--sx-green-deep); }
+.solux-pro .ce-vh-title { font-size:13.5px; font-weight:700; }
+.solux-pro .ce-vh-sub { font-size:12px; color:var(--sx-mute); margin-top:3px; }
+.solux-pro .ce-vh-meta { font-size:12px; color:var(--sx-mute); white-space:nowrap; text-align:right; line-height:1.5; }
+.solux-pro .ce-vh-meta b { color:var(--sx-ink); font-weight:600; }
+
+/* =====================================================================
+   Admin — solux-admin-offline.html reconstruction (multi-page)
+   Shared chrome + per-section styles. Used by /admin/{users,permissions,
+   sales-conditions,banks,diagnostics} and /permissions/teams.
+   ===================================================================== */
+
+/* admin sub-tabs (AdminTabs) */
+.solux-pro .ad-tabs-wrap { max-width:1400px; margin:0 auto; padding:16px 28px 0; }
+.solux-pro .ad-tabs { display:flex; border-bottom:1px solid var(--sx-line-2); flex-wrap:wrap; }
+.solux-pro .ad-tab { font-size:13px; font-weight:600; color:var(--sx-mute); padding:11px 16px; cursor:pointer; border-bottom:2px solid transparent; margin-bottom:-1px; text-decoration:none; }
+.solux-pro .ad-tab:hover { color:var(--sx-ink); }
+.solux-pro .ad-tab.active { color:var(--sx-ink); border-bottom-color:var(--sx-ink); }
+
+/* titles / text */
+.solux-pro .ad-doc-title { font-size:22px; font-weight:700; letter-spacing:-.015em; margin:3px 0; color:var(--sx-ink); }
+.solux-pro .ad-lead { font-size:13px; color:var(--sx-mute); max-width:840px; line-height:1.6; margin-top:8px; }
+.solux-pro .ad-lead b { color:var(--sx-ink-soft); font-weight:600; }
+.solux-pro .ad-section code, .solux-pro .ad-code { font-family:inherit; font-weight:700; font-size:11.5px; background:#f2f2f4; padding:1px 6px; color:var(--sx-ink-soft); }
+
+/* tags */
+.solux-pro .ad-tag { display:inline-block; font-size:9.5px; font-weight:700; letter-spacing:.04em; text-transform:uppercase; padding:1px 6px; vertical-align:middle; }
+.solux-pro .ad-tag.super { background:var(--sx-ink); color:#fff; }
+.solux-pro .ad-tag.you { background:var(--sx-green-tint); color:var(--sx-green-deep); border:1px solid rgba(85,255,126,.5); }
+.solux-pro .ad-tag.norole { background:var(--sx-amber-tint); color:var(--sx-amber-deep); border:1px solid var(--sx-amber-line); }
+.solux-pro .ad-tag.dft { background:var(--sx-green-tint); color:var(--sx-green-deep); border:1px solid rgba(85,255,126,.45); }
+
+/* callout */
+.solux-pro .ad-callout { padding:12px 15px; font-size:12.5px; line-height:1.55; margin-top:14px; border:1px solid var(--sx-line); background:#fafafa; color:var(--sx-ink-soft); border-left:3px solid var(--sx-ink); }
+.solux-pro .ad-callout b { font-weight:700; color:var(--sx-ink); }
+.solux-pro .ad-callout.warn { border-color:var(--sx-amber-line); border-left-color:var(--sx-amber); background:var(--sx-amber-tint); color:var(--sx-amber-deep); }
+.solux-pro .ad-callout.warn b { color:var(--sx-amber-deep); }
+
+/* entry forms */
+.solux-pro .ad-form-narrow { max-width:720px; }
+.solux-pro .ad-field { margin-bottom:14px; }
+.solux-pro .ad-fl { font-size:11px; font-weight:700; letter-spacing:.04em; text-transform:uppercase; color:var(--sx-mute); display:block; margin-bottom:6px; }
+.solux-pro .ad-fl .req { color:var(--sx-amber-deep); }
+.solux-pro .ad-fl .int { color:var(--sx-mute-2); font-weight:500; text-transform:none; letter-spacing:0; }
+.solux-pro .ad-field-grid { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+@media(max-width:760px){ .solux-pro .ad-field-grid { grid-template-columns:1fr; } }
+.solux-pro .ad-subform { box-shadow:none; background:#fafafa; padding:18px; margin-top:14px; }
+.solux-pro .ad-subform .st { font-size:15px; font-weight:700; margin-bottom:12px; }
+.solux-pro .ad-mono { font-variant-numeric:tabular-nums; letter-spacing:.01em; }
+
+/* user table */
+.solux-pro table.ad-tbl { width:100%; border-collapse:collapse; font-size:12.5px; }
+.solux-pro table.ad-tbl th { text-align:left; font-size:10px; font-weight:700; letter-spacing:.05em; text-transform:uppercase; color:var(--sx-mute); padding:11px 14px; background:#fafafa; border-bottom:1px solid var(--sx-line); }
+.solux-pro table.ad-tbl td { padding:13px 14px; border-bottom:1px solid var(--sx-line); vertical-align:top; }
+.solux-pro table.ad-tbl tr:last-child td { border-bottom:none; }
+.solux-pro table.ad-tbl tr.self { background:#fafafa; }
+.solux-pro .ad-uname { font-size:13px; font-weight:700; display:flex; align-items:center; gap:7px; flex-wrap:wrap; }
+.solux-pro .ad-uid { font-size:10.5px; color:var(--sx-mute-2); margin-top:4px; letter-spacing:.01em; font-variant-numeric:tabular-nums; }
+.solux-pro .ad-inline-form { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+.solux-pro .ad-inline-form select { width:auto; min-width:160px; padding:7px 28px 7px 10px; font-size:12.5px; }
+.solux-pro .ad-inline-form input[type="text"] { width:170px; padding:7px 10px; }
+.solux-pro .ad-hint-sm { font-size:10.5px; color:var(--sx-mute-2); margin-top:6px; }
+
+/* permissions matrix */
+.solux-pro .ad-mtx-wrap { overflow-x:auto; }
+.solux-pro table.ad-mtx { width:100%; border-collapse:collapse; font-size:12px; }
+.solux-pro table.ad-mtx th { padding:10px 8px; border-bottom:1px solid var(--sx-line-2); background:#fafafa; }
+.solux-pro table.ad-mtx th.cap { text-align:left; width:42%; font-size:10px; font-weight:700; letter-spacing:.05em; text-transform:uppercase; color:var(--sx-mute); padding-left:14px; }
+.solux-pro table.ad-mtx th.role { text-align:center; font-size:10px; font-weight:700; letter-spacing:.03em; text-transform:uppercase; color:var(--sx-ink-soft); min-width:76px; }
+.solux-pro table.ad-mtx th.role .ct { display:block; font-size:9px; font-weight:600; color:var(--sx-mute-2); margin-top:3px; font-variant-numeric:tabular-nums; }
+.solux-pro table.ad-mtx tr.catrow td { background:#f2f2f4; font-size:10px; font-weight:700; letter-spacing:.06em; text-transform:uppercase; color:var(--sx-ink-soft); padding:7px 14px; border-top:1px solid var(--sx-line); border-bottom:1px solid var(--sx-line); }
+.solux-pro table.ad-mtx td.cap { padding:10px 14px; border-bottom:1px solid var(--sx-line); }
+.solux-pro table.ad-mtx td.cap .cl { font-size:12.5px; font-weight:600; }
+.solux-pro table.ad-mtx td.cap .ck { font-size:10.5px; color:var(--sx-mute-2); margin-top:3px; letter-spacing:.01em; }
+.solux-pro table.ad-mtx td.cell { text-align:center; border-bottom:1px solid var(--sx-line); }
+.solux-pro table.ad-mtx tbody tr:hover td { background:#fbfbfc; }
+.solux-pro table.ad-mtx tbody tr.catrow:hover td { background:#f2f2f4; }
+.solux-pro .ad-chk { width:17px; height:17px; border:1.5px solid var(--sx-line-2); background:#fff; display:inline-flex; align-items:center; justify-content:center; cursor:pointer; padding:0; }
+.solux-pro .ad-chk svg { width:11px; height:11px; }
+.solux-pro .ad-chk.on { background:var(--sx-ink); border-color:var(--sx-ink); color:#fff; }
+.solux-pro .ad-chk.locked { background:var(--sx-green-tint); border-color:rgba(85,255,126,.55); color:var(--sx-green-deep); cursor:not-allowed; }
+.solux-pro .ad-matrix-savebar { position:sticky; bottom:0; background:#fff; border-top:1px solid var(--sx-line-2); padding:13px 16px; display:flex; align-items:center; justify-content:space-between; gap:12px; }
+.solux-pro .ad-matrix-savebar .note { font-size:11.5px; color:var(--sx-mute); }
+/* real checkboxes styled as the mockup's .chk box (square, ink when on, green when locked) */
+.solux-pro table.ad-mtx input[type="checkbox"] { appearance:none; -webkit-appearance:none; width:17px; height:17px; border:1.5px solid var(--sx-line-2); background:#fff; cursor:pointer; margin:0; display:inline-block; vertical-align:middle; }
+.solux-pro table.ad-mtx input[type="checkbox"]:checked { border-color:var(--sx-ink); background:var(--sx-ink) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='3.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='20 6 9 17 4 12'/%3E%3C/svg%3E") center / 11px no-repeat; }
+.solux-pro table.ad-mtx input[type="checkbox"]:disabled { cursor:not-allowed; }
+.solux-pro table.ad-mtx input[type="checkbox"]:disabled:checked { background-color:var(--sx-green-tint); border-color:rgba(85,255,126,.55); background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%230b7a39' stroke-width='3.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='20 6 9 17 4 12'/%3E%3C/svg%3E"); }
+
+/* roles cards */
+.solux-pro .ad-role-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:12px; margin-top:6px; }
+@media(max-width:900px){ .solux-pro .ad-role-grid { grid-template-columns:1fr 1fr; } }
+.solux-pro .ad-role-card { border:1px solid var(--sx-line); background:#fff; padding:15px 16px; }
+.solux-pro .ad-role-card .rn { font-size:14px; font-weight:700; display:flex; align-items:center; gap:8px; }
+.solux-pro .ad-role-card .rk { font-size:10.5px; color:var(--sx-mute-2); margin-top:4px; letter-spacing:.01em; }
+.solux-pro .ad-role-card .rd { font-size:12px; color:var(--sx-mute); margin-top:9px; line-height:1.55; }
+.solux-pro .ad-role-card .rc { font-size:10px; font-weight:700; color:var(--sx-green-deep); margin-top:11px; text-transform:uppercase; letter-spacing:.05em; }
+
+/* visibility lenses */
+.solux-pro .ad-lens-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:12px; margin-top:6px; }
+@media(max-width:900px){ .solux-pro .ad-lens-grid { grid-template-columns:1fr 1fr; } }
+.solux-pro .ad-lens { border:1px solid var(--sx-line); background:#fafafa; padding:12px 14px; }
+.solux-pro .ad-lens.broad { border-left:3px solid var(--sx-ink); }
+.solux-pro .ad-lens.mid { border-left:3px solid var(--sx-mute-2); }
+.solux-pro .ad-lens .ll { font-size:13px; font-weight:700; }
+.solux-pro .ad-lens .lh { font-size:12px; line-height:1.55; margin-top:5px; color:var(--sx-mute); }
+.solux-pro .ad-lens .le { font-size:11px; font-style:italic; margin-top:7px; color:var(--sx-mute-2); }
+
+/* access rules */
+.solux-pro .ad-access-card { border:1px solid var(--sx-line); padding:14px 16px; margin-bottom:10px; }
+.solux-pro .ad-access-head { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; flex-wrap:wrap; }
+.solux-pro .ad-access-head .who { font-weight:700; font-size:13.5px; }
+.solux-pro .ad-access-head .role-k { font-size:11px; color:var(--sx-mute-2); text-transform:uppercase; letter-spacing:.04em; margin-left:6px; }
+.solux-pro .ad-grant-chip { display:inline-flex; align-items:center; gap:6px; border:1px solid var(--sx-line-2); background:#fff; padding:3px 10px; font-size:11.5px; font-weight:600; color:var(--sx-ink-soft); }
+.solux-pro .ad-grant-chip .x { cursor:pointer; color:var(--sx-mute-2); font-weight:700; background:none; border:none; padding:0; font:inherit; font-weight:700; }
+.solux-pro .ad-grant-chip.everyone { border-color:var(--sx-ink); background:#fff; color:var(--sx-ink); }
+.solux-pro .ad-grant-chip.region { border-left:3px solid var(--sx-mute-2); }
+.solux-pro .ad-grant-chip.team { border-left:3px solid var(--sx-green-deep); }
+.solux-pro .ad-cansee { margin-top:11px; background:#fafafa; border:1px solid var(--sx-line); padding:10px 13px; }
+.solux-pro .ad-cansee .lbl { font-size:9.5px; font-weight:700; letter-spacing:.05em; text-transform:uppercase; color:var(--sx-mute-2); }
+.solux-pro .ad-cansee ul { list-style:none; margin-top:6px; display:flex; flex-direction:column; gap:4px; }
+.solux-pro .ad-cansee li { font-size:12.5px; color:var(--sx-ink-soft); display:flex; gap:8px; align-items:center; }
+.solux-pro .ad-cansee li .ok { color:var(--sx-green-deep); font-weight:700; display:inline-flex; }
+.solux-pro .ad-cansee li .ok svg { width:13px; height:13px; }
+
+/* sales conditions + banks */
+.solux-pro .ad-cond-card, .solux-pro .ad-bank-card { border:1px solid var(--sx-line); padding:15px 16px; margin-bottom:10px; }
+.solux-pro .ad-acts { display:flex; gap:8px; flex-wrap:wrap; }
+.solux-pro .ad-cond-body { white-space:pre-wrap; font-size:12.5px; color:var(--sx-ink-soft); background:#fafafa; border:1px solid var(--sx-line); padding:12px 14px; margin-top:10px; line-height:1.6; font-family:inherit; }
+.solux-pro .ad-cur-head { display:flex; align-items:baseline; gap:12px; margin:20px 0 10px; }
+.solux-pro .ad-cur-head h3 { font-size:16px; font-weight:700; }
+.solux-pro .ad-bank-top { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+.solux-pro .ad-bank-name { font-size:14px; font-weight:700; }
+.solux-pro .ad-bank-pdf { font-size:10.5px; text-transform:uppercase; letter-spacing:.04em; color:var(--sx-mute); margin-top:5px; }
+.solux-pro .ad-bank-pdf.warn { color:var(--sx-amber-deep); font-weight:700; }
+.solux-pro .ad-bank-meta { font-size:12.5px; color:var(--sx-ink-soft); margin-top:5px; }
+.solux-pro .ad-bank-mono { font-size:12px; color:var(--sx-ink-soft); margin-top:7px; display:flex; gap:20px; flex-wrap:wrap; font-variant-numeric:tabular-nums; letter-spacing:.01em; }
+
+/* diagnostics */
+.solux-pro .ad-health-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:12px; margin-top:6px; }
+@media(max-width:900px){ .solux-pro .ad-health-grid { grid-template-columns:1fr 1fr; } }
+.solux-pro .ad-health { border:1px solid var(--sx-line); padding:15px 16px; display:flex; flex-direction:column; gap:7px; }
+.solux-pro .ad-health.ok { border-left:3px solid var(--sx-green); }
+.solux-pro .ad-health.warn { border-color:var(--sx-amber-line); background:var(--sx-amber-tint); border-left:3px solid var(--sx-amber); }
+.solux-pro .ad-health.bad { border-color:var(--sx-amber-line); background:var(--sx-amber-tint); border-left:3px solid var(--sx-amber-deep); }
+.solux-pro .ad-health .hn { font-size:30px; font-weight:700; font-variant-numeric:tabular-nums; line-height:1; }
+.solux-pro .ad-health.ok .hn { color:var(--sx-green-deep); }
+.solux-pro .ad-health.warn .hn, .solux-pro .ad-health.bad .hn { color:var(--sx-amber-deep); }
+.solux-pro .ad-health .ht { font-size:12.5px; font-weight:600; color:var(--sx-ink-soft); line-height:1.45; }
+.solux-pro .ad-health .ha { font-size:11.5px; color:var(--sx-green-deep); font-weight:600; text-decoration:none; }
+.solux-pro .ad-lifecycle { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-top:7px; }
+.solux-pro .ad-lc-node { border:1px solid var(--sx-line-2); background:#fff; padding:6px 12px; font-size:12px; font-weight:600; }
+.solux-pro .ad-lc-node.terminal { background:#f2f2f4; color:var(--sx-mute); }
+.solux-pro .ad-lc-arrow { color:var(--sx-mute-2); font-size:13px; }
+.solux-pro .ad-lc-label { font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.05em; color:var(--sx-mute); margin-top:14px; }
+.solux-pro .ad-lc-label.first { margin-top:0; }
+.solux-pro .ad-insp-row { display:flex; gap:10px; align-items:center; }
+.solux-pro .ad-insp-row input[type="text"] { flex:1; width:auto; min-width:0; }
+.solux-pro .ad-status-row { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:11px 0; border-bottom:1px solid var(--sx-line); }
+.solux-pro .ad-status-row:last-child { border-bottom:none; }
+.solux-pro .ad-status-left { display:flex; align-items:center; gap:11px; }
+.solux-pro .ad-status-dot { width:9px; height:9px; border-radius:50%; background:var(--sx-green-deep); flex:none; }
+.solux-pro .ad-status-dot.warn { background:var(--sx-amber); }
+.solux-pro .ad-status-dot.bad { background:var(--sx-amber-deep); }
+.solux-pro .ad-status-label { font-size:13px; font-weight:600; }
+.solux-pro .ad-status-meta { font-size:11.5px; color:var(--sx-mute); text-align:right; }
+.solux-pro .ad-sub-block { box-shadow:none; padding:15px 16px; }
+.solux-pro .ad-mini-h { font-size:11px; font-weight:700; letter-spacing:.05em; text-transform:uppercase; color:var(--sx-mute); }

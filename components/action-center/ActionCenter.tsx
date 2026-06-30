@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { getT } from "@/lib/i18n/server";
 import {
   ACTION_SECTION_ORDER,
   SECTION_META,
@@ -11,7 +12,7 @@ import {
 import {
   markActionDone,
   addActionNote,
-} from "@/app/(app)/dashboard-v2/actions";
+} from "@/app/(app)/dashboard/action-center-actions";
 
 /** Tooltip: the exact date an item first appeared on the list. */
 function sinceTitle(since: string | null): string | undefined {
@@ -60,12 +61,13 @@ const CHIP_TONE: Record<NonNullable<ActionContextChip["tone"]>, string> = {
  * shows a single reassuring line instead of a wall of widgets.
  */
 export function ActionCenter({ data }: { data: ActionCenterData }) {
+  const t = getT();
   if (data.total === 0) {
     return (
       <div className="rounded-xl border border-neutral-200 bg-white px-6 py-12 text-center">
         <div className="text-2xl">✓</div>
         <p className="mt-2 text-sm font-medium text-neutral-800">
-          Nothing needs you right now.
+          {t("ac.empty")}
         </p>
         <p className="mt-1 text-xs text-neutral-500">
           When a quote, task list or order needs action, it'll appear here —
@@ -92,13 +94,13 @@ export function ActionCenter({ data }: { data: ActionCenterData }) {
                 aria-hidden
               />
               <h2 className="text-sm font-semibold text-neutral-900">
-                {meta.label}
+                {t(`ac.section.${section}`)}
               </h2>
               <span className="text-[11px] tabular-nums text-neutral-400">
                 {list.length}
               </span>
               <span className="text-[11px] text-neutral-400 hidden sm:inline">
-                · {meta.help}
+                · {t(`ac.help.${section}`)}
               </span>
             </div>
 
