@@ -166,9 +166,7 @@ export type EventType =
   // admin / system
   | "admin.permissions_changed"
   | "admin.user_role_changed"
-  | "system.dev_reset"
-  // generic
-  | "note.added";
+  | "system.dev_reset";
 
 /* ===========================================================================
    Bell eligibility (Decision D)
@@ -417,7 +415,6 @@ export function eventTypeLabel(t: EventType): string {
     "admin.permissions_changed": "Permissions matrix changed",
     "admin.user_role_changed": "User role changed",
     "system.dev_reset": "Dev data reset",
-    "note.added": "Note added",
   };
   return map[t] ?? t;
 }

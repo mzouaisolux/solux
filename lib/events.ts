@@ -130,7 +130,6 @@ const DEFAULT_SEVERITY: Record<EventType, EventSeverity> = {
   "admin.permissions_changed": "high",
   "admin.user_role_changed": "high",
   "system.dev_reset": "critical",
-  "note.added": "low",
 };
 
 // EventStatus / EVENT_STATUSES / EventRow / EventComment are
