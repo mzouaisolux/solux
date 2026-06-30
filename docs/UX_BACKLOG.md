@@ -45,7 +45,7 @@ Legend: ✅ done · 🟡 partial · ⬜ untouched. Evidence = `file:line`.
 | 10 | Confirm Mark Won + chips in "⋯" menu | ✅ | `window.confirm` on Mark Won (`DocQuickActions.tsx:152`); raw chips collapsed into "Other status" row (`DocStatusActions.tsx:83-98`). |
 | 11 | Flatten navigation | ⬜ | Still grouped under "Clients & Projects" etc.; Service Requests = 2 clicks (`navigation.ts:84-150`). (Owner-deferred.) |
 | 12 | Localize FR/EN fully | 🟡 | ✅ **SR domain** (Sprint 2) + ✅ **task-list domain verified English** (Sprint 3 sweep: no residual FR). `srNeed` FR→EN (Sprint 1). Remaining app-wide sweep (Finance/Admin/CRM) → Sprint 6. |
-| 13 | Order lifecycle: hide proforma "draft" contradiction | ⬜ | Won order still shows "Draft — not sent" from the proforma (`WorkflowStepper.tsx:217-223`). |
+| 13 | Order lifecycle: hide proforma "draft" contradiction | ✅ | **Sprint 5**: `buildLifecycleStages` (shared by order + document pages) now shows "Drafted"/"Confirmed" once the deal has advanced (task list / production order / won) instead of "Draft — not sent" / "Mark won to confirm". Display-only; `state` logic unchanged. Verified live on order PO-SLX-HMZ-26-221 (Quotation→Drafted, Won→Confirmed; retina shot). |
 | 14 | Auto-open generated quotation | ✅ | `generateQuotationFromProject` redirects to `/documents/new?edit=` (`projects/actions.ts:1228`). |
 | 15 | Ops chips plain language + legend | ✅ | **Sprint 4**: both surfaces now plain — OrdersInFlight pills "Nd late · factory/external" (`order-pills.ts`) + action-center slip chips "Baseline / Now due / Nd late" (`action-center.ts`). No "+Xd"/"Initial" cryptic format remains (verified live). Separate legend unneeded — labels are self-explanatory + carry hover detail. |
 | 16 | Merge the two Ops KPI strips | ✅ | **Sprint 4**: one KPI section — "Key numbers" row (operational, featured) + "Business snapshot" row (commercial) under a divider; all 8 numbers kept; bottom strip removed (`OperationsTab.tsx`). Verified live (both groups present, one section). |
@@ -54,7 +54,7 @@ Legend: ✅ done · 🟡 partial · ⬜ untouched. Evidence = `file:line`.
 | 19 | Inline, form-preserving errors everywhere | 🟡 | ✅ client-code + **SR create/edit** (Sprint 2: persistent inline error near submit; wizard keeps all input mounted so nothing is lost). App-wide generalization → Sprint 6. |
 | 20 | Skeletons + status color on dense tables | 🟡 | Color-coding on TLM queue ✅. Skeleton loaders ⬜ **deferred to Sprint 6** (server-rendered pages need Suspense restructuring — higher effort, lower value than the rest of Sprint 3). |
 
-**Score: 14 ✅ · 4 🟡 · 2 ⬜** (after Sprint 4 — #15 & #16 → ✅; Sprint 3: #7 & #8 → ✅; Sprint 2: #9 & #17 → ✅. #12/#19/#20 → ✅ for the domains done so far, app-wide remainder in Sprint 6). Sprint 1 (Dashboards & notifications) **fully satisfies its core items** — #1, #2, #3, #5, plus greeting (#4a), bell, Messages bubble (#18), auto-open quote (#14), the "✓✓" fix, and Orders-in-Flight restored. Its *trailing edges* (#4b account menu, #15/#16 Ops refinements) are reassigned to the domain sprints below rather than left dangling.
+**Score: 15 ✅ · 4 🟡 · 1 ⬜** (after Sprint 5 — #13 → ✅; Sprint 4: #15 & #16; Sprint 3: #7 & #8; Sprint 2: #9 & #17. The 4 🟡 = #4 account-menu / #12 / #19 / #20 — done for the domains shipped, app-wide remainder in Sprint 6. The 1 ⬜ = #11 nav, owner-deferred.) Sprint 1 (Dashboards & notifications) **fully satisfies its core items** — #1, #2, #3, #5, plus greeting (#4a), bell, Messages bubble (#18), auto-open quote (#14), the "✓✓" fix, and Orders-in-Flight restored. Its *trailing edges* (#4b account menu, #15/#16 Ops refinements) are reassigned to the domain sprints below rather than left dangling.
 
 ---
 
@@ -92,7 +92,11 @@ Rule: a sprint is closed only when **implemented → verified with real per-role
 - **Main risks:** freight ⇐ packing is **intended** (owner) — present it as a sequence, do **not** "fix" it; KPI merge must not drop any number; `OperationsTab` carries the Orders-in-Flight WIP fix.
 - **Validation plan:** real **Operations** login → dashboard scan (one KPI strip, legible chips) → price a request end-to-end (containers → optional attachment → prices).
 
-### Sprint 5 — Quotations & Orders  *(final commercial polish)*
+### Sprint 5 — Quotations & Orders  ✅ COMPLETE (2026-06-30)
+> **Delivered:** #13 `buildLifecycleStages` (shared by the order + document pages) now reads "Drafted"/"Confirmed" once the deal has advanced (won / task list / production order) instead of the proforma's "Draft — not sent" / "Mark won to confirm" — the contradiction the audit cited on a live order is gone. Display-only; the stage `state` machine is untouched. **#19 (inline document errors): already satisfied** — `NewDocumentForm` already uses an inline `error` state (validation + `saveDocument` failures via `setError`, rendered at `:2571`), input preserved → verified, no change. **#10/#14 not regressed** (untouched since Sprint 1). **File:** `components/WorkflowStepper.tsx`. **Verified** (genuine logins, retina element-scoped screenshots): order PO-SLX-HMZ-26-221 lifecycle shows Quotation→**Drafted**, Won→**Confirmed**, Production→Running (no contradiction); document page shows no contradiction either. `tsc` (no new errors) + `check:schema` ✅ + `npm test` 252/252 + `e2e:regression` 23/23. Committed.
+>
+> Tooling: the screenshot harness was upgraded to **retina (2× DPI)** + an element-scoped `shot` step, so sprint screenshots are crisp and focused.
+
 - **Objective:** make the money screens unambiguous and ship the final commercial polish (most of #10/#14 already done).
 - **Screens:** quotation workflow + document (`documents/[id]/*`), order workflow + detail (`WorkflowStepper.tsx` + order page), proforma UX.
 - **Deliverables:** #13 order lifecycle shows the **deal status (Won)** and hides/relabels the proforma's internal "Draft — not sent" on a live order; status consistency across quote↔proforma↔order; #19 inline errors on document forms; verify #10/#14 not regressed; final polish pass.

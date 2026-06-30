@@ -214,13 +214,17 @@ export function buildLifecycleStages(args: {
   stages.push({
     key: "quotation",
     label: "Quotation",
-    sub: isDraft
-      ? "Draft — not sent"
-      : quotationActive
-      ? "Sent / negotiating"
-      : quotationWon || hasTaskList || productionOrderId
-      ? "Drafted"
-      : "Started",
+    sub:
+      // #13 — once the deal has advanced (won / task list / production order)
+      // the document here is the INTERNAL proforma; never show "Draft — not
+      // sent" on a live order. Only a genuine, un-advanced quote reads "Draft".
+      quotationWon || hasTaskList || productionOrderId
+        ? "Drafted"
+        : quotationActive
+        ? "Sent / negotiating"
+        : isDraft
+        ? "Draft — not sent"
+        : "Started",
     state:
       quotationWon || hasTaskList || productionOrderId
         ? "done"
@@ -237,7 +241,10 @@ export function buildLifecycleStages(args: {
     key: "won",
     label: "Won",
     sub:
-      quotationStatus === "won"
+      // #13 — a live task list / production order means the deal IS won, even
+      // though the internal proforma's own status is still "draft". Don't ask
+      // to "Mark won" on something already in production.
+      quotationStatus === "won" || hasTaskList || productionOrderId
         ? "Confirmed"
         : quotationDead
         ? "Did not close"
