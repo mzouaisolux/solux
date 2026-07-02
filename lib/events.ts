@@ -129,6 +129,7 @@ const DEFAULT_SEVERITY: Record<EventType, EventSeverity> = {
   "pr.cancelled": "critical",
   "admin.permissions_changed": "high",
   "admin.user_role_changed": "high",
+  "import.batch_completed": "low",
   "system.dev_reset": "critical",
 };
 

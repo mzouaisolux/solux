@@ -261,6 +261,18 @@ export const NAVIGATION: NavCategory[] = [
     ],
   },
 
+  // 4b) Sales — the standalone Sales & Analytics register ("online Excel"): the
+  //     since-2019 order ledger + its statistics. Autonomous module (m138), zero
+  //     CRM link. Anti-lockout: admins always see it; other roles get it once
+  //     sales_analytics.view is granted in the matrix.
+  {
+    id: "sales",
+    label: "Sales",
+    href: "/sales",
+    visibility: { kind: "capabilityOrAdmin", capabilities: ["sales_analytics.view"], includeFinance: true },
+    groups: [],
+  },
+
   // 5) Catalog — product master data: the catalog STRUCTURE that feeds
   //    quotations and production task lists. Pulled OUT of "Pricing" (catalog
   //    structure is not pricing) and given a first-level home so Categories is

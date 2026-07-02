@@ -11,10 +11,15 @@ node_modules */
 .env.local
 .env*.local
 .env.e2e
+.env*.bak
+*.bak
 
 # E2E harness artifacts (sessions, run reports, traces)
 e2e/.auth
 e2e/.runs
+
+# sales-analytics import data (real customer financials — never commit)
+/data/*.csv
 
 # misc
 .DS_Store

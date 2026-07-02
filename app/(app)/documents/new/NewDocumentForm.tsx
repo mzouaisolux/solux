@@ -7,6 +7,8 @@ import ProductConfigurator from "@/components/ProductConfigurator";
 // imported at module load — loaded lazily inside the click handlers below.
 import { type QuotationPDFData } from "@/components/QuotationPDF";
 import { CountrySelect } from "@/components/forms/CountrySelect";
+import { ClientSelect } from "@/components/forms/ClientSelect";
+import { createClientRecord } from "@/app/(app)/clients/actions";
 import { PhoneField } from "@/components/forms/PhoneField";
 import { dialForCountry } from "@/lib/countries";
 import { createClient as createBrowserSupabase } from "@/lib/supabase/client";
@@ -100,6 +102,31 @@ function emptyLine(): DocumentLine {
   };
 }
 
+// P0-5 — suggest a unique 3-letter client code from the company name.
+// Tries the first letters, then per-word initials, then rotates the 3rd
+// letter until it finds one not already taken.
+function suggestClientCode(
+  name: string,
+  clients: { client_code?: string | null }[]
+): string {
+  const taken = new Set(
+    clients.map((c) => (c.client_code || "").toUpperCase()).filter(Boolean)
+  );
+  const letters = (name || "").toUpperCase().replace(/[^A-Z]/g, "");
+  if (!letters) return "";
+  const words = (name || "").toUpperCase().split(/[^A-Z]+/).filter(Boolean);
+  const base = letters.slice(0, 3).padEnd(3, letters[0]);
+  const tries: string[] = [base];
+  if (words.length >= 3) tries.push(words[0][0] + words[1][0] + words[2][0]);
+  if (words.length >= 2) tries.push(words[0].slice(0, 2) + words[1][0]);
+  for (let i = 1; i < letters.length - 1; i++)
+    tries.push(letters[0] + letters[i] + letters[i + 1]);
+  const twoBase = letters.slice(0, 2).padEnd(2, letters[0]);
+  for (const ch of "ABCDEFGHIJKLMNOPQRSTUVWXYZ") tries.push(twoBase + ch);
+  for (const t of tries) if (/^[A-Z]{3}$/.test(t) && !taken.has(t)) return t;
+  return base;
+}
+
 export default function NewDocumentForm({
   products,
   options,
@@ -178,7 +205,18 @@ export default function NewDocumentForm({
   // Mandatory-affair — the chosen client's open affairs. Seeded from the
   // server (client-launched flow) and refreshed when the client changes so the
   // general flow can attach the quote to an affaire too.
-  const [affairs, setAffairs] = useState<{ id: string; name: string }[]>(clientAffairs);
+  const [affairs, setAffairs] = useState<
+    { id: string; name: string; status?: string | null; created_at?: string | null }[]
+  >(clientAffairs);
+  // Search filter for the affair picker (a client can run dozens of affairs).
+  const [affairQuery, setAffairQuery] = useState("");
+  // Once a project is picked the list collapses to a compact card; "Change"
+  // reopens it.
+  const [changingAffair, setChangingAffair] = useState(false);
+  // P1-6 — note shown when commercial defaults were inherited from the client's
+  // last quotation (currency / incoterm / port / payment); keeps the change
+  // transparent and clearly editable.
+  const [inheritedNote, setInheritedNote] = useState<string | null>(null);
   // Inline "+ New Project" — create an affair without leaving the quote.
   const [showNewAffair, setShowNewAffair] = useState(false);
   const [newAffairName, setNewAffairName] = useState("");
@@ -234,6 +272,11 @@ export default function NewDocumentForm({
   >([]);
   const [showNewClientAdvanced, setShowNewClientAdvanced] = useState(false);
   const [creatingClient, setCreatingClient] = useState(false);
+  // Client code is auto-suggested from the company name until the user edits
+  // it by hand — then we stop overriding their choice.
+  const [codeEdited, setCodeEdited] = useState(false);
+  // Split-button menu (secondary save actions) on the final review bar.
+  const [actionsMenuOpen, setActionsMenuOpen] = useState(false);
 
   const [docType, setDocType] = useState<DocType>(
     (initialDoc?.type as DocType) ?? "quotation"
@@ -455,88 +498,35 @@ export default function NewDocumentForm({
   // ----- Handlers -----
 
   async function handleCreateClient() {
-    if (!newClient.company_name.trim()) {
-      setError("Company name is required");
-      return;
-    }
-    const code = newClient.client_code.trim().toUpperCase();
-    if (!code) {
-      setError("Client code is required (3 letters, used in document numbers)");
-      return;
-    }
-    if (!/^[A-Z]{3}$/.test(code)) {
-      setError("Client code must be exactly 3 letters (e.g. ARL)");
-      return;
-    }
-
-    // Validate custom fields: any with a value must have a label.
-    const cleanFields = newClientCustomFields
-      .map((f) => ({ label: f.label.trim(), value: f.value.trim() }))
-      .filter((f) => f.label || f.value);
-    for (const f of cleanFields) {
-      if (!f.label) {
-        setError("Each custom field needs a label.");
-        return;
-      }
-    }
-
     setError(null);
     setCreatingClient(true);
-    const supabase = createBrowserSupabase();
-    // m058 RLS requires created_by = auth.uid() on insert — resolve the
-    // current user so the new client is owned by its creator.
-    const {
-      data: { user: authUser },
-    } = await supabase.auth.getUser();
-    const basePayload = {
-      company_name: newClient.company_name.trim(),
-      client_code: code,
-      starting_sequence_number:
-        Number(newClient.starting_sequence_number) || 0,
-      contact_name: newClient.contact_name.trim() || null,
-      email: newClient.email.trim() || null,
-      phone_number: newClient.phone_number.trim() || null,
-      country: newClient.country.trim() || null,
-      custom_fields: cleanFields,
-    };
-    // m036 export fields + m051 phone code + m058 owner. Retry without
-    // if a column is missing (partial migration history).
-    const extraPayload = {
-      phone_country_code: newClient.phone_country_code.trim() || null,
-      vat_number: newClient.vat_number.trim() || null,
-      address: newClient.address.trim() || null,
-      default_attention_to: newClient.default_attention_to.trim() || null,
-      created_by: authUser?.id ?? null,
-    };
-    const selectCols =
-      "id, company_name, contact_name, email, phone_number, country, client_code, starting_sequence_number, custom_fields";
-    let { data, error: err } = await supabase
-      .from("clients")
-      .insert({ ...basePayload, ...extraPayload })
-      .select(selectCols)
-      .single();
-    if (
-      err &&
-      /(address|vat_number|default_attention_to|phone_country_code|created_by)/.test(
-        err.message ?? ""
-      )
-    ) {
-      ({ data, error: err } = await supabase
-        .from("clients")
-        .insert(basePayload)
-        .select(selectCols)
-        .single());
-    }
+    // Unified path (P0-5) — same server action the standalone modal uses, so
+    // both share validation, friendly duplicate-code errors, and the
+    // `client.created` audit event. We stay on the page and select the result.
+    const res = await createClientRecord({
+      company_name: newClient.company_name,
+      client_code: newClient.client_code,
+      contact_name: newClient.contact_name,
+      email: newClient.email,
+      phone_number: newClient.phone_number,
+      phone_country_code: newClient.phone_country_code,
+      country: newClient.country,
+      vat_number: newClient.vat_number,
+      address: newClient.address,
+      default_attention_to: newClient.default_attention_to,
+      starting_sequence_number: Number(newClient.starting_sequence_number) || 0,
+      custom_fields: newClientCustomFields,
+    });
     setCreatingClient(false);
-
-    if (err || !data) {
-      setError(err?.message ?? "Failed to create client");
+    if (!res.ok) {
+      setError(res.error);
       return;
     }
-    setClients((cs) => [data as Client, ...cs]);
-    setClientId(data.id);
+    setClients((cs) => [res.client as unknown as Client, ...cs]);
+    setClientId(res.client.id);
     setShowNewClient(false);
     setShowNewClientAdvanced(false);
+    setCodeEdited(false);
     setNewClient({
       company_name: "",
       client_code: "",
@@ -612,20 +602,82 @@ export default function NewDocumentForm({
       const supabase = createBrowserSupabase();
       const { data } = await supabase
         .from("affairs")
-        .select("id, name")
+        .select("id, name, status, created_at")
         .eq("client_id", clientId)
         .is("archived_at", null)
         .not("status", "in", "(lost,abandoned)")
         .order("created_at", { ascending: false });
       if (cancelled) return;
-      const list = (data ?? []) as { id: string; name: string }[];
+      const list = (data ?? []) as {
+        id: string;
+        name: string;
+        status?: string | null;
+        created_at?: string | null;
+      }[];
       setAffairs(list);
       setAffairId((cur) => (cur && list.some((a) => a.id === cur) ? cur : ""));
+      setAffairQuery("");
+      setChangingAffair(false);
     })();
     return () => {
       cancelled = true;
     };
   }, [clientId, isRevision, isEdit]);
+
+  // P1-6 — inherit the client's commercial defaults from their most recent
+  // quotation (currency / incoterm / destination port / payment) so the rep
+  // doesn't re-key what this client already had. Fresh new documents only —
+  // a revision/edit keeps the source's own values. Everything stays editable.
+  useEffect(() => {
+    if (!clientId || isRevision || isEdit) {
+      setInheritedNote(null);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      const supabase = createBrowserSupabase();
+      const { data } = await supabase
+        .from("documents")
+        .select(
+          "number, currency, incoterm, port_of_destination, payment_mode, payment_terms, date"
+        )
+        .eq("client_id", clientId)
+        .order("date", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (cancelled) return;
+      const d = data as any;
+      if (!d) {
+        setInheritedNote(null);
+        return;
+      }
+      if (d.currency) setCurrency(d.currency as Currency);
+      if (d.incoterm) setIncoterm(d.incoterm as Incoterm);
+      if (
+        typeof d.port_of_destination === "string" &&
+        d.port_of_destination.trim()
+      )
+        setPortOfDestination(d.port_of_destination);
+      if (d.payment_mode) setPaymentMode(d.payment_mode as PaymentMode);
+      if (d.payment_terms) setPaymentTerms(d.payment_terms as PaymentTerms);
+      setInheritedNote(
+        d.number ? `from the last quotation (${d.number})` : "from the last quotation"
+      );
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [clientId, isRevision, isEdit]);
+
+  // P0-5 — auto-suggest a unique 3-letter client code from the company name
+  // while creating a new client, until the user types their own.
+  useEffect(() => {
+    if (!showNewClient || codeEdited) return;
+    const suggestion = suggestClientCode(newClient.company_name, clients);
+    setNewClient((c) =>
+      c.client_code === suggestion ? c : { ...c, client_code: suggestion }
+    );
+  }, [newClient.company_name, showNewClient, codeEdited, clients]);
 
   function buildPayload() {
     if (!clientId) {
@@ -672,7 +724,7 @@ export default function NewDocumentForm({
     // document needs an explicit selection here.
     if (!affairId && !reviseOfId && !editOfId) {
       setError(
-        "Ce document doit être rattaché à une affaire (projet). Sélectionnez une affaire (ou créez-en une via « New service request ») avant d'enregistrer."
+        "This quotation must belong to a project. Select a project (or create one with + New Project) before saving."
       );
       return null;
     }
@@ -977,6 +1029,7 @@ export default function NewDocumentForm({
 
   // ---- Summary data (consumed by the sticky right sidebar) ----
   const selectedClientObj = clients.find((c) => c.id === clientId) ?? null;
+  const selectedAffair = affairs.find((a) => a.id === affairId) ?? null;
   const linesWithProducts = lines
     .map((l) => ({
       line: l,
@@ -1108,19 +1161,18 @@ export default function NewDocumentForm({
             {/* Affair selector is rendered once, below, for every flow. */}
           </>
         ) : !showNewClient ? (
-          <select
+          <ClientSelect
+            clients={clients}
             value={clientId}
-            onChange={(e) => setClientId(e.target.value)}
-            className="w-full rounded border px-3 py-2"
-          >
-            <option value="">— select a client —</option>
-            {clients.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.company_name}
-                {c.country ? ` (${c.country})` : ""}
-              </option>
-            ))}
-          </select>
+            onSelect={(id) => {
+              setClientId(id);
+              setError(null);
+            }}
+            onCreateNew={(qName) => {
+              setNewClient((c) => ({ ...c, company_name: qName }));
+              setShowNewClient(true);
+            }}
+          />
         ) : (
           <div className="rounded border border-neutral-200 bg-neutral-50/40 p-4 space-y-4">
             {/* Required: identity + code */}
@@ -1148,16 +1200,56 @@ export default function NewDocumentForm({
                   value={newClient.client_code}
                   maxLength={3}
                   placeholder="e.g. ARL"
-                  onChange={(e) =>
+                  onChange={(e) => {
+                    setCodeEdited(true);
                     setNewClient({
                       ...newClient,
                       client_code: e.target.value
                         .toUpperCase()
                         .replace(/[^A-Z]/g, ""),
-                    })
-                  }
+                    });
+                  }}
                   className="mt-1 w-full rounded border border-neutral-200 px-3 py-2 font-mono uppercase"
                 />
+                {(() => {
+                  const code = newClient.client_code;
+                  if (code.length < 3)
+                    return (
+                      <span className="mt-1 block text-[11px] text-neutral-400">
+                        Auto-suggested from the company name — edit if you like.
+                      </span>
+                    );
+                  const taken = clients.some(
+                    (c) => (c.client_code || "").toUpperCase() === code
+                  );
+                  const alt = suggestClientCode(newClient.company_name, clients);
+                  return taken ? (
+                    <span className="mt-1 block text-[11px] text-amber-600">
+                      Code “{code}” is taken
+                      {alt && alt !== code ? (
+                        <>
+                          {" "}
+                          — try{" "}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setCodeEdited(true);
+                              setNewClient((c) => ({ ...c, client_code: alt }));
+                            }}
+                            className="font-mono font-medium text-solux-dark underline"
+                          >
+                            {alt}
+                          </button>
+                        </>
+                      ) : null}
+                      .
+                    </span>
+                  ) : (
+                    <span className="mt-1 block text-[11px] text-emerald-600">
+                      ✓ Available
+                    </span>
+                  );
+                })()}
               </label>
             </div>
 
@@ -1417,43 +1509,149 @@ export default function NewDocumentForm({
             on revise/edit (the affair is inherited/kept). */}
         {clientId && !showNewClient && !isRevision && !isEdit && (
           <div className="mt-3">
-            <span className="text-neutral-500 text-xs uppercase tracking-widerx">
-              Affair / Project *
-            </span>
-            <div className="mt-1 flex items-center gap-2">
-              {affairs.length > 0 ? (
-                <select
-                  value={affairId}
-                  onChange={(e) => {
-                    setAffairId(e.target.value);
-                    const a = affairs.find((x) => x.id === e.target.value);
-                    setAffairName(a?.name ?? "");
-                  }}
-                  className="flex-1 rounded border px-3 py-2"
-                >
-                  <option value="">— Select project —</option>
-                  {affairs.map((a) => (
-                    <option key={a.id} value={a.id}>
-                      {a.name}
-                    </option>
-                  ))}
-                </select>
-              ) : (
-                <span className="flex-1 text-[13px] text-neutral-500">
-                  No project yet for this client — create one →
+            {inheritedNote && (
+              <p className="mb-2 flex items-start gap-1.5 text-[11px] text-neutral-500">
+                <span className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full bg-solux" />
+                <span>
+                  Currency, Incoterm, destination port and payment inherited{" "}
+                  {inheritedNote} — all editable below.
                 </span>
-              )}
+              </p>
+            )}
+            <div className="flex items-center justify-between">
+              <span className="text-neutral-500 text-xs uppercase tracking-widerx">
+                Affair / Project *
+              </span>
               <button
                 type="button"
                 onClick={() => {
                   setNewAffairError(null);
                   setShowNewAffair(true);
                 }}
-                className="shrink-0 rounded-md border border-solux bg-solux/5 px-3 py-2 text-sm font-medium text-solux-dark hover:bg-solux/10"
+                className="text-sm text-solux-dark hover:underline"
               >
                 + New Project
               </button>
             </div>
+
+            {affairs.length === 0 ? (
+              <div className="mt-2 rounded-lg border border-dashed border-solux/50 bg-solux/5 px-4 py-5 text-center">
+                <div className="text-sm font-medium text-neutral-800">
+                  First project for{" "}
+                  {selectedClientObj?.company_name ?? "this client"}
+                </div>
+                <p className="mx-auto mt-1 max-w-sm text-xs text-neutral-500">
+                  Every quotation belongs to a project (affair) — it keeps this
+                  client&apos;s quotes, orders and documents together. Create the
+                  first one to continue.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setNewAffairError(null);
+                    setShowNewAffair(true);
+                  }}
+                  className="mt-3 rounded-md bg-solux px-4 py-2 text-sm font-semibold text-white hover:bg-solux-dark"
+                >
+                  + New Project
+                </button>
+              </div>
+            ) : selectedAffair && !changingAffair ? (
+              <div className="mt-2 flex items-center justify-between gap-3 rounded-lg border border-solux/40 bg-solux/5 px-3 py-2.5">
+                <span className="flex min-w-0 items-center gap-2">
+                  <span className="text-sm font-semibold text-solux-dark">✓</span>
+                  <span className="min-w-0">
+                    <span className="block truncate text-sm font-medium text-neutral-800">
+                      {selectedAffair.name}
+                    </span>
+                    <span className="block text-[11px] text-neutral-500">
+                      {selectedAffair.status
+                        ? selectedAffair.status.replace(/_/g, " ")
+                        : "Active"}
+                      {selectedAffair.created_at
+                        ? ` · created ${new Date(
+                            selectedAffair.created_at
+                          ).toLocaleDateString("en-GB")}`
+                        : ""}
+                    </span>
+                  </span>
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setChangingAffair(true)}
+                  className="shrink-0 text-sm text-solux-dark hover:underline"
+                >
+                  Change
+                </button>
+              </div>
+            ) : (
+              (() => {
+                const affairsFiltered = affairs.filter((a) =>
+                  a.name
+                    .toLowerCase()
+                    .includes(affairQuery.trim().toLowerCase())
+                );
+                return (
+                  <div className="mt-2 overflow-hidden rounded-lg border border-neutral-200">
+                    {affairs.length > 6 && (
+                      <div className="border-b border-neutral-100 p-2">
+                        <input
+                          type="search"
+                          value={affairQuery}
+                          onChange={(e) => setAffairQuery(e.target.value)}
+                          placeholder="Search a project…"
+                          className="w-full rounded border border-neutral-200 px-3 py-1.5 text-sm"
+                        />
+                      </div>
+                    )}
+                    <div className="max-h-56 divide-y divide-neutral-100 overflow-y-auto">
+                      {affairsFiltered.map((a) => {
+                        const active = a.id === affairId;
+                        return (
+                          <button
+                            key={a.id}
+                            type="button"
+                            onClick={() => {
+                              setAffairId(a.id);
+                              setAffairName(a.name);
+                              setChangingAffair(false);
+                              setError(null);
+                            }}
+                            className={`flex w-full items-center justify-between gap-3 px-3 py-2 text-left ${
+                              active ? "bg-solux/10" : "hover:bg-neutral-50"
+                            }`}
+                          >
+                            <span className="min-w-0">
+                              <span className="block truncate text-sm font-medium text-neutral-800">
+                                {a.name}
+                              </span>
+                              <span className="block text-[11px] text-neutral-500">
+                                {a.status ? a.status.replace(/_/g, " ") : "Active"}
+                                {a.created_at
+                                  ? ` · created ${new Date(
+                                      a.created_at
+                                    ).toLocaleDateString("en-GB")}`
+                                  : ""}
+                              </span>
+                            </span>
+                            {active && (
+                              <span className="shrink-0 text-sm font-semibold text-solux-dark">
+                                ✓
+                              </span>
+                            )}
+                          </button>
+                        );
+                      })}
+                      {affairsFiltered.length === 0 && (
+                        <div className="px-3 py-3 text-xs text-neutral-500">
+                          No project matches “{affairQuery}”.
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })()
+            )}
           </div>
         )}
 
@@ -1590,40 +1788,8 @@ export default function NewDocumentForm({
           "Affair / project name" field was removed (#4) — one field, no
           ambiguity. */}
 
-      {/* ---------- VALIDATION REQUEST (advisory, m068) ----------
-          Optional: flag the quote for a manager's review on save. Never
-          blocks saving or sending — it sets the quote "Awaiting review"
-          and notifies management. You can also do this later from the
-          quotation's page. */}
-      <section className="rounded-lg border border-neutral-200 bg-neutral-50/60 p-4">
-        <label className="flex items-start gap-2.5 cursor-pointer">
-          <input
-            type="checkbox"
-            checked={requestValidation}
-            onChange={(e) => setRequestValidation(e.target.checked)}
-            className="mt-0.5 h-4 w-4 rounded border-neutral-300 text-solux focus:ring-solux/40"
-          />
-          <span>
-            <span className="block text-sm font-medium text-neutral-900">
-              Request management validation
-            </span>
-            <span className="block text-[11px] text-neutral-500 mt-0.5">
-              Flags this quote for a manager to review (e.g. an unusual
-              discount or payment terms). Advisory only — it never blocks
-              saving or sending.
-            </span>
-          </span>
-        </label>
-        {requestValidation && (
-          <textarea
-            value={validationRequestNote}
-            onChange={(e) => setValidationRequestNote(e.target.value)}
-            rows={2}
-            placeholder="Why does this need a second opinion? (optional)"
-            className="mt-2.5 w-full rounded-md border border-neutral-300 px-3 py-2 text-sm focus:border-solux focus:outline-none focus:ring-1 focus:ring-solux"
-          />
-        )}
-      </section>
+      {/* Management-validation request moved to the final review area (P1-7) —
+          it now sits next to the save actions and only nudges when relevant. */}
 
       {/* ---------- LINES ---------- */}
       <section className="space-y-3">
@@ -2570,6 +2736,51 @@ export default function NewDocumentForm({
 
         {error && <p className="text-sm text-red-600">{error}</p>}
 
+        {/* Management validation (relocated here, P1-7) — the last checkpoint
+            before sending, with a nudge only when the quote has unusual terms. */}
+        <div className="rounded-lg border border-neutral-200 bg-neutral-50/60 p-3">
+          <label className="flex items-start gap-2.5 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={requestValidation}
+              onChange={(e) => setRequestValidation(e.target.checked)}
+              className="mt-0.5 h-4 w-4 rounded border-neutral-300 text-solux focus:ring-solux/40"
+            />
+            <span>
+              <span className="block text-sm font-medium text-neutral-900">
+                Request management validation
+              </span>
+              <span className="block text-[11px] text-neutral-500 mt-0.5">
+                Flags this quote for a manager to review. Advisory only — never
+                blocks saving or sending.
+              </span>
+            </span>
+          </label>
+          {!requestValidation &&
+            (anyManual ||
+              lines.some((l) => l.discount_type) ||
+              (totalMargin !== null && totalMargin < 0)) && (
+              <button
+                type="button"
+                onClick={() => setRequestValidation(true)}
+                className="mt-2 inline-flex items-center gap-1.5 rounded-md bg-amber-50 px-2.5 py-1 text-[11px] font-medium text-amber-700 ring-1 ring-inset ring-amber-200 hover:bg-amber-100"
+              >
+                Unusual terms on this quote — request a review?
+              </button>
+            )}
+          {requestValidation && (
+            <textarea
+              value={validationRequestNote}
+              onChange={(e) => setValidationRequestNote(e.target.value)}
+              rows={2}
+              placeholder="Why does this need a second opinion? (optional)"
+              className="mt-2.5 w-full rounded-md border border-neutral-300 px-3 py-2 text-sm focus:border-solux focus:outline-none focus:ring-1 focus:ring-solux"
+            />
+          )}
+        </div>
+
+        {/* Save-as-draft is a visible button again; Preview & Send stays the
+            primary, with the rarer Finalize behind the split caret (P1-8). */}
         <div className="flex flex-wrap items-center justify-end gap-2">
           <button
             type="button"
@@ -2582,29 +2793,55 @@ export default function NewDocumentForm({
                 : "Save as draft — no PDF generated. You can come back and finalize later."
             }
           >
-            {isPending
-              ? "Saving…"
-              : isEdit
-              ? "Save changes"
-              : "Save draft"}
+            {isPending ? "Saving…" : isEdit ? "Save changes" : "Save as draft"}
           </button>
-          <button
-            type="button"
-            onClick={handleSaveAndGenerate}
-            disabled={isPending || previewBuilding}
-            className="btn-secondary"
-            title="Save document + generate PDF in one click"
-          >
-            {isPending ? "Working…" : "Finalize & generate"}
-          </button>
-          <button
-            type="button"
-            onClick={handlePreview}
-            disabled={isPending || previewBuilding}
-            className="btn-primary"
-          >
-            {previewBuilding ? "Preparing…" : "Preview PDF"}
-          </button>
+          <div className="relative inline-flex">
+            <button
+              type="button"
+              onClick={handlePreview}
+              disabled={isPending || previewBuilding}
+              className="btn-primary rounded-r-none"
+            >
+              {previewBuilding
+                ? "Preparing…"
+                : isPending
+                ? "Working…"
+                : "Preview & Send"}
+            </button>
+            <button
+              type="button"
+              aria-label="More save options"
+              onClick={() => setActionsMenuOpen((v) => !v)}
+              disabled={isPending || previewBuilding}
+              className="btn-primary rounded-l-none border-l border-white/25 px-2"
+            >
+              ▾
+            </button>
+            {actionsMenuOpen && (
+              <>
+                <div
+                  className="fixed inset-0 z-10"
+                  onClick={() => setActionsMenuOpen(false)}
+                />
+                <div className="absolute right-0 top-full z-20 mt-1 w-64 overflow-hidden rounded-md border border-neutral-200 bg-white shadow-lg">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActionsMenuOpen(false);
+                      handleSaveAndGenerate();
+                    }}
+                    disabled={isPending || previewBuilding}
+                    className="block w-full px-3 py-2 text-left text-sm hover:bg-neutral-50"
+                  >
+                    <span className="font-medium">Finalize &amp; generate</span>
+                    <span className="block text-[11px] text-neutral-500">
+                      Save and generate the PDF in one click.
+                    </span>
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
         </div>
       </section>
       </div>
@@ -2631,6 +2868,84 @@ export default function NewDocumentForm({
             DRAFT
           </span>
         </div>
+
+        {/* Readiness cockpit — answers "can I send this now?" without scrolling (P2-9). */}
+        {(() => {
+          const checks = [
+            {
+              label: "Client",
+              ok: !!clientId && !!selectedClientObj?.client_code,
+              required: true,
+            },
+            {
+              label: "Project / affair",
+              ok: !!affairId || !!reviseOfId || !!editOfId,
+              required: true,
+            },
+            {
+              label: "Products",
+              ok:
+                lines.some(
+                  (l) => !!l.product_id || l.client_product_name != null
+                ) && !lines.some((l) => !l.product_id && l.category_id),
+              required: true,
+            },
+            {
+              label: "Payment terms",
+              ok: !validatePaymentTerms(
+                paymentMode,
+                normalizePaymentTerms(paymentMode, paymentTerms)
+              ),
+              required: true,
+            },
+            {
+              label: "Destination port",
+              ok: !!portOfDestination.trim(),
+              required: false,
+            },
+          ];
+          const requiredLeft = checks.filter((c) => c.required && !c.ok).length;
+          const ready = requiredLeft === 0;
+          return (
+            <div className="panel px-3 py-2.5 text-xs">
+              <div className="mb-1.5 flex items-center gap-1.5">
+                <span
+                  className={`inline-flex h-4 w-4 items-center justify-center rounded-full text-[10px] font-bold text-white ${
+                    ready ? "bg-emerald-500" : "bg-amber-500"
+                  }`}
+                >
+                  {ready ? "✓" : requiredLeft}
+                </span>
+                <span className="text-[11px] font-semibold uppercase tracking-widerx text-neutral-600">
+                  {ready ? "Ready to send" : `${requiredLeft} required left`}
+                </span>
+              </div>
+              <ul className="space-y-1">
+                {checks.map((c) => (
+                  <li key={c.label} className="flex items-center gap-2">
+                    <span
+                      className={`w-3 text-center text-sm leading-none ${
+                        c.ok
+                          ? "text-emerald-600"
+                          : c.required
+                          ? "text-amber-500"
+                          : "text-neutral-300"
+                      }`}
+                    >
+                      {c.ok ? "✓" : c.required ? "•" : "○"}
+                    </span>
+                    <span className={c.ok ? "text-neutral-700" : "text-neutral-500"}>
+                      {c.label}
+                      {!c.required && !c.ok && (
+                        <span className="text-neutral-400"> · recommended</span>
+                      )}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          );
+        })()}
 
         {/* Products — compact list, name · qty · line subtotal */}
         {linesWithProducts.length > 0 && (

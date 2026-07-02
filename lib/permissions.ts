@@ -97,7 +97,12 @@ export type Capability =
   | "admin.manage_sales_conditions"
   // pricing (m122 — was requireAdmin / requireAdminOrFinance)
   | "pricing.manage"
-  | "pricing.manage_costs";
+  | "pricing.manage_costs"
+  // sales & analytics register (m138 — standalone module; seed in a follow-up
+  // matrix migration. Until then admins pass via the anti-lockout floor.)
+  | "sales_analytics.view"
+  | "sales_order.edit"
+  | "sales_client.merge";
 
 /* ===========================================================================
    CACHE

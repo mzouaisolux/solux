@@ -230,61 +230,101 @@ function customFields(fd: FormData) {
   return out;
 }
 
-export async function createClientAction(formData: FormData) {
+export type NewClientInput = {
+  company_name: string;
+  client_code: string;
+  contact_name?: string | null;
+  email?: string | null;
+  phone_number?: string | null;
+  phone_country_code?: string | null;
+  country?: string | null;
+  vat_number?: string | null;
+  address?: string | null;
+  default_attention_to?: string | null;
+  starting_sequence_number?: number;
+  custom_fields?: { label: string; value: string }[];
+};
+
+export type CreatedClient = {
+  id: string;
+  company_name: string;
+  contact_name: string | null;
+  email: string | null;
+  phone_number: string | null;
+  country: string | null;
+  client_code: string | null;
+  starting_sequence_number: number | null;
+  custom_fields: { label: string; value: string }[] | null;
+};
+
+// Single source of truth for creating a client. Returns a discriminated
+// result (never throws for validation/DB issues, never redirects) so BOTH
+// entry points share it: the standalone modal (createClientAction, which
+// wraps this + redirects) and the inline new-client form on the quotation
+// builder (which stays on the page and selects the new client). Emits the
+// `client.created` event on every path so the audit/event registry sees it.
+export async function createClientRecord(
+  input: NewClientInput
+): Promise<{ ok: true; client: CreatedClient } | { ok: false; error: string }> {
   const supabase = createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
 
-  // Base columns — always present.
-  const basePayload = {
-    company_name: str(formData, "company_name"),
-    contact_name: str(formData, "contact_name"),
-    email: str(formData, "email"),
-    phone_number: str(formData, "phone_number"),
-    country: str(formData, "country"),
-    client_code: clientCode(formData),
-    starting_sequence_number: num(formData, "starting_sequence_number", 0),
-    custom_fields: customFields(formData),
-  };
-  // Validation errors are RETURNED (not thrown) so the modal can show them
-  // inline and keep everything the user typed — throwing bubbles to the
-  // generic "We couldn't complete that action" boundary and discards the form.
-  if (!basePayload.company_name) return { error: "Company name is required." };
-  // A client without a 3-letter code silently breaks every quotation save
-  // later (buildPayload in the document form rejects it). Enforce it here at
-  // creation — the single source of truth — so the broken state can never be
-  // created. The inline new-client flow on the quotation form already
-  // requires it; this brings the dedicated form in line. (clientCode() above
-  // validates the 3-letter format; this guards the empty case with a clear,
-  // actionable message.)
-  if (!basePayload.client_code) {
+  const company_name = (input.company_name ?? "").trim();
+  if (!company_name) return { ok: false, error: "Company name is required." };
+
+  const code = (input.client_code ?? "").trim().toUpperCase();
+  if (!code) {
     return {
+      ok: false,
       error:
-        "A 3-letter client code is required (e.g. ARL). It is used in every quotation, proforma and production-order number — a client without it can't have documents saved.",
+        "A 3-letter client code is required (e.g. ARL). It appears in every quotation, proforma and order number.",
     };
   }
+  if (!/^[A-Z]{3}$/.test(code)) {
+    return { ok: false, error: "Client code must be exactly 3 letters (e.g. ARL)." };
+  }
 
-  // Newer columns (m036 export fields + m051 phone code + m058 owner).
-  // We attempt the insert with them included; if the DB rejects because
-  // a column is missing (partial migration history), retry with the
-  // base shape so the client still gets created with what we can store.
-  // `created_by` is REQUIRED by the m058 RLS insert policy — once that
-  // migration is applied, every new client gets an owner.
+  const cleanFields: { label: string; value: string }[] = [];
+  for (const f of input.custom_fields ?? []) {
+    const label = String(f?.label ?? "").trim();
+    const value = String(f?.value ?? "").trim();
+    if (!label && !value) continue;
+    if (!label) return { ok: false, error: "Each custom field needs a label." };
+    cleanFields.push({ label, value });
+  }
+
+  const clean = (v: unknown) => {
+    const s = v == null ? "" : String(v).trim();
+    return s || null;
+  };
+  const basePayload = {
+    company_name,
+    client_code: code,
+    contact_name: clean(input.contact_name),
+    email: clean(input.email),
+    phone_number: clean(input.phone_number),
+    country: clean(input.country),
+    starting_sequence_number: Number(input.starting_sequence_number) || 0,
+    custom_fields: cleanFields,
+  };
+  // Newer columns (m036 export fields + m051 phone code + m058 owner) — retry
+  // without them if a column is missing (partial migration history).
   const extraPayload = {
-    address: str(formData, "address"),
-    vat_number: str(formData, "vat_number"),
-    default_attention_to: str(formData, "default_attention_to"),
-    phone_country_code: str(formData, "phone_country_code"),
+    address: clean(input.address),
+    vat_number: clean(input.vat_number),
+    default_attention_to: clean(input.default_attention_to),
+    phone_country_code: clean(input.phone_country_code),
     created_by: user?.id ?? null,
   };
-  const payload = { ...basePayload, ...extraPayload };
+  const selectCols =
+    "id, company_name, contact_name, email, phone_number, country, client_code, starting_sequence_number, custom_fields";
 
-  // Insert + return the new row so we can emit an event with the real id.
   let { data: inserted, error } = await supabase
     .from("clients")
-    .insert(payload)
-    .select("id, company_name, client_code")
+    .insert({ ...basePayload, ...extraPayload })
+    .select(selectCols)
     .single();
   if (
     error &&
@@ -295,49 +335,63 @@ export async function createClientAction(formData: FormData) {
     ({ data: inserted, error } = await supabase
       .from("clients")
       .insert(basePayload)
-      .select("id, company_name, client_code")
+      .select(selectCols)
       .single());
   }
-  if (error) {
-    // Surface a friendly, inline error instead of crashing the page. The most
-    // common case by far is a duplicate 3-letter code (the space is tiny) —
-    // catch the unique-violation explicitly so the user can just pick another.
-    const msg = error.message ?? "";
-    if ((error as { code?: string }).code === "23505" || /client_code|unique/i.test(msg)) {
+  if (error || !inserted) {
+    // Friendly, inline error — never a raw DB string. The common case by far is
+    // a duplicate 3-letter code; catch the unique violation explicitly.
+    const msg = error?.message ?? "";
+    if (
+      (error as { code?: string } | null)?.code === "23505" ||
+      /client_code|unique/i.test(msg)
+    ) {
       return {
-        error: `Client code "${basePayload.client_code}" is already used by another client. Please choose a different 3-letter code.`,
+        ok: false,
+        error: `Client code "${code}" is already used by another client. Pick a different 3-letter code.`,
       };
     }
-    return { error: msg || "Could not create the client. Please try again." };
+    return { ok: false, error: msg || "Could not create the client. Please try again." };
   }
 
-  if (inserted?.id) {
-    await emitEvent({
-      entity_type: "client",
-      entity_id: inserted.id,
-      event_type: "client.created",
-      message: `Client created: ${inserted.company_name}${
-        inserted.client_code ? ` (${inserted.client_code})` : ""
-      }`,
-      payload: {
-        company_name: inserted.company_name,
-        client_code: inserted.client_code,
-        country: payload.country,
-      },
-      bestEffort: true,
-    });
-  }
-
+  await emitEvent({
+    entity_type: "client",
+    entity_id: inserted.id,
+    event_type: "client.created",
+    message: `Client created: ${inserted.company_name}${
+      inserted.client_code ? ` (${inserted.client_code})` : ""
+    }`,
+    payload: {
+      company_name: inserted.company_name,
+      client_code: inserted.client_code,
+      country: basePayload.country,
+    },
+    bestEffort: true,
+  });
   revalidatePath("/clients");
-  // F6 fix — redirect SERVER-SIDE (deterministic, handled at the server-action
-  // boundary by Next) to the created client, carrying a one-shot ?flash success
-  // toast. The previous pattern returned the id and let the modal's CLIENT-side
-  // router.push() navigate, which did NOT fire reliably (no redirect, no toast,
-  // user stranded on /clients). redirect() throws NEXT_REDIRECT and never returns.
+  return { ok: true, client: inserted as CreatedClient };
+}
+
+// Standalone new-client modal (<form action>). Thin wrapper over
+// createClientRecord that redirects to the new client on success (F6).
+export async function createClientAction(formData: FormData) {
+  const res = await createClientRecord({
+    company_name: str(formData, "company_name") ?? "",
+    client_code: clientCode(formData) ?? "",
+    contact_name: str(formData, "contact_name"),
+    email: str(formData, "email"),
+    phone_number: str(formData, "phone_number"),
+    phone_country_code: str(formData, "phone_country_code"),
+    country: str(formData, "country"),
+    vat_number: str(formData, "vat_number"),
+    address: str(formData, "address"),
+    default_attention_to: str(formData, "default_attention_to"),
+    starting_sequence_number: num(formData, "starting_sequence_number", 0),
+    custom_fields: customFields(formData),
+  });
+  if (!res.ok) return { error: res.error };
   redirect(
-    inserted?.id
-      ? `/clients/${inserted.id}?flash=${encodeURIComponent("✓ Client created")}`
-      : `/clients?flash=${encodeURIComponent("✓ Client created")}`,
+    `/clients/${res.client.id}?flash=${encodeURIComponent("✓ Client created")}`
   );
 }
 

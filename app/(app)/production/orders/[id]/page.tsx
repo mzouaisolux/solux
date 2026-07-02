@@ -8,6 +8,7 @@ import {
   SummaryRow,
 } from "@/components/production/CollapsibleSection";
 import { PremiumPill } from "@/components/production/premium-ui";
+import { StatusSelect } from "@/components/production/StatusSelect";
 import { getEffectiveRole } from "@/lib/auth";
 import { resolveUserLabelStrings } from "@/lib/user-display";
 import { ATTACHMENTS_BUCKET } from "@/lib/attachments";
@@ -92,10 +93,7 @@ import {
   type OperationsShippingState,
 } from "@/components/production/OrderOperationsStrip";
 import { DelayTimelineCard } from "@/components/production/DelayTimelineCard";
-import {
-  LiveStatusSidebar,
-  type StageTone,
-} from "@/components/production/LiveStatusSidebar";
+import { type StageTone } from "@/components/production/LiveStatusSidebar";
 import { Timeline } from "@/components/Timeline";
 import { CancellationBanner } from "@/components/CancellationBanner";
 import { SubmitButton } from "@/components/SubmitButton";
@@ -566,8 +564,8 @@ export default async function ProductionOrderDetailPage({
         }
       : null;
 
-  // Single derivation of the live operational state — feeds both the top
-  // OrderOperationsStrip and the sticky LiveStatusSidebar so they never drift.
+  // Single derivation of the live operational state — feeds the top
+  // OrderOperationsStrip KPI cards.
   const liveStatus = {
     initialEta: (order.initial_production_deadline ?? null) as string | null,
     currentEta: (order.current_production_deadline ?? null) as string | null,
@@ -914,21 +912,23 @@ export default async function ProductionOrderDetailPage({
         <WorkflowStepper stages={lifecycle} premium />
       </section>
 
-      {/* ---------- TOP OPERATIONAL STRIP (m072) ----------
+      {/* ---------- TOP OPERATIONAL STRIP (m072) — sticky ----------
           The single most important read on the page: who owes what
           right now? Five cards — initial ETA, current ETA, delay
           (factory vs external split), payment, shipping.
-          Mobile: this strip is the only KPI surface. lg+: the sticky
-          sidebar on the right takes over as the operator scrolls. */}
-      <OrderOperationsStrip {...liveStatus} />
+          lg+: sticks 62px below the sticky nav so the live status stays
+          visible while the operator scrolls down to edit — this replaced
+          the old right-hand sidebar. The wrapper bleeds full-width and
+          fills with the page canvas so content scrolls cleanly under it. */}
+      <div className="lg:sticky lg:top-[62px] lg:z-30 lg:-mx-6 lg:border-b lg:border-[color:var(--line)] lg:bg-[color:var(--canvas)] lg:px-6 lg:py-3">
+        <OrderOperationsStrip {...liveStatus} />
+      </div>
 
-      {/* ---------- 2-COLUMN COCKPIT (m075) ----------
-          Main content on the left, sticky live-status sidebar on the right.
-          Single source of truth — both surfaces consume `liveStatus`. The
-          sidebar hides on narrow screens; the top strip stays as the
-          fallback KPI view. */}
-      <div className="lg:grid lg:grid-cols-[minmax(0,1fr)_320px] lg:gap-[22px]">
-        <div className="space-y-6 min-w-0">
+      {/* ---------- COCKPIT ----------
+          Full-width single column. The top OrderOperationsStrip is the KPI
+          surface; the old sticky live-status sidebar was removed — it merely
+          mirrored the strip and cost 320px of width on the most-edited page. */}
+      <div className="space-y-6">
 
       {/* ---------- PRODUCTION (status workflow + baseline) ---------- */}
       <CollapsibleSection
@@ -985,7 +985,7 @@ export default async function ProductionOrderDetailPage({
             <div className="eyebrow">Operational status</div>
             <p className="text-xs text-neutral-500 mt-0.5">
               {technical
-                ? "Click any chip below to flip the order to that status."
+                ? "Pick a status — you'll confirm before it's applied."
                 : "Read-only — only the production team can change status."}
             </p>
           </div>
@@ -1000,43 +1000,28 @@ export default async function ProductionOrderDetailPage({
             </b>
           </div>
         </div>
-        <div className="flex flex-wrap gap-2">
-          {PRODUCTION_ORDER_STATUSES.map((s) => {
-            const isCurrent = s === status;
-            if (technical && !isCurrent) {
-              return (
-                <form
-                  key={s}
-                  action={updateProductionOrderStatus}
-                  className="inline"
-                >
-                  <input type="hidden" name="id" value={order.id} />
-                  <input type="hidden" name="status" value={s} />
-                  <SubmitButton
-                    variant="secondary"
-                    size="sm"
-                    pendingLabel={PRODUCTION_ORDER_STATUS_LABEL[s]}
-                    className="!rounded-full"
-                  >
-                    → {PRODUCTION_ORDER_STATUS_LABEL[s]}
-                  </SubmitButton>
-                </form>
-              );
-            }
-            return (
+        {technical ? (
+          <StatusSelect
+            orderId={order.id}
+            current={status}
+            action={updateProductionOrderStatus}
+          />
+        ) : (
+          <div className="flex flex-wrap gap-2">
+            {PRODUCTION_ORDER_STATUSES.map((s) => (
               <span
                 key={s}
                 className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[11px] font-medium ${
-                  isCurrent
+                  s === status
                     ? "bg-neutral-900 text-white border border-neutral-900"
                     : "border border-neutral-200 bg-neutral-50 text-neutral-400"
                 }`}
               >
                 {PRODUCTION_ORDER_STATUS_LABEL[s]}
               </span>
-            );
-          })}
-        </div>
+            ))}
+          </div>
+        )}
         </div>
 
         {/* --- Production Baseline --- */}
@@ -2188,15 +2173,6 @@ export default async function ProductionOrderDetailPage({
         <Timeline events={events} actorLabelByUser={labelByUser} />
       </CollapsibleSection>
 
-        </div>
-        {/* Sticky live-status sidebar — lg+ only. Mirrors the top strip
-            data via the shared `liveStatus` derivation; pure presentation. */}
-        <div className="hidden lg:block">
-          <LiveStatusSidebar
-            {...liveStatus}
-            productionStage={productionStage}
-          />
-        </div>
       </div>
 
       {/* Conversation drawer — overlaid on top of this page when the

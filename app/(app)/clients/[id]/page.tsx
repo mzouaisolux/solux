@@ -39,6 +39,9 @@ import {
   HUB_TABS,
   type HubTab,
 } from "@/components/clients/ClientHubTabs";
+import { ClientHistoryPanel } from "@/components/clients/ClientHistoryPanel";
+import { loadCustomerHistory } from "@/lib/import/history-server";
+import type { CustomerHistory } from "@/lib/import/history-stats";
 import { ClientMessageComposer } from "@/components/clients/ClientMessageComposer";
 import { AffairRow } from "@/components/affairs/AffairRow";
 import { getClientAffairs } from "@/lib/client-affairs";
@@ -296,6 +299,11 @@ export default async function ClientWorkspacePage({
   if (tab === "messages") {
     clientMessages = await listEntityMessagesWithAuthors("client", params.id);
   }
+  // Historical Invoice Import — rebuilt commercial history (import island).
+  let customerHistory: CustomerHistory | null = null;
+  if (tab === "history") {
+    customerHistory = await loadCustomerHistory(params.id);
+  }
 
   return (
     <div className="mx-auto max-w-screen-2xl px-6 py-8 space-y-6">
@@ -360,6 +368,28 @@ export default async function ClientWorkspacePage({
               className="btn-secondary"
             >
               + New service request
+            </Link>
+          )}
+          {canCreateQuotation && (
+            <Link
+              href={`/clients/${client.id}/import-invoices`}
+              className="btn-secondary inline-flex items-center gap-1.5"
+            >
+              <svg
+                className="h-3.5 w-3.5"
+                viewBox="0 0 20 20"
+                fill="none"
+                aria-hidden
+              >
+                <path
+                  d="M10 6v4l2.5 1.5M17 10a7 7 0 1 1-2.05-4.95M17 5v3h-3"
+                  stroke="currentColor"
+                  strokeWidth="1.4"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+              Import historical invoices
             </Link>
           )}
           {/* DESTRUCTIVE ACTIONS only — kept in a discreet 3-dot menu
@@ -676,6 +706,15 @@ export default async function ClientWorkspacePage({
         )}
       </section>
         </div>
+      )}
+
+      {/* ===== HISTORY ===== */}
+      {tab === "history" && customerHistory && (
+        <ClientHistoryPanel
+          clientId={client.id}
+          clientName={client.company_name}
+          history={customerHistory}
+        />
       )}
 
       {/* ===== MESSAGES ===== */}

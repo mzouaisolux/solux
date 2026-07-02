@@ -88,6 +88,8 @@ export const NOTIFICATION_CATALOG: Record<EventType, NotificationCatalogEntry> =
   "client.contact_added": { entity: "client", category: "bookkeeping", severity: "low", label: "Contact added" },
   "client.contact_updated": { entity: "client", category: "bookkeeping", severity: "low", label: "Contact updated" },
   "client.contact_deleted": { entity: "client", category: "bookkeeping", severity: "low", label: "Contact deleted" },
+  // ---- historical invoice import (read-only island) ----
+  "import.batch_completed": { entity: "client", category: "bookkeeping", severity: "low", label: "Historical invoices imported" },
   // ---- affair (CRM) ----
   "affair.action_planned": { entity: "affair", category: "bookkeeping", severity: "low", label: "Next action planned" },
   "affair.action_done": { entity: "affair", category: "bookkeeping", severity: "low", label: "Action completed" },

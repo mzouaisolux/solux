@@ -166,6 +166,8 @@ export type EventType =
   // admin / system
   | "admin.permissions_changed"
   | "admin.user_role_changed"
+  // historical invoice import (read-only island)
+  | "import.batch_completed"
   | "system.dev_reset";
 
 /* ===========================================================================
@@ -414,6 +416,7 @@ export function eventTypeLabel(t: EventType): string {
     "pr.cancelled": "Project cancelled",
     "admin.permissions_changed": "Permissions matrix changed",
     "admin.user_role_changed": "User role changed",
+    "import.batch_completed": "Historical invoices imported",
     "system.dev_reset": "Dev data reset",
   };
   return map[t] ?? t;
