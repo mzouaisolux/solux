@@ -32,7 +32,7 @@ import {
 } from "@/lib/events-shared";
 import type { EventRow, EventEntityType } from "@/lib/events-shared";
 import {
-  resolveNotificationChannel,
+  resolveEventNotification,
   type NotificationChannel,
 } from "@/lib/notification-catalog";
 import {
@@ -92,40 +92,58 @@ const HARD_CAP_COUNT = 20;
  *   - m045 / m039 not applied (returns empty list)
  *   - DB errors (logged, swallowed)
  */
+/** Per-role channel overrides + the set of events whose notifications
+ *  are enabled (their master `role='*'` routing row). */
+type NotificationConfig = {
+  /** event_key → this role's explicit channel override (bell/feed/off). */
+  rules: Map<string, NotificationChannel>;
+  /** event_keys with notifications ENABLED (master switch on). Absent ⇒
+   *  disabled ⇒ the event never notifies (opt-in default, 2026-07-03). */
+  enabled: Set<string>;
+};
+
 /**
- * Load this role's notification channel overrides into an event_key →
- * channel map.
+ * Load this role's notification config from the unified event registry.
  *
- * Step 1 (m136): the bell is now ONE consumer of the unified event
- * registry. Its per-role overrides live in event_routing where
- * consumer='notification'; config.channel holds bell/feed/off.
+ * The bell is ONE consumer of the registry (m136); its routing lives in
+ * event_routing where consumer='notification'. Two kinds of rows matter:
+ *   - role = '*'  → the MASTER switch. Its presence (enabled ≠ false) means
+ *                   notifications are turned ON for that event. Absent ⇒
+ *                   the event is disabled (opt-in default) ⇒ no bell/feed.
+ *   - role = <me> → this role's explicit channel override (bell/feed/off),
+ *                   applied only when the event is enabled.
  *
- * Defensive: a missing table (pre-m136) or any error ⇒ empty map ⇒ the
- * legacy defaults (defaultChannel == eventRaisesBell), so the registry is
- * invisible until a rule is added — identical to the m123 guarantee.
+ * Defensive: a missing table (pre-m136) or any error ⇒ empty config ⇒ no
+ * event is enabled ⇒ the bell stays silent until an admin opts an event in.
  */
-async function loadNotificationRules(
+async function loadNotificationConfig(
   supabase: ReturnType<typeof createClient>,
   role: Role
-): Promise<Map<string, NotificationChannel>> {
-  const map = new Map<string, NotificationChannel>();
+): Promise<NotificationConfig> {
+  const rules = new Map<string, NotificationChannel>();
+  const enabled = new Set<string>();
   try {
     const { data, error } = await supabase
       .from("event_routing")
-      .select("event_key, config")
+      .select("event_key, role, config, enabled")
       .eq("consumer", "notification")
-      .eq("role", role);
-    if (error) return map;
+      .in("role", [role, "*"]);
+    if (error) return { rules, enabled };
     for (const r of (data ?? []) as any[]) {
+      if (!r.event_key) continue;
+      if (r.role === "*") {
+        if (r.enabled !== false) enabled.add(r.event_key); // master ON
+        continue;
+      }
       const ch = r?.config?.channel;
-      if (r.event_key && (ch === "bell" || ch === "feed" || ch === "off")) {
-        map.set(r.event_key, ch as NotificationChannel);
+      if (ch === "bell" || ch === "feed" || ch === "off") {
+        rules.set(r.event_key, ch as NotificationChannel);
       }
     }
   } catch {
-    /* table absent or transient error → defaults */
+    /* table absent or transient error → nothing enabled */
   }
-  return map;
+  return { rules, enabled };
 }
 
 export async function getNotificationSummary(
@@ -142,9 +160,12 @@ export async function getNotificationSummary(
   const review = await buildReviewNotification(role);
   const supabase = createClient();
 
-  // Phase 3C: per-role notification rules (read-time channel overrides).
-  // Empty map (default / pre-m123) ⇒ legacy eventRaisesBell behavior.
-  const rulesMap = role ? await loadNotificationRules(supabase, role) : new Map<string, NotificationChannel>();
+  // Unified registry: per-role channel overrides + the opt-in master set.
+  // Empty (default / pre-m136) ⇒ nothing enabled ⇒ the bell stays silent
+  // until an admin opts an event in (owner decision 2026-07-03).
+  const { rules: rulesMap, enabled: enabledEvents } = role
+    ? await loadNotificationConfig(supabase, role)
+    : { rules: new Map<string, NotificationChannel>(), enabled: new Set<string>() };
 
   // Finalizer — merge review + event + note items into one list, newest first,
   // capped for the dropdown. The total counts every unread source.
@@ -201,10 +222,13 @@ export async function getNotificationSummary(
     const lastReadMap = await getEventLastReadMap(userId, eventIds);
 
     surfacedEvents = events.filter((e) => {
-      if (unreadMap.has(e.id)) return true; // unread comments
-      const channel = resolveNotificationChannel({
+      if (unreadMap.has(e.id)) return true; // unread comments (direct thread)
+      // Opt-in: an event raises the bell on CREATION only when it is enabled
+      // in the registry AND resolves to the bell channel for this role.
+      const channel = resolveEventNotification({
         eventKey: e.event_type,
         severity: e.severity,
+        notifyEnabled: enabledEvents.has(e.event_type),
         rule: rulesMap.get(e.event_type) ?? null,
       });
       if (channel !== "bell" || e.status === "resolved") return false;

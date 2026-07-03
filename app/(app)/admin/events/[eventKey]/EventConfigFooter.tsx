@@ -70,7 +70,7 @@ export default function EventConfigFooter({
   return (
     <div className="ad-matrix-savebar evt-savebar">
       <span className="note">
-        Only non-default values are stored. Defaults = today’s behavior.
+        Only what you change is stored. A disabled event notifies no one.
       </span>
       <div className="evt-savebar-actions">
         <button

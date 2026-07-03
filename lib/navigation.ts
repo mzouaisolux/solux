@@ -230,6 +230,25 @@ export const NAVIGATION: NavCategory[] = [
         items: [
           { label: "All orders", href: "/operations", visibility: { kind: "always" } },
           {
+            label: "Quick Update",
+            href: "/production/quick-update",
+            // Match the PAGE gate exactly: visible to anyone who can edit ANY
+            // facet of a production order (status / shipment / payments /
+            // deadline) — plus admins/super-admins (anti-lockout). Gating on
+            // edit_status ALONE hid the link from an Operations role granted
+            // only edit_shipment, even though they can use the page.
+            visibility: {
+              kind: "capabilityOrAdmin",
+              capabilities: [
+                "production_order.edit_status",
+                "production_order.edit_shipment",
+                "production_order.edit_payments",
+                "production_order.edit_deadline",
+              ],
+            },
+            description: "Fast inline editing — auto-saves",
+          },
+          {
             label: "In Production",
             href: "/operations?status=in_production",
             visibility: { kind: "always" },

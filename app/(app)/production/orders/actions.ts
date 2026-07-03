@@ -19,6 +19,7 @@ import {
   blProfileStatus,
   blProfileMissingFields,
 } from "@/lib/bl";
+import { normalizeShippingDetails } from "@/lib/shipping";
 
 function str(fd: FormData, key: string): string | null {
   const v = fd.get(key);
@@ -1021,22 +1022,37 @@ export async function updateProductionOrderShipment(formData: FormData) {
 
   // Shipping / BL execution details (m070) — saved separately so a missing
   // column never blocks the core shipment save. jsonb blob from lib/shipping.
-  const numOrNull = (k: string) => {
+  // MERGE-SAFE: only overwrite the keys actually present in this submission.
+  // The order-detail form ships the 9 original keys (no booking/container/
+  // tracking), so WITHOUT this guard every save from that form would wipe the
+  // 3 Quick-Update keys. Absent keys keep their previous value; present-but-
+  // empty keys clear (unchanged behaviour for the full order-detail form).
+  const prevShipping = normalizeShippingDetails(prev?.shipping_details ?? null);
+  const strOrKeep = (k: string, keep: string | null) =>
+    formData.has(k) ? str(formData, k) : keep;
+  const numOrKeep = (k: string, keep: number | null) => {
+    if (!formData.has(k)) return keep;
     const s = String(formData.get(k) ?? "").trim();
     if (!s) return null;
     const n = Number(s);
     return Number.isFinite(n) ? n : null;
   };
   const shipping_details = {
-    bl_number: str(formData, "bl_number"),
-    forwarder: str(formData, "forwarder"),
-    vessel: str(formData, "vessel"),
-    voyage: str(formData, "voyage"),
-    gross_weight: numOrNull("gross_weight"),
-    net_weight: numOrNull("net_weight"),
-    cbm: numOrNull("cbm"),
-    packages: numOrNull("packages"),
-    hs_code: str(formData, "hs_code"),
+    bl_number: strOrKeep("bl_number", prevShipping.bl_number),
+    forwarder: strOrKeep("forwarder", prevShipping.forwarder),
+    vessel: strOrKeep("vessel", prevShipping.vessel),
+    voyage: strOrKeep("voyage", prevShipping.voyage),
+    gross_weight: numOrKeep("gross_weight", prevShipping.gross_weight),
+    net_weight: numOrKeep("net_weight", prevShipping.net_weight),
+    cbm: numOrKeep("cbm", prevShipping.cbm),
+    packages: numOrKeep("packages", prevShipping.packages),
+    hs_code: strOrKeep("hs_code", prevShipping.hs_code),
+    booking_number: strOrKeep("booking_number", prevShipping.booking_number),
+    container_number: strOrKeep(
+      "container_number",
+      prevShipping.container_number
+    ),
+    tracking_url: strOrKeep("tracking_url", prevShipping.tracking_url),
   };
   const { error: blErr } = await supabase
     .from("production_orders")
@@ -1073,6 +1089,9 @@ export async function updateProductionOrderShipment(formData: FormData) {
     cbm: "CBM",
     packages: "packages",
     hs_code: "HS code",
+    booking_number: "booking#",
+    container_number: "container#",
+    tracking_url: "tracking",
   };
   const blChanged: string[] = [];
   for (const k of Object.keys(shipping_details) as (keyof typeof shipping_details)[]) {

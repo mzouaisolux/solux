@@ -2,7 +2,10 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { StatusBadge } from "@/components/StatusBadge";
-import { ClientDocumentsByAffaire } from "@/components/clients/ClientDocumentsByAffaire";
+import {
+  ClientDocumentsByAffaire,
+  type ClientInvoiceRow,
+} from "@/components/clients/ClientDocumentsByAffaire";
 import ContextMenu from "@/components/ContextMenu";
 import {
   deleteClientPermanently,
@@ -201,6 +204,42 @@ export default async function ClientWorkspacePage({
         .in("task_list_id", allTaskListIds);
       for (const p of poRows ?? []) allProductionOrderIds.push(p.id);
     }
+  }
+
+  // Legal invoices (m141) for this client — surfaced in the Documents tab so
+  // an invoice is one click away, without opening the quotation (audit #5/#9).
+  // Defensive: pre-m141 env or missing FK → empty, the section just hides.
+  const clientInvoices: ClientInvoiceRow[] = [];
+  try {
+    const { data: famRows, error: famErr } = await supabase
+      .from("invoice_families")
+      .select(
+        "id, commercial_number, affair_id, currency, created_at, invoices(id, accounting_number, invoice_type, label, status, amount, created_at)"
+      )
+      .eq("client_id", params.id);
+    if (!famErr) {
+      for (const f of (famRows ?? []) as any[]) {
+        for (const inv of (f.invoices ?? []) as any[]) {
+          clientInvoices.push({
+            id: inv.id,
+            accounting_number: inv.accounting_number,
+            commercial_number: f.commercial_number,
+            invoice_type: inv.invoice_type,
+            label: inv.label ?? null,
+            status: inv.status,
+            amount: Number(inv.amount) || 0,
+            currency: f.currency ?? null,
+            affair_id: f.affair_id ?? null,
+          });
+        }
+      }
+      // Newest accounting number first within each affaire.
+      clientInvoices.sort((a, b) =>
+        b.accounting_number.localeCompare(a.accounting_number)
+      );
+    }
+  } catch {
+    /* invoicing not enabled — leave empty */
   }
 
   const customFields = (Array.isArray(client.custom_fields)
@@ -682,6 +721,7 @@ export default async function ClientWorkspacePage({
               affair_name: d.affair_name ?? null,
               taskList: taskListByDoc.get(d.id) ?? null,
             }))}
+            invoices={clientInvoices}
           />
         )}
 

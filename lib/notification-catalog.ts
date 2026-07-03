@@ -155,6 +155,32 @@ export function resolveNotificationChannel(args: {
   return args.rule ?? defaultChannel(args.eventKey, args.severity);
 }
 
+/**
+ * OPT-IN gate (owner decision 2026-07-03: notifications are DISABLED by
+ * default; during testing only the events that prove useful are enabled).
+ *
+ * An event notifies ONLY when it is explicitly ENABLED in the registry
+ * (its master `event_routing(consumer='notification', role='*')` row).
+ * When disabled — the default for every event — the channel is "off" for
+ * everyone: no bell, no feed, no recipients.
+ *
+ * When enabled, per-role routing behaves exactly as before: a role's
+ * explicit `rule` wins, otherwise the event's built-in severity default
+ * (`defaultChannel`) applies. So enabling an event with no per-role
+ * tweaks reproduces the sensible legacy behavior — the opt-in gate is the
+ * only thing that changed. Pure so the flip is unit-testable.
+ */
+export function resolveEventNotification(args: {
+  eventKey: string;
+  severity: EventSeverity;
+  /** master switch — true iff notifications are enabled for this event. */
+  notifyEnabled: boolean;
+  rule?: NotificationChannel | null;
+}): NotificationChannel {
+  if (!args.notifyEnabled) return "off";
+  return resolveNotificationChannel(args);
+}
+
 /* ------------------------------------------------------------------ */
 /* Anti-spam — pure decision for emit-once-within-window               */
 /* ------------------------------------------------------------------ */

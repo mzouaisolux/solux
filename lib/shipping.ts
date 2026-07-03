@@ -25,6 +25,12 @@ export type ShippingDetails = {
   packages: number | null;
   /** Harmonised System customs code. */
   hs_code: string | null;
+  /** Carrier booking / reference number (Quick Update — jsonb, no migration). */
+  booking_number: string | null;
+  /** Container number (Quick Update — jsonb, no migration). */
+  container_number: string | null;
+  /** Carrier tracking URL (Quick Update — jsonb, no migration). */
+  tracking_url: string | null;
 };
 
 export function emptyShippingDetails(): ShippingDetails {
@@ -38,6 +44,9 @@ export function emptyShippingDetails(): ShippingDetails {
     cbm: null,
     packages: null,
     hs_code: null,
+    booking_number: null,
+    container_number: null,
+    tracking_url: null,
   };
 }
 
@@ -67,6 +76,9 @@ export function normalizeShippingDetails(raw: unknown): ShippingDetails {
     cbm: num(p.cbm),
     packages: num(p.packages),
     hs_code: str(p.hs_code),
+    booking_number: str(p.booking_number),
+    container_number: str(p.container_number),
+    tracking_url: str(p.tracking_url),
   };
 }
 
@@ -81,6 +93,9 @@ export function isShippingDetailsEmpty(d: ShippingDetails): boolean {
     d.net_weight == null &&
     d.cbm == null &&
     d.packages == null &&
-    !d.hs_code
+    !d.hs_code &&
+    !d.booking_number &&
+    !d.container_number &&
+    !d.tracking_url
   );
 }

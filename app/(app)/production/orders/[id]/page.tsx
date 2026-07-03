@@ -8,6 +8,7 @@ import {
   SummaryRow,
 } from "@/components/production/CollapsibleSection";
 import { PremiumPill } from "@/components/production/premium-ui";
+import ProductLightingSetupCard from "@/components/lighting/ProductLightingSetupCard";
 import { StatusSelect } from "@/components/production/StatusSelect";
 import { getEffectiveRole } from "@/lib/auth";
 import { resolveUserLabelStrings } from "@/lib/user-display";
@@ -1250,6 +1251,11 @@ export default async function ProductionOrderDetailPage({
         )}
         </div>
       </CollapsibleSection>
+
+      {/* ---------- PRODUCT LIGHTING SETUP (m144) ---------- */}
+      {/* Read-only handoff of the lighting config Sales approved at Launch
+          Production. Renders nothing when the order has no setup (additive). */}
+      <ProductLightingSetupCard documentId={order.quotation_id} />
 
       {/* ---------- DELAY & TIMELINE (m075) ---------- */}
       <CollapsibleSection

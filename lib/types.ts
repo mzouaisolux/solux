@@ -1427,6 +1427,37 @@ export const DOC_TERMINAL_STATUSES: DocStatus[] = [
 export type PricingMode = "auto" | "manual";
 export type DiscountType = "percentage" | "fixed";
 
+/**
+ * Durable provenance of a line's SELLING price — the lock that decouples the
+ * catalogue (what we manufacture) from the approved commercial price (what we
+ * sell). See m139.
+ *   catalogue                -> catalogue model selection MAY drive the price
+ *   manual                   -> LOCKED: sales typed/edited the selling price
+ *   approved_service_request -> LOCKED: generated from an approved Service Request
+ *   imported                 -> LOCKED: historical-import origin (forward-looking)
+ * Lock predicate: `pricing_source !== "catalogue"`. Use `isLineLocked()`.
+ */
+export type PricingSource =
+  | "catalogue"
+  | "manual"
+  | "approved_service_request"
+  | "imported";
+
+/**
+ * A line whose price is locked must never be recomputed from the catalogue:
+ * `original_unit_price` is the commercial truth and the attached `product_id`
+ * is a MANUFACTURING REFERENCE only. A missing/legacy `pricing_source` falls
+ * back to the mechanical mode (manual => locked) so pre-m139 rows behave right
+ * even before the backfill lands.
+ */
+export function isLineLocked(line: {
+  pricing_source?: PricingSource | null;
+  pricing_mode?: PricingMode;
+}): boolean {
+  if (line.pricing_source) return line.pricing_source !== "catalogue";
+  return line.pricing_mode === "manual";
+}
+
 export type DocumentLine = {
   id?: string;
   product_id: string;
@@ -1448,6 +1479,21 @@ export type DocumentLine = {
   category_id?: string | null;
   /** Dynamic per-family configuration values, keyed by field_name. */
   config_values?: Record<string, string>;
+  /**
+   * Commercial-price provenance / lock (m139). When this is anything other than
+   * "catalogue" the line is LOCKED: `original_unit_price` is the approved
+   * selling price and must never be recomputed from the catalogue tier map —
+   * the attached `product_id` is a manufacturing reference only. Defaults to
+   * "catalogue" for fresh ad-hoc lines; set to "manual" the moment sales edits
+   * the price, and "approved_service_request" for SR-generated lines.
+   */
+  pricing_source?: PricingSource | null;
+  /** The Service Request this line's approved price came from (audit/routing). */
+  source_project_request_id?: string | null;
+  /** Who approved the SR pricing (from project_products.priced_by). */
+  approved_by?: string | null;
+  /** When the SR pricing was approved (from project_products.priced_at). */
+  approved_at?: string | null;
   // UI-only (not persisted): set when a line was pre-filled from a previous quotation
   previous_unit_price?: number;
 };

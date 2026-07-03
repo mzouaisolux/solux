@@ -42,6 +42,18 @@ export default function NewClientPanel({
   const [open, setOpen] = useState(false);
   // Phone prefix is mirrored here so picking a country can prefill it.
   const [phoneCode, setPhoneCode] = useState("");
+  // Controlled so we can validate inline and disable submit — no silent
+  // rejection (audit #10). Code = exactly 3 letters, no digits.
+  const [companyName, setCompanyName] = useState("");
+  const [clientCode, setClientCode] = useState("");
+  const [codeTouched, setCodeTouched] = useState(false);
+  const codeError =
+    clientCode.length === 0
+      ? "Required"
+      : !/^[A-Za-z]{3}$/.test(clientCode)
+        ? "3 letters only — no digits or symbols (e.g. ARL)"
+        : null;
+  const canSubmit = companyName.trim().length > 0 && codeError === null;
   // Inline validation error returned by createClientAction (e.g. duplicate
   // client code) — shown in the footer; the form + its data are preserved.
   const [formError, setFormError] = useState<string | null>(null);
@@ -56,6 +68,9 @@ export default function NewClientPanel({
     setOpen(false);
     setPhoneCode("");
     setFormError(null);
+    setCompanyName("");
+    setClientCode("");
+    setCodeTouched(false);
     // Drop the ?new=1 param (preserving any others) so the modal doesn't
     // re-open on refresh and the URL stays clean.
     if (searchParams.get("new")) {
@@ -190,6 +205,8 @@ export default function NewClientPanel({
                           placeholder="Arelux Lighting"
                           required
                           autoFocus
+                          value={companyName}
+                          onChange={(e) => setCompanyName(e.target.value)}
                           className={fieldInput}
                         />
                       </label>
@@ -200,16 +217,29 @@ export default function NewClientPanel({
                           placeholder="ARL"
                           maxLength={3}
                           required
-                          pattern="[A-Za-z]{3}"
                           title="Exactly 3 letters (e.g. ARL)"
-                          className={`${fieldInput} font-mono uppercase`}
+                          value={clientCode}
+                          onChange={(e) => setClientCode(e.target.value)}
+                          onBlur={() => setCodeTouched(true)}
+                          aria-invalid={codeTouched && !!codeError}
+                          className={`${fieldInput} font-mono uppercase ${
+                            codeTouched && codeError
+                              ? "border-rose-400 focus:border-rose-500 focus:ring-rose-200"
+                              : ""
+                          }`}
                           style={{ textTransform: "uppercase" }}
                         />
-                        <span className={hint}>
-                          Required — 3 letters, shown in every document number,
-                          e.g. <code>SLX-ARL-26-001</code>. A client without it
-                          can&apos;t have quotations saved.
-                        </span>
+                        {codeTouched && codeError && clientCode.length > 0 ? (
+                          <span className="mt-1 block text-[11px] font-medium text-rose-600">
+                            {codeError}
+                          </span>
+                        ) : (
+                          <span className={hint}>
+                            Required — 3 letters, shown in every document number,
+                            e.g. <code>SLX-ARL-26-001</code>. A client without it
+                            can&apos;t have quotations saved.
+                          </span>
+                        )}
                       </label>
                       <label className="block sm:col-span-1">
                         <span className={fieldLabel}>Country</span>
@@ -330,7 +360,21 @@ export default function NewClientPanel({
                     >
                       Cancel
                     </button>
-                    <button className="btn-primary px-5">Add client</button>
+                    <button
+                      type="submit"
+                      disabled={!canSubmit}
+                      onClick={() => setCodeTouched(true)}
+                      title={
+                        canSubmit
+                          ? "Create this client"
+                          : codeError
+                            ? `Client code: ${codeError}`
+                            : "Fill the required fields"
+                      }
+                      className="btn-primary px-5 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      Add client
+                    </button>
                   </div>
                 </div>
               </form>

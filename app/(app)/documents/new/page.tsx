@@ -2,6 +2,7 @@ import { createClient } from "@/lib/supabase/server";
 import NewDocumentForm from "./NewDocumentForm";
 import { getEffectiveRole } from "@/lib/auth";
 import { buildTierPriceMap, buildTierPriceMapByCategory } from "@/lib/pricing";
+import { getCataloguePriceVisibility } from "@/lib/pricing-visibility";
 import { getQuotePricingContext } from "@/lib/price-lists";
 import type { CostMap } from "@/lib/types";
 
@@ -14,6 +15,12 @@ export default async function NewDocumentPage({
 
   const { effectiveRole: role, userId } = await getEffectiveRole();
   const isAdmin = role === "admin";
+
+  // m142 — TEMPORARY test-phase flag: hide catalogue prices from sales.
+  // Decided HERE on the server so a hidden user's browser never receives the
+  // tier prices at all (not just visually hidden). Exempt users (admin floor /
+  // pricing.view_catalogue_prices) keep prices + get the "admin only" badge.
+  const priceVisibility = await getCataloguePriceVisibility(supabase);
 
   // Pricing v4: which seller's price list applies to this quote? The deal
   // owner when editing/revising an existing doc, else the current user.
@@ -84,12 +91,23 @@ export default async function NewDocumentPage({
     if (src) {
       sourceOwnerId = src.sales_owner_id ?? src.created_by ?? null;
       const [{ data: srcLines }, { data: srcContainers }] = await Promise.all([
-        supabase
-          .from("document_lines")
-          .select(
-            "product_id, category_id, quantity, selected_options, unit_price, total_price, pricing_mode, pricing_tier, original_unit_price, discount_type, discount_value, client_product_name, config_values"
-          )
-          .eq("document_id", sourceId),
+        // Resilient to a not-yet-applied m139 (pricing_source & friends): fall
+        // back to the pre-m139 column list so edit/revise still loads its lines.
+        (async () => {
+          const base =
+            "product_id, category_id, quantity, selected_options, unit_price, total_price, pricing_mode, pricing_tier, original_unit_price, discount_type, discount_value, client_product_name, config_values";
+          const full = await supabase
+            .from("document_lines")
+            .select(
+              `${base}, pricing_source, source_project_request_id, approved_by, approved_at`
+            )
+            .eq("document_id", sourceId);
+          if (!full.error) return full;
+          return await supabase
+            .from("document_lines")
+            .select(base)
+            .eq("document_id", sourceId);
+        })(),
         // Resilient to a missing wooden_box_cost column (migration 007).
         (async () => {
           const full = await supabase
@@ -123,6 +141,13 @@ export default async function NewDocumentPage({
           discount_value: Number(l.discount_value ?? 0),
           client_product_name: l.client_product_name ?? null,
           config_values: l.config_values ?? {},
+          // m139 — preserve the price lock across edit/revise (same commercial
+          // lineage). The approved SR price stays protected from catalogue
+          // re-reads even after re-opening the builder.
+          pricing_source: l.pricing_source ?? null,
+          source_project_request_id: l.source_project_request_id ?? null,
+          approved_by: l.approved_by ?? null,
+          approved_at: l.approved_at ?? null,
         })),
         containers: (() => {
           const mapped = (srcContainers ?? []).map((c: any) => ({
@@ -249,8 +274,17 @@ export default async function NewDocumentPage({
   return (
     <div className="solux-pro mx-auto max-w-screen-2xl px-6 py-8">
       {/* Pricing source — shows which published price list(s) feed this quote,
-          and warns when an assigned list hasn't been published yet. */}
-      {pricingCtx.appliedLists.length > 0 ? (
+          and warns when an assigned list hasn't been published yet.
+          m142 — hidden entirely for a price-hidden user (it's catalogue-pricing
+          chrome that makes no sense when no catalogue price is shown), and
+          replaced by the "admin only" reminder for exempt users. */}
+      {priceVisibility.hidden ? null : priceVisibility.adminOverride ? (
+        <div className="mb-4 rounded-md border border-amber-200 bg-amber-50/70 px-4 py-2 text-sm text-amber-900">
+          <span className="font-medium">Catalogue prices are hidden for sales</span>{" "}
+          (test phase) — you see them because of your permissions. Sales reps price
+          via approved Service Requests or manual entry only.
+        </div>
+      ) : pricingCtx.appliedLists.length > 0 ? (
         <div className="mb-4 rounded-md border border-emerald-200 bg-emerald-50/70 px-4 py-2 text-sm text-emerald-900">
           <span className="font-medium">Pricing from your price list{pricingCtx.appliedLists.length > 1 ? "s" : ""}:</span>{" "}
           {pricingCtx.appliedLists.map((l, i) => (
@@ -282,7 +316,9 @@ export default async function NewDocumentPage({
         products={products ?? []}
         options={options ?? []}
         clients={clients ?? []}
-        tierPrices={tierPrices}
+        tierPrices={priceVisibility.hidden ? {} : tierPrices}
+        hideCataloguePrices={priceVisibility.hidden}
+        adminPriceOverride={priceVisibility.adminOverride}
         costs={costs}
         isAdmin={isAdmin}
         salesConditions={(salesConditions ?? []) as any}

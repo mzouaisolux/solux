@@ -17,6 +17,7 @@ import { buildPdfFilename } from "@/lib/pdf-filename";
 import { saveDocument } from "./actions";
 import { savePdfPath } from "../[id]/actions";
 import { quickCreateAffair } from "@/app/(app)/affairs/actions";
+import { requestCostingRevision } from "@/app/(app)/projects/actions";
 import { computeMargin } from "@/lib/pricing";
 import {
   formatPaymentTerms,
@@ -132,6 +133,8 @@ export default function NewDocumentForm({
   options,
   clients: initialClients,
   tierPrices,
+  hideCataloguePrices = false,
+  adminPriceOverride = false,
   costs,
   isAdmin,
   salesConditions,
@@ -151,6 +154,13 @@ export default function NewDocumentForm({
   options: Option[];
   clients: Client[];
   tierPrices: TierPriceMap;
+  /** m142 — TEMPORARY test-phase flag: catalogue prices are hidden for this
+   *  user (server already passes an empty tierPrices map). Line prices come
+   *  from an approved Service Request or manual entry only. */
+  hideCataloguePrices?: boolean;
+  /** m142 — flag active but this user is exempt: mark catalogue prices with a
+   *  discreet "visible admin only" badge. */
+  adminPriceOverride?: boolean;
   costs: CostMap | null;
   isAdmin: boolean;
   salesConditions: SalesCondition[];
@@ -1832,6 +1842,8 @@ export default function NewDocumentForm({
             products={products}
             options={options}
             tierPrices={tierPrices}
+            hidePrices={hideCataloguePrices}
+            showAdminOnlyPriceBadge={adminPriceOverride}
             costs={costs}
             isAdmin={isAdmin}
             fieldsByCategory={fieldsByCategory}
@@ -1849,6 +1861,7 @@ export default function NewDocumentForm({
                 ? () => clearSuggestion(i)
                 : undefined
             }
+            onRequestCostingRevision={requestCostingRevision}
           />
         ))}
       </section>

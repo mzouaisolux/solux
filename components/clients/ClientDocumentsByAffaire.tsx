@@ -19,6 +19,36 @@ export type ClientDocRow = {
   taskList: { id: string; number: string | null } | null;
 };
 
+/** A legal invoice (m141) surfaced in the client Documents tab. */
+export type ClientInvoiceRow = {
+  id: string; // → /invoicing/[id]
+  accounting_number: string;
+  commercial_number: string;
+  invoice_type: string;
+  label: string | null;
+  status: string;
+  amount: number;
+  currency: string | null;
+  affair_id: string | null;
+};
+
+const INVOICE_TYPE_LABEL: Record<string, string> = {
+  deposit: "Deposit Invoice",
+  balance: "Balance Invoice",
+  full: "Full Invoice",
+  custom: "Custom Invoice",
+  credit_note: "Credit Note",
+};
+
+const INVOICE_STATUS_STYLE: Record<string, string> = {
+  draft: "bg-neutral-100 text-neutral-600",
+  sent: "bg-sky-100 text-sky-800",
+  partially_paid: "bg-amber-100 text-amber-800",
+  paid: "bg-emerald-100 text-emerald-800",
+  overdue: "bg-rose-100 text-rose-800",
+  cancelled: "bg-neutral-100 text-neutral-400 line-through",
+};
+
 const ALL = "__all__";
 const UNASSIGNED = "__unassigned__";
 
@@ -54,7 +84,13 @@ type Group = {
  * Invoices (proformas). Legacy documents with no affaire fall into an
  * "Unassigned" bucket. Per-row status switch + quick actions are preserved.
  */
-export function ClientDocumentsByAffaire({ docs }: { docs: ClientDocRow[] }) {
+export function ClientDocumentsByAffaire({
+  docs,
+  invoices = [],
+}: {
+  docs: ClientDocRow[];
+  invoices?: ClientInvoiceRow[];
+}) {
   const groups = useMemo<Group[]>(() => {
     const map = new Map<string, Group>();
     for (const d of docs) {
@@ -85,6 +121,18 @@ export function ClientDocumentsByAffaire({ docs }: { docs: ClientDocRow[] }) {
     });
     return arr;
   }, [docs]);
+
+  // Invoices grouped by affaire, keyed the same way as the doc groups.
+  const invoicesByAffair = useMemo<Map<string, ClientInvoiceRow[]>>(() => {
+    const m = new Map<string, ClientInvoiceRow[]>();
+    for (const inv of invoices) {
+      const key = inv.affair_id ?? UNASSIGNED;
+      const arr = m.get(key);
+      if (arr) arr.push(inv);
+      else m.set(key, [inv]);
+    }
+    return m;
+  }, [invoices]);
 
   const [filter, setFilter] = useState<string>(ALL);
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
@@ -154,7 +202,8 @@ export function ClientDocumentsByAffaire({ docs }: { docs: ClientDocRow[] }) {
             {open && (
               <div className="border-t border-neutral-100">
                 <SubGroup label="Quotations" rows={quotations} />
-                <SubGroup label="Invoices (proforma)" rows={proformas} />
+                <InvoiceSubGroup rows={invoicesByAffair.get(g.key) ?? []} />
+                <SubGroup label="Proforma (command)" rows={proformas} />
                 <SubGroup label="Other" rows={others} />
               </div>
             )}
@@ -198,6 +247,53 @@ function SubGroup({ label, rows }: { label: string; rows: ClientDocRow[] }) {
               taskList={d.taskList}
             />
             <Link href={`/documents/${d.id}`} className="row-link text-xs">
+              Open →
+            </Link>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/** Legal invoices (m141) for an affaire — each links straight to the
+ *  invoice detail page, so a new employee finds any invoice in one click
+ *  from the client's Documents tab (audit #5/#9). */
+function InvoiceSubGroup({ rows }: { rows: ClientInvoiceRow[] }) {
+  if (rows.length === 0) return null;
+  return (
+    <div className="px-3 py-2">
+      <div className="px-1 py-1 text-[11px] font-semibold uppercase tracking-wider text-neutral-400">
+        Invoices <span className="font-normal text-neutral-300">{rows.length}</span>
+      </div>
+      <div className="divide-y divide-neutral-100">
+        {rows.map((inv) => (
+          <div
+            key={inv.id}
+            className="flex flex-wrap items-center gap-x-3 gap-y-1.5 px-1 py-2 text-sm"
+          >
+            <Link
+              href={`/invoicing/${inv.id}`}
+              className="font-mono text-[13px] hover:underline"
+            >
+              {inv.accounting_number}
+            </Link>
+            <span className="text-xs text-neutral-600">
+              {inv.label ?? INVOICE_TYPE_LABEL[inv.invoice_type] ?? "Invoice"}
+            </span>
+            <span
+              className={`rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${
+                INVOICE_STATUS_STYLE[inv.status] ?? "bg-neutral-100 text-neutral-600"
+              }`}
+            >
+              {inv.status.replace("_", " ")}
+            </span>
+            <span className="text-[11px] text-neutral-400">{inv.commercial_number}</span>
+            <span className="ml-auto font-semibold tabular-nums">
+              {inv.invoice_type === "credit_note" ? "−" : ""}
+              {money(inv.amount, inv.currency)}
+            </span>
+            <Link href={`/invoicing/${inv.id}`} className="row-link text-xs">
               Open →
             </Link>
           </div>

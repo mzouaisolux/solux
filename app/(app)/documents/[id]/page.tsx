@@ -45,6 +45,7 @@ import {
   EventDiscussionPanel,
   parseEventSearchParam,
 } from "@/components/dashboard/EventDiscussionPanel";
+import PaymentScheduleSection from "@/components/invoicing/PaymentScheduleSection";
 import { isTechnicalRole, isAdminLike, canSupervise } from "@/lib/types";
 import { computeMargin, formatDiscount } from "@/lib/pricing";
 import { formatPaymentTerms } from "@/lib/payment";
@@ -513,6 +514,8 @@ export default async function DocumentViewPage({
   // matrix). Cancel stays available via the "Other status" row below.
   const canArchiveQuotation = await hasUiCapability("quotation.archive");
   const canDeleteQuotation = await hasUiCapability("quotation.delete");
+  // Invoicing a won deal is the same commercial act as quoting it (m141).
+  const canInvoice = await hasUiCapability("quotation.create");
   const isArchived = !!(doc as any).archived_at;
 
   // ---- Versioning: is this the LATEST version of its affair? ----------
@@ -904,6 +907,25 @@ export default async function DocumentViewPage({
             </ContextMenu>
         </div>
       </div>
+
+      {/* ---------- Payment Schedule (m141) ----------
+          Deposit & Balance invoicing: one commercial invoice (INV-XXXX)
+          split into legal invoices with unique accounting numbers, all
+          amounts computed from the payment terms. Renders only for a WON
+          quotation / proforma command, or when a family already exists. */}
+      <PaymentScheduleSection
+        doc={{
+          id: doc.id,
+          number: doc.number ?? null,
+          type: (doc as any).type,
+          status: doc.status,
+          total_price: Number(doc.total_price) || 0,
+          currency: (doc.currency ?? null) as string | null,
+          payment_mode: paymentMode,
+          payment_terms: paymentTerms,
+        }}
+        canInvoice={canInvoice}
+      />
 
       {/* ---------- DRAFT: work-in-progress (no lifecycle yet) ----------
           A draft hasn't been sent, so it's not in the order lifecycle.
@@ -1364,6 +1386,24 @@ export default async function DocumentViewPage({
           </dl>
         </div>
       </section>
+
+      {/* Invoices mirror — right where the user finishes reading the totals,
+          so they don't scroll back to the top Payment Schedule to invoice
+          or open an invoice. Condensed: rows + View/PDF/Send + remaining. */}
+      <PaymentScheduleSection
+        doc={{
+          id: doc.id,
+          number: doc.number ?? null,
+          type: (doc as any).type,
+          status: doc.status,
+          total_price: Number(doc.total_price) || 0,
+          currency: (doc.currency ?? null) as string | null,
+          payment_mode: paymentMode,
+          payment_terms: paymentTerms,
+        }}
+        canInvoice={canInvoice}
+        variant="summary"
+      />
 
       {bankAccount && (
         <section className="panel p-5">

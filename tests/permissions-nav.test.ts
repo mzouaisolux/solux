@@ -91,6 +91,7 @@ test("super-admin (all caps, admin-like) sees every category", () => {
     "clients-projects",
     "task-lists",
     "orders",
+    "sales",
     "catalog",
     "pricing",
     "admin",

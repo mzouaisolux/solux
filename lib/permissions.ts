@@ -98,6 +98,8 @@ export type Capability =
   // pricing (m122 — was requireAdmin / requireAdminOrFinance)
   | "pricing.manage"
   | "pricing.manage_costs"
+  // m142 — exemption from the test-phase "hide catalogue prices" flag
+  | "pricing.view_catalogue_prices"
   // sales & analytics register (m138 — standalone module; seed in a follow-up
   // matrix migration. Until then admins pass via the anti-lockout floor.)
   | "sales_analytics.view"

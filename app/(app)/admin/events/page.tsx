@@ -21,6 +21,7 @@ import {
   type RoutingRow,
   type CatalogOverride,
 } from "@/lib/event-registry";
+import { getEventHelp } from "@/lib/event-help";
 import EventRegistryTable, { type EvtRow } from "./EventRegistryTable";
 
 export const dynamic = "force-dynamic";
@@ -64,14 +65,25 @@ export default async function EventRegistryIndex() {
     const id = resolveEventIdentity(key, ov);
     if (!categories.includes(id.category)) categories.push(id.category);
     const rows = byEvent.get(key) ?? [];
+    // Per-role channel overrides (exclude the master role='*' switch, which
+    // carries no channel — it only says notifications are ON for the event).
     const notif = rows
-      .filter((r) => r.consumer === "notification" && r.enabled !== false)
+      .filter(
+        (r) =>
+          r.consumer === "notification" &&
+          r.role !== "*" &&
+          r.enabled !== false
+      )
       .map((r) => ({
         role: r.role,
         roleLabel: ROLE_SHORT_LABEL[r.role as Role] ?? r.role,
         channel: r.config?.channel as "bell" | "feed" | "off",
       }))
       .filter((n) => n.channel === "bell" || n.channel === "feed" || n.channel === "off");
+    // Opt-in master: notifications enabled ⇔ a role='*' row exists (enabled).
+    const notifEnabled = rows.some(
+      (r) => r.consumer === "notification" && r.role === "*" && r.enabled !== false
+    );
     const futureStored = rows.some((r) =>
       ["dashboard", "kpi", "audit"].includes(r.consumer)
     );
@@ -83,20 +95,20 @@ export default async function EventRegistryIndex() {
       severity: id.severity,
       enabled: id.enabled,
       isModified: !!ov && Object.keys(ov).length > 0,
+      notifEnabled,
       notif,
       futureStored,
-      // Effective default channel when a role inherits (no override). Uses the
-      // CODE severity (runtime ignores the metadata-only severity override), so
-      // this matches what the bell actually does today.
+      help: getEventHelp(key),
+      // Effective default channel a role inherits once the event is enabled.
+      // Uses the CODE severity (runtime ignores the metadata-only severity
+      // override), so this matches what the bell actually does.
       defaultCh: defaultChannel(key, NOTIFICATION_CATALOG[key].severity) as
         | "bell"
         | "feed",
     });
   }
 
-  const modifiedCount = events.filter(
-    (e) => e.isModified || e.notif.length > 0 || e.futureStored
-  ).length;
+  const enabledCount = events.filter((e) => e.notifEnabled).length;
   const criticalCount = events.filter((e) => e.severity === "critical").length;
 
   return (
@@ -107,34 +119,37 @@ export default async function EventRegistryIndex() {
           <h2 className="ad-doc-title">Events</h2>
           <p className="ad-lead">
             Every business event and where it goes once emitted. Events are{" "}
-            <b>emitted from code</b> — here you configure their{" "}
-            <b>routing &amp; presentation</b> (who is notified, in which surfaces).
-            Open an event to configure its whole downstream life on one page.
+            <b>emitted from code</b> — here you decide which ones actually{" "}
+            <b>notify people</b>. Hover the{" "}
+            <span className="evt-inline-i" aria-hidden>i</span> on any event to
+            see, in plain language, what it means and who would care.
           </p>
 
-          {/* Honest runtime banner — what actually takes effect today. */}
+          {/* Opt-in banner — the new default philosophy. */}
           <div className="evt-banner" role="note">
-            <span className="evt-banner-dot" />
+            <span className="evt-banner-dot off" />
             <div>
-              <b>Today, only notifications are enforced at runtime.</b> Bell &amp;
-              feed routing takes effect immediately. Dashboard, KPI and Audit
-              settings are <b>stored for later</b> and have no effect yet.
+              <b>Notifications are off by default.</b> Every event starts
+              disabled and notifies no one. Turn on only the events that prove
+              useful — open an event and enable it to choose recipients.
             </div>
           </div>
 
-          {/* Status legend. */}
+          {/* Badge legend — how to read the list at a glance. */}
           <div className="evt-legend">
             <span className="evt-leg">
-              <span className="evt-leg-badge live">Live</span> enforced today
-              (Notification)
+              <span className="evt-leg-badge on">Enabled</span> notifies people
             </span>
             <span className="evt-leg">
-              <span className="evt-leg-badge store">Stored only</span> saved, not
-              used yet (Dashboard, KPI, Audit)
+              <span className="evt-leg-badge off">Disabled</span> notifies no one
             </span>
             <span className="evt-leg">
-              <span className="evt-leg-badge future">Future</span> not
-              configurable yet (Automations)
+              <span className="evt-leg-badge custom">Customized</span> tuned per
+              recipient
+            </span>
+            <span className="evt-leg">
+              <span className="evt-leg-badge critical">Critical</span> high-impact
+              event
             </span>
           </div>
 
@@ -145,8 +160,8 @@ export default async function EventRegistryIndex() {
             >
               ⚠ Tables <code>event_routing</code> /{" "}
               <code>event_catalog_overrides</code> missing — apply migration{" "}
-              <code>136_event_registry.sql</code>. Until then every event shows
-              its code defaults (read-only routing).
+              <code>136_event_registry.sql</code>. Until then every event stays
+              disabled and configuration cannot be saved.
             </div>
           )}
 
@@ -156,7 +171,7 @@ export default async function EventRegistryIndex() {
             </span>
             <span className="evt-stat-sep">·</span>
             <span className="evt-stat">
-              <b>{modifiedCount}</b> modified
+              <b>{enabledCount}</b> enabled
             </span>
             <span className="evt-stat-sep">·</span>
             <span className="evt-stat crit">

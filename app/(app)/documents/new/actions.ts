@@ -196,7 +196,39 @@ export async function saveDocument(
       client_product_name: l.client_product_name || null,
       category_id: l.category_id ?? null, // m133 — line-level product family
       config_values: l.config_values ?? {},
+      // m139 — commercial-price provenance / lock. Default from the mechanical
+      // mode so every persisted line has an explicit, correct source even if an
+      // older client omitted it (matches the migration's backfill rule).
+      pricing_source:
+        l.pricing_source ??
+        (l.pricing_mode === "manual" ? "manual" : "catalogue"),
+      source_project_request_id: l.source_project_request_id ?? null,
+      approved_by: l.approved_by ?? null,
+      approved_at: l.approved_at ?? null,
     }));
+
+  // Insert lines, tolerating an environment where m139 is not yet applied:
+  // on a 42703 for the new columns, retry with them stripped (today's shape).
+  const m139Cols = /(pricing_source|source_project_request_id|approved_by|approved_at)/;
+  const insertLineRows = async (docId: string) => {
+    const rows = buildLineRows(docId);
+    const attempt = await supabase.from("document_lines").insert(rows);
+    if (attempt.error && m139Cols.test(attempt.error.message ?? "")) {
+      const baseRows = rows.map(
+        ({
+          pricing_source,
+          source_project_request_id,
+          approved_by,
+          approved_at,
+          ...rest
+        }) => rest
+      );
+      const fb = await supabase.from("document_lines").insert(baseRows);
+      if (fb.error) throw new Error(fb.error.message);
+      return;
+    }
+    if (attempt.error) throw new Error(attempt.error.message);
+  };
 
   async function insertContainers(docId: string) {
     if (!validContainers.length) return;
@@ -307,10 +339,7 @@ export async function saveDocument(
         .delete()
         .eq("document_id", input.edit_of);
       if (delLines) throw new Error(delLines.message);
-      const { error: insLines } = await supabase
-        .from("document_lines")
-        .insert(buildLineRows(input.edit_of));
-      if (insLines) throw new Error(insLines.message);
+      await insertLineRows(input.edit_of);
     }
     {
       const { error: delC } = await supabase
@@ -494,24 +523,8 @@ export async function saveDocument(
   }
   if (insErr) throw new Error(insErr.message);
 
-  const lines = input.lines.map((l) => ({
-    document_id: inserted!.id,
-    product_id: l.product_id,
-    quantity: l.quantity,
-    selected_options: l.selected_options,
-    unit_price: l.unit_price,
-    total_price: l.total_price,
-    pricing_mode: l.pricing_mode,
-    pricing_tier: l.pricing_tier,
-    original_unit_price: l.original_unit_price,
-    discount_type: l.discount_type,
-    discount_value: l.discount_value,
-    client_product_name: l.client_product_name || null,
-    category_id: l.category_id ?? null, // m133 — line-level product family
-    config_values: l.config_values ?? {},
-  }));
-  const { error: linesErr } = await supabase.from("document_lines").insert(lines);
-  if (linesErr) throw new Error(linesErr.message);
+  // Same row shape + m139-resilient insert as the edit-in-place path.
+  await insertLineRows(inserted!.id);
 
   if (validContainers.length) {
     // Base row shape — fields that have always existed on

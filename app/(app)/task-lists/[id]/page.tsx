@@ -12,6 +12,7 @@ import { ProductSummaryCard } from "@/components/documents/ProductSummaryCard";
 import { AttachmentsPanel } from "@/components/attachments/AttachmentsPanel";
 import { StickerRequirementsEditor } from "@/components/documents/StickerRequirementsEditor";
 import { RiskFlagsEditor } from "@/components/documents/RiskFlagsEditor";
+import ProductLightingSetupForm from "@/components/lighting/ProductLightingSetupForm";
 import {
   normalizeFactoryExtras,
   type FactoryExtras,
@@ -87,7 +88,7 @@ export default async function TaskListDetailPage({
         // team doesn't have to bounce back to the quotation. Single
         // source of truth stays on the document — PTL only stores
         // overrides (shipping_method) on its own row.
-        "id, number, status, date, shipping_method, production_notes, technical_notes, quotation_id, client_id, created_by, submitted_at, factory_sent_at, original_sales_request, clients(company_name, country, contact_name, client_code), documents:quotation_id(number, type, date, affair_name, incoterm, freight_type, freight_cost, port_of_loading, port_of_destination, currency, payment_mode, payment_terms, production_mode, production_days, production_date, total_price)"
+        "id, number, status, date, shipping_method, production_notes, technical_notes, quotation_id, affair_id, client_id, created_by, submitted_at, factory_sent_at, original_sales_request, clients(company_name, country, contact_name, client_code), documents:quotation_id(number, type, date, affair_name, incoterm, freight_type, freight_cost, port_of_loading, port_of_destination, currency, payment_mode, payment_terms, production_mode, production_days, production_date, total_price)"
       )
       .eq("id", params.id)
       .maybeSingle(),
@@ -104,6 +105,21 @@ export default async function TaskListDetailPage({
   ]);
 
   if (!task) notFound();
+
+  // Product Lighting Setup (m144) — the approved lighting config for this
+  // command, anchored on the proforma (document_id = quotation_id). Fetched
+  // defensively so a missing m144 just leaves the Lighting tab empty/editable.
+  let lightingRow: any = null;
+  if ((task as any).quotation_id) {
+    const { data } = await supabase
+      .from("product_lighting_setups")
+      .select(
+        "id, document_id, lighting_power, operating_hours, lighting_program, approved_optics, energy_study_path, energy_study_name, dialux_path, dialux_name, ai_extracted, created_at"
+      )
+      .eq("document_id", (task as any).quotation_id)
+      .maybeSingle();
+    lightingRow = data ?? null;
+  }
 
   // m135 — manual-item columns, fetched defensively so a missing migration
   // just leaves the map empty (the page falls back to the product/category
@@ -786,6 +802,7 @@ export default async function TaskListDetailPage({
         {[
           { href: "#tl-request", label: "Sales request" },
           { href: "#tl-product", label: "Product" },
+          { href: "#tl-lighting", label: "Lighting" },
           { href: "#tl-production", label: "Production" },
           { href: "#tl-risks", label: "Risks" },
           { href: "#tl-logistics", label: "Logistics" },
@@ -915,6 +932,36 @@ export default async function TaskListDetailPage({
           </div>
         )}
       </div>
+
+      {/* ---------- PRODUCT LIGHTING SETUP (m144) ----------
+          Sales completes the APPROVED lighting config here (Energy Study +
+          power + dimming program + optics + operating hours), with optional AI
+          Auto-fill. Non-blocking; transferred to the production order via the
+          command (quotation_id). Editable while the task list is sales-editable. */}
+      {task.quotation_id && (
+        <>
+          <div className="sec-head">
+            <div className="lhs">
+              <h2 id="tl-lighting" style={{ scrollMarginTop: 16 }}>
+                Product Lighting Setup
+              </h2>
+              <p className="micro">
+                Lighting parameters + technical studies for production,
+                controller programming and quality control.
+              </p>
+            </div>
+          </div>
+          <div className="prod-shell">
+            <ProductLightingSetupForm
+              documentId={task.quotation_id}
+              affairId={(task as any).affair_id ?? null}
+              clientId={task.client_id ?? null}
+              initial={lightingRow ?? null}
+              editable={salesCanEdit}
+            />
+          </div>
+        </>
+      )}
 
       {/* ---------- KNOWN RISKS / WARNINGS ----------
           Sits between the configuration and attachments. Compact +

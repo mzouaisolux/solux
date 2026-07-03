@@ -82,16 +82,25 @@ export async function saveEventConfig(formData: FormData): Promise<void> {
     consumer: string;
     role: string;
     config: Record<string, unknown>;
+    enabled?: boolean;
     updated_by: string | null;
     updated_at: string;
   };
   const desired: Row[] = [];
 
-  // notification — per-role channel (default ⇒ no row ⇒ legacy behavior)
-  for (const r of VIEW_AS_ROLES) {
-    const v = String(formData.get(`notification__${r}`) ?? "default");
-    if (v === "bell" || v === "feed" || v === "off") {
-      desired.push({ event_key: eventKey, consumer: "notification", role: r, config: { channel: v }, updated_by: uid, updated_at: now });
+  // notification — OPT-IN (owner decision 2026-07-03). The master switch is
+  // a role='*' row: present ⇒ enabled, absent ⇒ disabled (no bell/feed for
+  // anyone). Per-role channel rows are stored only while enabled; when the
+  // event is disabled we write NO notification rows at all, leaving it in
+  // the pristine opt-in default so "disabled" is unambiguous.
+  const notifyEnabled = formData.get("notify_enabled") != null;
+  if (notifyEnabled) {
+    desired.push({ event_key: eventKey, consumer: "notification", role: "*", config: {}, enabled: true, updated_by: uid, updated_at: now });
+    for (const r of VIEW_AS_ROLES) {
+      const v = String(formData.get(`notification__${r}`) ?? "default");
+      if (v === "bell" || v === "feed" || v === "off") {
+        desired.push({ event_key: eventKey, consumer: "notification", role: r, config: { channel: v }, updated_by: uid, updated_at: now });
+      }
     }
   }
   // dashboard — per-role visibility + a shared section

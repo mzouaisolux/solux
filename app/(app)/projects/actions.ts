@@ -851,6 +851,9 @@ export async function setProjectPricing(formData: FormData): Promise<void> {
   const poleMargin = numOrNull(formData, "pole_margin_pct");
   const poleCommission = numOrNull(formData, "pole_commission_pct");
   const supabase = createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
 
   // Load the project (for the client guard + the Project Product snapshot),
   // the cost (Director can read), freight total, and pricing settings.
@@ -918,6 +921,10 @@ export async function setProjectPricing(formData: FormData): Promise<void> {
       product_unit_price: productFinal,
       pole_unit_price: poleFinal,
       freight_total: (freight as any)?.estimated_total_freight ?? null,
+      // Approval provenance (m139) — carried onto the generated quotation line
+      // as approved_by / approved_at so the locked price is fully traceable.
+      priced_by: user?.id ?? null,
+      priced_at: now(),
       updated_at: now(),
     },
     { onConflict: "project_request_id" }
@@ -931,6 +938,51 @@ export async function setProjectPricing(formData: FormData): Promise<void> {
     bestEffort: true,
   });
   revalidate(id);
+}
+
+// ---------------------------- request costing revision (m139) ----------------------------
+
+/**
+ * m139 — from a locked quotation line, ask the Sales Director to re-cost the
+ * source Service Request. The SR is the single source of truth for costing, so
+ * we REOPEN it for pricing (never spawn a new SR) and notify the Director. The
+ * quotation itself is left untouched — it keeps its approved price until a new
+ * costing is approved and the salesperson explicitly applies it. (Phase 2 turns
+ * this into a full costing-version revision with history.)
+ *
+ * `projectRequestId` is passed directly (client action), not via FormData.
+ */
+export async function requestCostingRevision(
+  projectRequestId: string
+): Promise<void> {
+  await requireCapability("project.generate_quotation");
+  if (!projectRequestId) throw new Error("Missing project request id");
+  const supabase = createClient();
+
+  const { data: pr } = await supabase
+    .from("project_requests")
+    .select("id, name, status")
+    .eq("id", projectRequestId)
+    .maybeSingle();
+  if (!pr) throw new Error("Service Request not found or not visible.");
+
+  // Reopen for re-pricing. Best-effort: if RLS blocks this requester from
+  // updating, the notification below still reaches the Director, who can act.
+  await supabase
+    .from("project_requests")
+    .update({ status: "ready_for_pricing", updated_at: now() })
+    .eq("id", projectRequestId);
+
+  await emitEvent({
+    entity_type: "project_request",
+    entity_id: projectRequestId,
+    event_type: "pr.ready_for_pricing",
+    message: `Costing revision requested from the quotation — please re-cost ${
+      (pr as any)?.name ?? "this Service Request"
+    }.`,
+    bestEffort: true,
+  });
+  revalidate(projectRequestId);
 }
 
 // ---------------------------- generate quotation (multi-line) ----------------------------
@@ -1079,6 +1131,14 @@ export async function generateQuotationFromProject(formData: FormData): Promise<
     discount_type: null,
     discount_value: 0,
     client_product_name: name,
+    // m139 — this price was APPROVED by the Sales Director in the Service
+    // Request. Lock it: attaching the mandatory catalogue model later in the
+    // builder must attach a manufacturing reference only, never re-read the
+    // catalogue price. Cost stays confidential to the SR (linked, not copied).
+    pricing_source: "approved_service_request",
+    source_project_request_id: id,
+    approved_by: pr?.priced_by ?? null,
+    approved_at: pr?.priced_at ?? null,
   });
 
   const poleQty = Math.max(1, Number(pr?.pole_quantity ?? p.pole_quantity ?? qty));

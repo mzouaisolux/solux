@@ -13,6 +13,7 @@ import {
   NOTIFICATION_EVENT_KEYS,
   defaultChannel,
   resolveNotificationChannel,
+  resolveEventNotification,
   shouldEmitOnce,
 } from "../lib/notification-catalog.ts";
 import { eventRaisesBell, type EventType } from "../lib/events-shared.ts";
@@ -72,6 +73,50 @@ test("a rule override wins over the default", () => {
   assert.equal(
     resolveNotificationChannel({ eventKey: "tl.validated", severity: "medium", rule: "feed" }),
     "feed"
+  );
+});
+
+/* ----------------------- opt-in master gate ------------------------ */
+
+test("disabled ⇒ off for EVERY event, whatever its severity or rule", () => {
+  for (const key of NOTIFICATION_EVENT_KEYS) {
+    const sev = NOTIFICATION_CATALOG[key].severity;
+    // no rule
+    assert.equal(
+      resolveEventNotification({ eventKey: key, severity: sev, notifyEnabled: false, rule: null }),
+      "off",
+      `disabled should mute ${key}`
+    );
+    // even a rule that says "bell" cannot re-enable a disabled event
+    assert.equal(
+      resolveEventNotification({ eventKey: key, severity: sev, notifyEnabled: false, rule: "bell" }),
+      "off",
+      `disabled ignores rule for ${key}`
+    );
+  }
+});
+
+test("enabled ⇒ reproduces the legacy severity default (no rule)", () => {
+  for (const key of NOTIFICATION_EVENT_KEYS) {
+    const sev = NOTIFICATION_CATALOG[key].severity;
+    assert.equal(
+      resolveEventNotification({ eventKey: key, severity: sev, notifyEnabled: true, rule: null }),
+      defaultChannel(key, sev),
+      `enabled default mismatch for ${key}`
+    );
+  }
+});
+
+test("enabled + rule ⇒ the per-role rule wins", () => {
+  // critical event, enabled, muted for a role
+  assert.equal(
+    resolveEventNotification({ eventKey: "po.cancelled", severity: "critical", notifyEnabled: true, rule: "off" }),
+    "off"
+  );
+  // normally-feed event, enabled, promoted to the bell for a role
+  assert.equal(
+    resolveEventNotification({ eventKey: "po.created", severity: "medium", notifyEnabled: true, rule: "bell" }),
+    "bell"
   );
 });
 

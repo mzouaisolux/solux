@@ -26,9 +26,11 @@ import {
   type CatalogOverride,
 } from "@/lib/event-registry";
 import type { EventType } from "@/lib/events-shared";
+import { getEventHelp } from "@/lib/event-help";
 import { saveEventConfig, resetEventConfig } from "../actions";
-import NotificationRouting from "./NotificationRouting";
+import NotificationConfig from "./NotificationConfig";
 import EventConfigFooter from "./EventConfigFooter";
+import EventHelp from "../EventHelp";
 import { EvtIcon } from "../EvtIcons";
 
 export const dynamic = "force-dynamic";
@@ -89,8 +91,13 @@ export default async function EventDetailPage({
   const isCritical = identity.severity === "critical";
   const hasConfig =
     (!!override && Object.keys(override).length > 0) || routingRows.length > 0;
-  // What "inherit" actually resolves to today (code severity, role-independent).
+  // What "inherit" resolves to WHEN enabled (code severity, role-independent).
   const baselineChannel = defaultChannel(typedKey, base.severity);
+  // Opt-in master switch: notifications are ON only when the master role='*'
+  // routing row exists and isn't disabled. Absent ⇒ disabled (the default).
+  const masterRow = idx.get("notification:*");
+  const notifyEnabled = !!masterRow && masterRow.enabled !== false;
+  const help = getEventHelp(eventKey);
 
   // ---- current form values ----
   const reqActionValue =
@@ -133,9 +140,12 @@ export default async function EventDetailPage({
             </Link>{" "}
             · {identity.category}
           </div>
-          <h2 className="ad-doc-title">
-            {identity.icon ? `${identity.icon} ` : ""}
-            {identity.label}
+          <h2 className="ad-doc-title evt-title-row">
+            <span>
+              {identity.icon ? `${identity.icon} ` : ""}
+              {identity.label}
+            </span>
+            {help && <EventHelp title={identity.label} help={help} />}
           </h2>
           <div className="evt-head-meta">
             <code>{eventKey}</code>
@@ -153,8 +163,10 @@ export default async function EventDetailPage({
 
           {searchParams?.saved && (
             <div className="evt-flash ok" role="status">
-              ✓ Configuration saved. Only non-default values are stored —
-              everything else stays at today’s behavior.
+              ✓ Configuration saved.{" "}
+              {notifyEnabled
+                ? "Notifications are enabled and take effect immediately."
+                : "Notifications stay disabled — this event notifies no one."}
             </div>
           )}
           {searchParams?.reset && (
@@ -176,9 +188,20 @@ export default async function EventDetailPage({
           {isCritical && (
             <div className="evt-crit-banner" role="note">
               <div>
-                <b>Critical event.</b> Be careful when muting notifications for{" "}
-                <b>Super admin</b> or <b>Admin</b> — they would stop being
-                alerted when this happens.
+                <b>Critical event.</b>{" "}
+                {notifyEnabled ? (
+                  <>
+                    Be careful when muting notifications for{" "}
+                    <b>Super admin</b> or <b>Admin</b> — they would stop being
+                    alerted when this happens.
+                  </>
+                ) : (
+                  <>
+                    It is currently <b>disabled</b>, so no one is alerted when
+                    it happens. Consider enabling it for <b>Super admin</b> /{" "}
+                    <b>Admin</b>.
+                  </>
+                )}
               </div>
             </div>
           )}
@@ -186,29 +209,24 @@ export default async function EventDetailPage({
           <form action={saveEventConfig} className="evt-form">
             <input type="hidden" name="event_key" value={eventKey} />
 
-            {/* ---------------- B. Notification (live, primary) ------------- */}
+            {/* ---------------- B. Notification (live, primary, opt-in) ----- */}
             <div className="evt-section evt-section-primary">
               <div className="evt-section-head">
                 <EvtIcon name="bell" size={17} />
                 <span className="evt-section-title">Notifications</span>
-                <span className="evt-leg-badge live">Live</span>
               </div>
               <p className="evt-section-sub">
-                Notifications are <b>live today</b>. Bell / feed routing is
-                enforced immediately.
+                Notifications are <b>off by default</b>. Enable this event to
+                notify people; bell / feed routing then takes effect
+                immediately.
               </p>
-              <div className="evt-callout">
-                <div>
-                  <b>Super admin</b> and <b>Admin</b> are separate channels.
-                  Configuring Admin does <b>not</b> include Super admin.
-                </div>
-              </div>
-              <NotificationRouting
+              <NotificationConfig
                 roles={notifRoles}
                 channels={NOTIFICATION_CHANNELS as unknown as { value: string; label: string }[]}
                 values={notifValues}
                 isCritical={isCritical}
                 defaultChannel={baselineChannel}
+                initialEnabled={notifyEnabled}
               />
             </div>
 

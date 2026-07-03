@@ -14,6 +14,10 @@ import {
   affairPhaseLabel,
 } from "@/components/affairs/AffairProgressStrip";
 import { AffairWorkspace } from "@/components/affairs/AffairWorkspace";
+import {
+  AffairInvoicesCard,
+  type AffairInvoiceFamily,
+} from "@/components/affairs/AffairInvoicesCard";
 import { ProjectActionsMenu } from "@/components/affairs/ProjectActionsMenu";
 import { AssignableDoc } from "@/components/affairs/AssignDocumentPanel";
 import type { Option } from "@/components/affairs/NewProjectPanel";
@@ -57,6 +61,7 @@ export function AffairDetail({
   owners,
   canAssignOwner,
   assignableDocs,
+  invoiceFamilies = [],
   source,
   plannedActions,
   tenderOrigin,
@@ -67,6 +72,8 @@ export function AffairDetail({
   owners: Option[];
   canAssignOwner: boolean;
   assignableDocs: AssignableDoc[];
+  /** m141 — the deal's commercial invoices + legal invoices. */
+  invoiceFamilies?: AffairInvoiceFamily[];
   /** CRM step 3 (m102): where the deal came from. */
   source?: string | null;
   /** CRM step 4 (m103): the deal's planned actions (null pre-migration). */
@@ -229,6 +236,12 @@ export function AffairDetail({
           assignableDocs={assignableDocs}
           plannedActions={plannedActions}
         />
+
+        {invoiceFamilies.length > 0 && (
+          <div className="mt-8 border-t border-neutral-200 pt-6">
+            <AffairInvoicesCard families={invoiceFamilies} />
+          </div>
+        )}
       </div>
     </div>
   );

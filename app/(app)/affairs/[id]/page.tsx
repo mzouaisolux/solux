@@ -24,6 +24,13 @@ import {
 } from "@/lib/affairs-prototype";
 import { AffairDetail } from "@/components/affairs/AffairDetail";
 import type { AssignableDoc } from "@/components/affairs/AssignDocumentPanel";
+import {
+  fetchFamiliesForAffair,
+  fetchPdfContext,
+  toInvoicePdfData,
+  familyRollup,
+} from "@/lib/invoicing-server";
+import type { AffairInvoiceFamily } from "@/components/affairs/AffairInvoicesCard";
 
 export const dynamic = "force-dynamic";
 
@@ -283,6 +290,52 @@ export default async function AffairDetailPage({ params }: { params: { id: strin
       : "Unknown / unlinked client");
   const owners = ownerOptionsRaw.map((o) => ({ id: o.id, name: o.name }));
 
+  // Invoices of this affair (m141) — assembled with per-invoice PDF data so
+  // the client card can Preview / Download / Send without another round-trip.
+  // Defensive: any failure (pre-m141 env) → empty, the card simply hides.
+  let invoiceFamilies: AffairInvoiceFamily[] = [];
+  try {
+    const families = await fetchFamiliesForAffair(supabase, id);
+    if (families.length) {
+      const ctxByClient = new Map<string, Awaited<ReturnType<typeof fetchPdfContext>>>();
+      for (const fam of families) {
+        const key = fam.client_id ?? "__none__";
+        if (!ctxByClient.has(key)) {
+          ctxByClient.set(key, await fetchPdfContext(supabase, fam.client_id));
+        }
+      }
+      invoiceFamilies = families.map((fam) => {
+        const ctx = ctxByClient.get(fam.client_id ?? "__none__")!;
+        const rollup = familyRollup(fam);
+        return {
+          id: fam.id,
+          commercial_number: fam.commercial_number,
+          source_document_id: fam.source_document_id,
+          source_number: fam.source_number,
+          total_amount: fam.total_amount,
+          currency: fam.currency,
+          client_name: fam.client_name,
+          client_email: ctx.client?.email ?? null,
+          invoiced: rollup.invoiced,
+          paid: rollup.paid,
+          remaining: rollup.remaining,
+          invoices: fam.invoices.map((inv) => ({
+            id: inv.id,
+            accounting_number: inv.accounting_number,
+            invoice_type: inv.invoice_type,
+            label: inv.label,
+            status: inv.status,
+            amount: inv.amount,
+            paid: inv.paid,
+            pdfData: toInvoicePdfData(fam, inv, ctx),
+          })),
+        };
+      });
+    }
+  } catch {
+    invoiceFamilies = [];
+  }
+
   return (
     <AffairDetail
       affair={group}
@@ -291,6 +344,7 @@ export default async function AffairDetailPage({ params }: { params: { id: strin
       owners={owners}
       canAssignOwner={canAssignOwner}
       assignableDocs={assignableDocs}
+      invoiceFamilies={invoiceFamilies}
       source={affair.source ?? null}
       plannedActions={plannedActions}
       tenderOrigin={

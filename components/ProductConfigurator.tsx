@@ -9,6 +9,7 @@ import {
 import {
   CUSTOM_OPTION_SENTINEL,
   customValueKey,
+  isLineLocked,
   type ConfigField,
   type CostMap,
   type DiscountType,
@@ -248,11 +249,17 @@ function CategoryLineCard({
   // empty — the model's own name is the internal label, and sales can type a
   // real client reference if they want one.
   function pickModel(id: string) {
+    // m139 — attaching the catalogue model is a MANUFACTURING REFERENCE only.
+    // For a LOCKED line (approved Service-Request price / manual / imported) the
+    // commercial price must be preserved: do NOT flip to catalogue "auto"
+    // pricing and do NOT touch the price. Only a catalogue-sourced line hands
+    // off to auto catalogue pricing (today's behaviour).
+    const locked = isLineLocked(value);
     onChange({
       ...value,
       product_id: id,
-      pricing_mode: "auto",
       client_product_name: null,
+      ...(locked ? {} : { pricing_mode: "auto" }),
     });
   }
 
@@ -436,6 +443,20 @@ type Props = {
   products: Product[];
   options: Option[];
   tierPrices: TierPriceMap;
+  /**
+   * m142 — TEMPORARY test-phase flag: hide every catalogue-price surface
+   * (tier buttons, standard price, "no price" warning, standard-vs-previous
+   * comparison) for this user. The unit price becomes a manual input; an
+   * approved Service-Request price still shows (it's commercial, not
+   * catalogue). Pure visibility — pricing data & the m139 lock are untouched.
+   */
+  hidePrices?: boolean;
+  /**
+   * m142 — the flag is active but THIS user is exempt: show a discreet
+   * "admin only" marker next to the catalogue price so nobody quotes a
+   * number the sales rep in front of them can't see.
+   */
+  showAdminOnlyPriceBadge?: boolean;
   costs?: CostMap | null; // admin-only; null/undefined = hidden
   isAdmin?: boolean;
   /** Dynamic configuration fields grouped by product category. */
@@ -444,12 +465,20 @@ type Props = {
   onChange: (line: DocumentLine) => void;
   onRemove?: () => void;
   onClearSuggestion?: () => void; // hides the "previous" comparison
+  /**
+   * m139 — ask the Sales Director to re-cost the source Service Request (reopen
+   * for pricing + notify). Wired by the builder; when absent the "Request
+   * Costing Revision" action is hidden. Receives the source project_request id.
+   */
+  onRequestCostingRevision?: (projectRequestId: string) => Promise<void>;
 };
 
 export default function ProductConfigurator({
   products,
   options,
   tierPrices,
+  hidePrices = false,
+  showAdminOnlyPriceBadge = false,
   costs,
   isAdmin = false,
   fieldsByCategory,
@@ -457,6 +486,7 @@ export default function ProductConfigurator({
   onChange,
   onRemove,
   onClearSuggestion,
+  onRequestCostingRevision,
 }: Props) {
   const product = useMemo(
     () => products.find((p) => p.id === value.product_id) ?? null,
@@ -495,6 +525,16 @@ export default function ProductConfigurator({
     );
     return hasOpts || hasCfg || value.category_id != null;
   });
+  // m139 — locked-line UX state. `specTouched` arms the "specification changed
+  // on an approved item" advisory (the price is kept regardless); `recalcArmed`
+  // is the inline confirm for the explicit "Recalculate from Catalogue" escape;
+  // `recalcError` shows the refusal when the catalogue has no tier price.
+  const [specTouched, setSpecTouched] = useState(false);
+  const [recalcArmed, setRecalcArmed] = useState(false);
+  const [recalcError, setRecalcError] = useState<string | null>(null);
+  const [revisionState, setRevisionState] = useState<
+    "idle" | "pending" | "sent" | "error"
+  >("idle");
 
   useEffect(() => {
     setFavorites(loadFavorites());
@@ -713,19 +753,38 @@ export default function ProductConfigurator({
     );
   }
 
-  const standardPrice = resolveStandardUnitPrice(
-    product,
-    value.pricing_tier,
-    value.selected_options,
-    productOptions,
-    tierPrices
-  );
+  // m139 — the commercial-price lock. `isLocked` (source ≠ catalogue) means the
+  // catalogue must never drive this line's price: it's the approved SR price, a
+  // manual price, or an imported one. `isApproved` is the stricter set that
+  // gets the read-only "approved / manufacturing-reference" treatment + the
+  // explicit escape actions (a plain `manual` line stays user-editable).
+  const isLocked = isLineLocked(value);
+  const isApproved =
+    value.pricing_source === "approved_service_request" ||
+    value.pricing_source === "imported";
+
+  // m142 — hidden-prices mode never consults the catalogue at all (the server
+  // passes an empty tierPrices map anyway; this keeps intent explicit).
+  const standardPrice = hidePrices
+    ? null
+    : resolveStandardUnitPrice(
+        product,
+        value.pricing_tier,
+        value.selected_options,
+        productOptions,
+        tierPrices
+      );
   // When no tier price exists, auto-mode shows 0 and a warning is rendered.
-  const priceMissing = standardPrice === null;
+  // A locked line never consults the catalogue, so it's never "missing" —
+  // and neither is a hidden-prices line (its price is entered, not resolved).
+  const priceMissing = !hidePrices && !isLocked && standardPrice === null;
   const effectiveStandard = standardPrice ?? 0;
 
+  // A locked line's displayed price is always its own committed price, never the
+  // catalogue tier price — even if some legacy row still carries pricing_mode
+  // "auto" (defensive; locked lines are seeded manual).
   const originalPrice =
-    value.pricing_mode === "auto"
+    !isLocked && value.pricing_mode === "auto"
       ? effectiveStandard
       : value.original_unit_price;
   const finalUnit = applyDiscount(
@@ -743,6 +802,29 @@ export default function ProductConfigurator({
   // Single commit on any state change: merge derived prices so save payload is correct.
   function commit(patch: Partial<DocumentLine>) {
     const next = { ...value, ...patch };
+
+    // m139 — LOCKED line: the catalogue must never re-price it. Keep the
+    // approved/manual unit price (`original_unit_price`) verbatim and only
+    // re-derive the discounted unit + line total (qty / discount still apply).
+    // We check the MERGED result so an explicit unlock (a patch setting
+    // pricing_source back to "catalogue") correctly falls through to the
+    // catalogue recompute below.
+    // m142 — hidden-prices mode takes the same branch for EVERY line: with the
+    // catalogue unreadable, the auto recompute below would resolve to 0 and
+    // silently zero an existing line's price on any qty/config change.
+    if (isLineLocked(next) || hidePrices) {
+      const nextFinal = applyDiscount(
+        next.original_unit_price,
+        next.discount_type,
+        next.discount_value
+      );
+      onChange({
+        ...next,
+        unit_price: nextFinal,
+        total_price: nextFinal * Math.max(next.quantity, 0),
+      });
+      return;
+    }
 
     // Re-resolve derived values based on the new state.
     const nextProduct =
@@ -782,14 +864,76 @@ export default function ProductConfigurator({
   }
 
   function setTier(t: PricingTier) {
+    // Tier is manufacturing intent on a locked line (it can't move the price);
+    // flag the spec change so the costing advisory shows.
+    if (isApproved) setSpecTouched(true);
     commit({ pricing_tier: t });
   }
 
   function setPricingMode(mode: PricingMode) {
     // Seed manual mode with the current standard so the number stays sensible.
-    const patch: Partial<DocumentLine> = { pricing_mode: mode };
+    // m139 — the Source toggle IS the lock: switching to Manual marks the line
+    // "manual" (protected from catalogue model changes); Auto returns pricing to
+    // the catalogue. (Hidden entirely for approved/imported lines — they use
+    // the explicit escape actions instead.)
+    const patch: Partial<DocumentLine> = {
+      pricing_mode: mode,
+      pricing_source: mode === "manual" ? "manual" : "catalogue",
+    };
     if (mode === "manual") patch.original_unit_price = effectiveStandard;
     commit(patch);
+  }
+
+  // m139 — explicit escape #1: abandon the approved/manual price and re-read the
+  // catalogue. Refuses (never zeroes) when the catalogue has no price for this
+  // model + tier. This is the ONLY in-form path that unlocks a line's price.
+  function recalcFromCatalogue() {
+    if (!product) return; // only reachable from the full card (product present)
+    if (hidePrices) return; // m142 — no catalogue reads while prices are hidden
+    const std = resolveStandardUnitPrice(
+      product,
+      value.pricing_tier,
+      value.selected_options,
+      productOptions,
+      tierPrices
+    );
+    if (std === null) {
+      setRecalcError(
+        `No ${value.pricing_tier} catalogue price for ${product.name}. The approved price is kept — pick a tier that has a price, or a different model.`
+      );
+      return;
+    }
+    const finalUnit = applyDiscount(std, value.discount_type, value.discount_value);
+    onChange({
+      ...value,
+      pricing_source: "catalogue",
+      pricing_mode: "auto",
+      // Drop the SR link + approval stamp: the price is no longer the approved one.
+      source_project_request_id: null,
+      approved_by: null,
+      approved_at: null,
+      original_unit_price: std,
+      unit_price: finalUnit,
+      total_price: finalUnit * Math.max(value.quantity, 0),
+    });
+    setRecalcArmed(false);
+    setRecalcError(null);
+    setSpecTouched(false);
+  }
+
+  // m139 — explicit escape #2: ask the Sales Director to re-cost the source
+  // Service Request. Reopens the SR for pricing + notifies; the quotation keeps
+  // its approved price until a new costing is approved. (Phase 2 turns this into
+  // a full costing-version revision.)
+  async function requestCostingRevision() {
+    if (!onRequestCostingRevision || !value.source_project_request_id) return;
+    setRevisionState("pending");
+    try {
+      await onRequestCostingRevision(value.source_project_request_id);
+      setRevisionState("sent");
+    } catch {
+      setRevisionState("error");
+    }
   }
 
   function setDiscountType(dt: DiscountType | "") {
@@ -809,9 +953,17 @@ export default function ProductConfigurator({
               Price pre-filled from previous quotation (editable)
             </span>
             <div className="mt-1 text-amber-900">
-              Standard ({value.pricing_tier}):{" "}
-              <b>{standardPrice != null ? standardPrice.toFixed(2) : "—"}</b>{" "}
-              · Previous: <b>{value.previous_unit_price.toFixed(2)}</b>
+              {/* m142 — the standard (catalogue) side of the comparison is a
+                  catalogue price: hidden with the flag. The previous price is
+                  commercial history and stays. */}
+              {!hidePrices && (
+                <>
+                  Standard ({value.pricing_tier}):{" "}
+                  <b>{standardPrice != null ? standardPrice.toFixed(2) : "—"}</b>{" "}
+                  ·{" "}
+                </>
+              )}
+              Previous: <b>{value.previous_unit_price.toFixed(2)}</b>
             </div>
           </div>
           {onClearSuggestion && (
@@ -826,11 +978,122 @@ export default function ProductConfigurator({
         </div>
       )}
 
-      {/* ✓ Model selected — success confirmation for lines that originated from
-          a Service Request (category-origin). Reassures sales that the mandatory
-          Step 1 is done and the configuration below is now unlocked. Hidden
-          while the picker is open (they're actively changing the model). */}
-      {value.category_id && !pickerOpen && (
+      {/* m139 — LOCKED (approved SR / imported) line: the catalogue model is a
+          manufacturing reference only; the approved commercial price is frozen.
+          Reassure sales, surface the config-change advisory, and expose the two
+          EXPLICIT escapes (recalculate / request costing revision). Kept visible
+          even while the picker is open — that's exactly when the "price won't
+          change" reassurance matters most. */}
+      {isApproved ? (
+        <div className="space-y-2 rounded-lg border-2 border-green-300 bg-green-50/70 px-3.5 py-3">
+          <div className="flex items-start gap-2">
+            <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-green-600 text-white">
+              <CheckIcon className="h-3 w-3" />
+            </span>
+            <div className="min-w-0 text-sm text-green-900">
+              <div className="font-semibold">
+                Manufacturing reference attached
+                {product
+                  ? ` — ${product.name}${product.sku ? ` · ${product.sku}` : ""}`
+                  : ""}
+              </div>
+              <div className="mt-0.5 flex items-center gap-1.5 text-green-800">
+                <LockIcon className="h-3.5 w-3.5" />
+                <span>
+                  Commercial pricing remains the approved pricing from the
+                  Service Request.
+                  {value.approved_at
+                    ? ` Approved ${value.approved_at.slice(0, 10)}.`
+                    : ""}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {specTouched && (
+            <div className="flex items-start justify-between gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+              <span>
+                Specification changed on an approved item — the approved price is
+                kept. If this changes the manufacturing cost, use{" "}
+                <b>Request Costing Revision</b>.
+              </span>
+              <button
+                type="button"
+                onClick={() => setSpecTouched(false)}
+                className="shrink-0 text-amber-800 hover:underline"
+              >
+                Dismiss
+              </button>
+            </div>
+          )}
+
+          <div className="flex flex-wrap items-center gap-2 pt-0.5">
+            {/* m142 — "Recalculate from Catalogue" reads a catalogue price:
+                hidden with the flag. Request Costing Revision stays — it's
+                the intended pricing path during the test phase. */}
+            {hidePrices ? null : recalcArmed ? (
+              <div className="flex flex-wrap items-center gap-2 text-xs">
+                <span className="text-neutral-700">
+                  Replace the approved price with the catalogue price?
+                </span>
+                <button
+                  type="button"
+                  onClick={recalcFromCatalogue}
+                  className="rounded-md bg-red-600 px-2.5 py-1 font-semibold text-white hover:bg-red-700"
+                >
+                  Replace
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setRecalcArmed(false);
+                    setRecalcError(null);
+                  }}
+                  className="rounded-md border border-neutral-300 px-2.5 py-1 text-neutral-600 hover:bg-neutral-50"
+                >
+                  Cancel
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setRecalcArmed(true)}
+                className="rounded-md border border-neutral-300 bg-white px-2.5 py-1 text-xs font-medium text-neutral-700 hover:bg-neutral-50"
+              >
+                Recalculate from Catalogue
+              </button>
+            )}
+
+            {onRequestCostingRevision &&
+              value.source_project_request_id &&
+              (revisionState === "sent" ? (
+                <span className="text-xs font-medium text-green-700">
+                  Costing revision requested — the Director will re-cost the
+                  Service Request.
+                </span>
+              ) : (
+                <button
+                  type="button"
+                  onClick={requestCostingRevision}
+                  disabled={revisionState === "pending"}
+                  className="rounded-md border border-neutral-300 bg-white px-2.5 py-1 text-xs font-medium text-neutral-700 hover:bg-neutral-50 disabled:opacity-50"
+                >
+                  {revisionState === "pending"
+                    ? "Requesting…"
+                    : revisionState === "error"
+                    ? "Retry request"
+                    : "Request Costing Revision"}
+                </button>
+              ))}
+          </div>
+
+          {recalcError && (
+            <div className="rounded-md border border-red-300 bg-red-50 px-3 py-2 text-xs text-red-800">
+              {recalcError}
+            </div>
+          )}
+        </div>
+      ) : value.category_id && !pickerOpen ? (
         <div className="flex items-center gap-2 rounded-lg border border-green-300 bg-green-50 px-3 py-2 text-sm text-green-800">
           <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-green-600 text-white">
             <CheckIcon className="h-3 w-3" />
@@ -841,7 +1104,7 @@ export default function ProductConfigurator({
             available below.
           </span>
         </div>
-      )}
+      ) : null}
 
       {/* ---------- HEADER: thumbnail + prominent product name + actions ---------- */}
       <div className="flex items-start gap-3">
@@ -926,7 +1189,10 @@ export default function ProductConfigurator({
           Automatic / Manual source demoted to a small toggle far right. */}
       <div className="border-t border-neutral-100 pt-3.5">
         <div className="flex items-start gap-x-5 gap-y-3 flex-wrap">
-          {/* TIER — loud active state so the chosen tier is unmistakable */}
+          {/* TIER — loud active state so the chosen tier is unmistakable.
+              m142 — the tier picker IS the catalogue price choice: hidden
+              entirely (not greyed) while prices are hidden. */}
+          {!hidePrices && (
           <div>
             <div className="eyebrow mb-1.5">Tier</div>
             <div className="inline-flex rounded-lg bg-white border border-neutral-200 p-0.5">
@@ -953,11 +1219,26 @@ export default function ProductConfigurator({
               })}
             </div>
           </div>
+          )}
 
           {/* UNIT PRICE — hero number; updates the instant a tier is clicked */}
           <div>
-            <div className="eyebrow mb-1.5">Unit price</div>
-            {value.pricing_mode === "manual" ? (
+            <div className="eyebrow mb-1.5">
+              Unit price
+              {/* m142 — exempt user seeing a catalogue price others don't */}
+              {showAdminOnlyPriceBadge && !isLocked && (
+                <span className="ml-1.5 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold normal-case tracking-normal text-amber-800">
+                  visible admin only
+                </span>
+              )}
+            </div>
+            {/* m139 — an approved/imported line shows its frozen price READ-ONLY
+                (edit it only via the explicit escape actions). A plain manual
+                line stays editable; a catalogue line shows the standard price.
+                m142 — hidden prices: no catalogue price to show, so every
+                non-approved line gets the manual input; typing in it commits
+                the line to manual pricing (source = manual, m139 semantics). */}
+            {(value.pricing_mode === "manual" || hidePrices) && !isApproved ? (
               <input
                 type="number"
                 min={0}
@@ -966,6 +1247,12 @@ export default function ProductConfigurator({
                 onChange={(e) =>
                   commit({
                     original_unit_price: parseFloat(e.target.value) || 0,
+                    ...(hidePrices
+                      ? {
+                          pricing_mode: "manual" as PricingMode,
+                          pricing_source: "manual" as const,
+                        }
+                      : {}),
                   })
                 }
                 style={{
@@ -982,16 +1269,22 @@ export default function ProductConfigurator({
                   priceMissing ? "text-red-600" : "text-neutral-900"
                 }`}
               >
-                {standardPrice != null ? standardPrice.toFixed(2) : "—"}
+                {isLocked
+                  ? Number(value.original_unit_price).toFixed(2)
+                  : standardPrice != null
+                  ? standardPrice.toFixed(2)
+                  : "—"}
               </div>
             )}
             <div className="text-[11px] text-neutral-400 mt-1 tabular-nums">
               {value.discount_type && Number(value.discount_value) > 0
                 ? `−${discountAmount.toFixed(2)} → ${finalUnit.toFixed(2)}/u`
-                : value.pricing_mode === "manual"
+                : isApproved
+                ? "approved price"
+                : value.pricing_mode === "manual" || hidePrices
                 ? "manual price"
                 : `standard · ${value.pricing_tier}`}
-              {isAdmin && margin
+              {isAdmin && margin && !isApproved
                 ? ` · margin ${margin.marginPct.toFixed(0)}%`
                 : ""}
             </div>
@@ -1061,33 +1354,47 @@ export default function ProductConfigurator({
                 {value.quantity} × {finalUnit.toFixed(2)}
               </div>
             </div>
+            {/* m142 — hidden prices: "Auto" would re-read the catalogue, so the
+                whole Source toggle disappears (approved lines keep their badge). */}
+            {hidePrices && !isApproved ? null : (
             <div>
               <div className="eyebrow mb-1.5">Source</div>
-              <div className="inline-flex rounded-md border border-neutral-200 overflow-hidden text-[11px]">
-                <button
-                  type="button"
-                  onClick={() => setPricingMode("auto")}
-                  className={`px-2.5 py-1.5 ${
-                    value.pricing_mode === "auto"
-                      ? "bg-neutral-900 text-white"
-                      : "bg-white hover:bg-neutral-50 text-neutral-500"
-                  }`}
-                >
-                  Auto
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setPricingMode("manual")}
-                  className={`px-2.5 py-1.5 ${
-                    value.pricing_mode === "manual"
-                      ? "bg-neutral-900 text-white"
-                      : "bg-white hover:bg-neutral-50 text-neutral-500"
-                  }`}
-                >
-                  Manual
-                </button>
-              </div>
+              {/* m139 — approved/imported lines hide the Auto/Manual toggle: the
+                  price is locked and can only change via the explicit escapes
+                  above. Everything else keeps the normal source toggle. */}
+              {isApproved ? (
+                <div className="inline-flex items-center gap-1.5 rounded-md border border-green-300 bg-green-50 px-2.5 py-1.5 text-[11px] font-medium text-green-800">
+                  <LockIcon className="h-3 w-3" />
+                  Approved
+                </div>
+              ) : (
+                <div className="inline-flex rounded-md border border-neutral-200 overflow-hidden text-[11px]">
+                  <button
+                    type="button"
+                    onClick={() => setPricingMode("auto")}
+                    className={`px-2.5 py-1.5 ${
+                      value.pricing_mode === "auto"
+                        ? "bg-neutral-900 text-white"
+                        : "bg-white hover:bg-neutral-50 text-neutral-500"
+                    }`}
+                  >
+                    Auto
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPricingMode("manual")}
+                    className={`px-2.5 py-1.5 ${
+                      value.pricing_mode === "manual"
+                        ? "bg-neutral-900 text-white"
+                        : "bg-white hover:bg-neutral-50 text-neutral-500"
+                    }`}
+                  >
+                    Manual
+                  </button>
+                </div>
+              )}
             </div>
+            )}
           </div>
         </div>
 
@@ -1137,8 +1444,12 @@ export default function ProductConfigurator({
         if (totalCfg === 0) return null;
 
         const configValues = value.config_values ?? {};
-        const setConfig = (patch: Record<string, string>) =>
+        const setConfig = (patch: Record<string, string>) => {
+          // m139 — a spec change on an approved item can't move the (locked)
+          // price, but it may invalidate the approved costing: arm the advisory.
+          if (isApproved) setSpecTouched(true);
           commit({ config_values: { ...configValues, ...patch } });
+        };
         const setOpts = Object.values(value.selected_options ?? {}).filter(
           (v) => v != null && v !== ""
         ).length;
@@ -1190,14 +1501,15 @@ export default function ProductConfigurator({
                         <div className="eyebrow mb-1.5">{type}</div>
                         <select
                           value={value.selected_options[type] ?? ""}
-                          onChange={(e) =>
+                          onChange={(e) => {
+                            if (isApproved) setSpecTouched(true);
                             commit({
                               selected_options: {
                                 ...value.selected_options,
                                 [type]: e.target.value,
                               },
-                            })
-                          }
+                            });
+                          }}
                           className="w-full rounded-md border border-neutral-200 px-3 py-1.5 text-sm"
                         >
                           <option value="">— select —</option>
