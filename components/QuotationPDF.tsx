@@ -92,6 +92,10 @@ export type QuotationPDFData = {
   currency?: Currency;
   freight_type: string | null;
   freight_cost: number;
+  // m146 — logistics extras. Insurance = single amount; additional_charges =
+  // repeatable {label, amount} rows (ECTN, BESC, FERI, inspection…).
+  insurance_cost?: number | null;
+  additional_charges?: { label: string; amount: number }[];
   port_of_loading?: string | null;
   port_of_destination?: string | null;
   containers?: DocumentContainer[];
@@ -803,7 +807,14 @@ function TotalsBlock({ data }: { data: QuotationPDFData }) {
     containers.length > 0
       ? totalFreight(containers)
       : Number(data.freight_cost || 0);
-  const grand = itemsSubtotal + freightTotal;
+  // m146 — insurance + additional charges are real costs the customer pays,
+  // so they DO belong in the CFR/CIF total (unlike the internal commission).
+  const insurance = Number(data.insurance_cost || 0);
+  const charges = (data.additional_charges ?? []).filter(
+    (c) => Number(c.amount) > 0
+  );
+  const chargesTotal = charges.reduce((s, c) => s + Number(c.amount || 0), 0);
+  const grand = itemsSubtotal + freightTotal + insurance + chargesTotal;
 
   // Port of destination is still used for the grand-total label
   // (e.g. "Total CFR COTONOU"), but the items sub-total now reads
@@ -874,6 +885,40 @@ function TotalsBlock({ data }: { data: QuotationPDFData }) {
               </View>
             </View>
           )}
+
+      {/* Insurance (m146) */}
+      {insurance > 0 && (
+        <View style={s.tableRow}>
+          <Text style={[s.tableBodyCell, s.colDescription]}>Insurance</Text>
+          <View style={s.colClientRef} />
+          <Text style={[s.tableBodyCell, s.colQty]} />
+          <View style={[s.colUnit, s.moneyCell]}>
+            <Text style={s.moneyCurrency}>{cur}</Text>
+          </View>
+          <View style={[s.colTotal, s.moneyCell]}>
+            <Text style={s.moneyCurrency}>{cur}</Text>
+            <Text style={s.moneyAmount}>{formatAmount(insurance)}</Text>
+          </View>
+        </View>
+      )}
+
+      {/* Additional charges — one row each (ECTN, BESC, FERI, inspection…) */}
+      {charges.map((c, i) => (
+        <View key={`ac-${i}`} style={s.tableRow}>
+          <Text style={[s.tableBodyCell, s.colDescription]}>
+            {c.label || "Additional charge"}
+          </Text>
+          <View style={s.colClientRef} />
+          <Text style={[s.tableBodyCell, s.colQty]} />
+          <View style={[s.colUnit, s.moneyCell]}>
+            <Text style={s.moneyCurrency}>{cur}</Text>
+          </View>
+          <View style={[s.colTotal, s.moneyCell]}>
+            <Text style={s.moneyCurrency}>{cur}</Text>
+            <Text style={s.moneyAmount}>{formatAmount(Number(c.amount))}</Text>
+          </View>
+        </View>
+      ))}
 
       {/* Total CFR <port> */}
       <View style={s.totalRow}>

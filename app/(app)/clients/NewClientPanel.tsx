@@ -3,11 +3,16 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { createClientAction } from "./actions";
+import { createClientAction, suggestClientCodeAction } from "./actions";
 import CustomFieldsEditor from "./[id]/edit/CustomFieldsEditor";
 import { CountrySelect } from "@/components/forms/CountrySelect";
 import { PhoneField } from "@/components/forms/PhoneField";
 import { dialForCountry } from "@/lib/countries";
+import {
+  deriveClientCodeBase,
+  isValidClientCode,
+  normalizeClientCode,
+} from "@/lib/client-code";
 
 /**
  * "+ New client" — trigger button + focused creation modal.
@@ -42,17 +47,23 @@ export default function NewClientPanel({
   const [open, setOpen] = useState(false);
   // Phone prefix is mirrored here so picking a country can prefill it.
   const [phoneCode, setPhoneCode] = useState("");
-  // Controlled so we can validate inline and disable submit — no silent
-  // rejection (audit #10). Code = exactly 3 letters, no digits.
   const [companyName, setCompanyName] = useState("");
+  // The 3-letter code is AUTO-GENERATED from the name and kept in sync until
+  // the rep overrides it (codeManual). `availability` reflects the live,
+  // cross-rep check; `suggestion` is the nearest free code to offer.
   const [clientCode, setClientCode] = useState("");
+  const [codeManual, setCodeManual] = useState(false);
   const [codeTouched, setCodeTouched] = useState(false);
+  const [availability, setAvailability] = useState<
+    "idle" | "checking" | "available" | "taken"
+  >("idle");
+  const [suggestion, setSuggestion] = useState("");
+  // Empty is OK (the server auto-generates one); only a present-but-malformed
+  // code blocks submit. No digits/symbols — mirrors the DB CHECK ^[A-Z]{3}$.
   const codeError =
-    clientCode.length === 0
-      ? "Required"
-      : !/^[A-Za-z]{3}$/.test(clientCode)
-        ? "3 letters only — no digits or symbols (e.g. ARL)"
-        : null;
+    clientCode.length === 0 || /^[A-Za-z]{3}$/.test(clientCode)
+      ? null
+      : "3 letters only — no digits or symbols (e.g. ARL)";
   const canSubmit = companyName.trim().length > 0 && codeError === null;
   // Inline validation error returned by createClientAction (e.g. duplicate
   // client code) — shown in the footer; the form + its data are preserved.
@@ -64,12 +75,63 @@ export default function NewClientPanel({
     if (deepLink && searchParams.get("new")) setOpen(true);
   }, [searchParams]);
 
+  // Auto-derive the code from the name (instant, local) until the rep edits it.
+  useEffect(() => {
+    if (codeManual) return;
+    const base = deriveClientCodeBase(companyName);
+    setClientCode((prev) => (prev === base ? prev : base));
+  }, [companyName, codeManual]);
+
+  // Live availability — debounced, cross-rep accurate (server action). In AUTO
+  // mode, silently adopt the nearest FREE code so the rep never has to think
+  // about it; in MANUAL mode, just report available/taken + offer the suggestion.
+  useEffect(() => {
+    if (!open) return;
+    const name = companyName.trim();
+    const code = normalizeClientCode(clientCode);
+    if (!name && !code) {
+      setAvailability("idle");
+      setSuggestion("");
+      return;
+    }
+    setAvailability("checking");
+    let cancelled = false;
+    const handle = setTimeout(async () => {
+      try {
+        const res = await suggestClientCodeAction(name, code);
+        if (cancelled) return;
+        setSuggestion(res.suggestion);
+        if (isValidClientCode(code)) {
+          const free = res.preferredAvailable === true;
+          setAvailability(free ? "available" : "taken");
+          if (!codeManual && !free && res.suggestion && res.suggestion !== code) {
+            setClientCode(res.suggestion); // auto mode: roll to the free code
+          }
+        } else {
+          setAvailability("idle");
+          if (!codeManual && res.suggestion && res.suggestion !== code) {
+            setClientCode(res.suggestion);
+          }
+        }
+      } catch {
+        if (!cancelled) setAvailability("idle");
+      }
+    }, 350);
+    return () => {
+      cancelled = true;
+      clearTimeout(handle);
+    };
+  }, [clientCode, companyName, codeManual, open]);
+
   const close = () => {
     setOpen(false);
     setPhoneCode("");
     setFormError(null);
     setCompanyName("");
     setClientCode("");
+    setCodeManual(false);
+    setAvailability("idle");
+    setSuggestion("");
     setCodeTouched(false);
     // Drop the ?new=1 param (preserving any others) so the modal doesn't
     // re-open on refresh and the URL stays clean.
@@ -211,33 +273,61 @@ export default function NewClientPanel({
                         />
                       </label>
                       <label className="block sm:col-span-1">
-                        <span className={fieldLabel}>Client code *</span>
+                        <span className={fieldLabel}>Client code</span>
                         <input
                           name="client_code"
-                          placeholder="ARL"
+                          placeholder="Auto"
                           maxLength={3}
-                          required
-                          title="Exactly 3 letters (e.g. ARL)"
+                          title="Auto-generated from the name — 3 letters (e.g. ARL). Edit only to force a specific one."
                           value={clientCode}
-                          onChange={(e) => setClientCode(e.target.value)}
+                          onChange={(e) => {
+                            setCodeManual(true);
+                            setClientCode(e.target.value.toUpperCase());
+                          }}
                           onBlur={() => setCodeTouched(true)}
-                          aria-invalid={codeTouched && !!codeError}
+                          aria-invalid={
+                            (codeTouched && !!codeError) || availability === "taken"
+                          }
                           className={`${fieldInput} font-mono uppercase ${
-                            codeTouched && codeError
+                            (codeTouched && codeError) || availability === "taken"
                               ? "border-rose-400 focus:border-rose-500 focus:ring-rose-200"
-                              : ""
+                              : availability === "available"
+                                ? "border-emerald-400 focus:border-emerald-500 focus:ring-emerald-200"
+                                : ""
                           }`}
                           style={{ textTransform: "uppercase" }}
                         />
-                        {codeTouched && codeError && clientCode.length > 0 ? (
+                        {codeTouched && codeError ? (
                           <span className="mt-1 block text-[11px] font-medium text-rose-600">
                             {codeError}
                           </span>
+                        ) : availability === "checking" ? (
+                          <span className={hint}>Checking availability…</span>
+                        ) : availability === "available" && clientCode ? (
+                          <span className="mt-1 block text-[11px] font-medium text-emerald-600">
+                            ✓ {clientCode} is available
+                          </span>
+                        ) : availability === "taken" ? (
+                          <span className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px] font-medium text-rose-600">
+                            {clientCode} is already taken
+                            {suggestion && suggestion !== clientCode && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setClientCode(suggestion);
+                                  setCodeManual(true);
+                                }}
+                                className="rounded border border-emerald-300 bg-emerald-50 px-1.5 py-0.5 font-semibold text-emerald-700 hover:bg-emerald-100"
+                              >
+                                Use {suggestion}
+                              </button>
+                            )}
+                          </span>
                         ) : (
                           <span className={hint}>
-                            Required — 3 letters, shown in every document number,
-                            e.g. <code>SLX-ARL-26-001</code>. A client without it
-                            can&apos;t have quotations saved.
+                            Auto-generated from the name — appears in every
+                            document number, e.g. <code>SLX-ARL-26-001</code>.
+                            Edit only to force a specific one.
                           </span>
                         )}
                       </label>

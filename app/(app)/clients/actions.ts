@@ -8,6 +8,11 @@ import { requireCapability } from "@/lib/permissions";
 import { normalizeBlProfile, blProfileStatus } from "@/lib/bl";
 import { getCurrentUserRole, requireSuperAdmin } from "@/lib/auth";
 import { canSupervise } from "@/lib/types";
+import {
+  clientCodeCandidates,
+  isValidClientCode,
+  normalizeClientCode,
+} from "@/lib/client-code";
 
 /**
  * Reassign a client's SALES OWNER (account manager) — m066.
@@ -274,16 +279,23 @@ export async function createClientRecord(
   const company_name = (input.company_name ?? "").trim();
   if (!company_name) return { ok: false, error: "Company name is required." };
 
-  const code = (input.client_code ?? "").trim().toUpperCase();
-  if (!code) {
-    return {
-      ok: false,
-      error:
-        "A 3-letter client code is required (e.g. ARL). It appears in every quotation, proforma and order number.",
-    };
-  }
-  if (!/^[A-Z]{3}$/.test(code)) {
-    return { ok: false, error: "Client code must be exactly 3 letters (e.g. ARL)." };
+  // Client code — AUTO-GENERATED so a rep never has to think about it (owner
+  // req 2026-07-03). A valid explicit code (rep override) is TRIED FIRST;
+  // otherwise it's derived from the company name. `normalizeClientCode`
+  // tolerates messy input and never throws; `company_name` is always present.
+  const preferred = normalizeClientCode(input.client_code);
+  function* codeOrder(): Generator<string> {
+    const seen = new Set<string>();
+    if (isValidClientCode(preferred)) {
+      seen.add(preferred);
+      yield preferred;
+    }
+    for (const c of clientCodeCandidates(company_name)) {
+      if (!seen.has(c)) {
+        seen.add(c);
+        yield c;
+      }
+    }
   }
 
   const cleanFields: { label: string; value: string }[] = [];
@@ -299,13 +311,13 @@ export async function createClientRecord(
     const s = v == null ? "" : String(v).trim();
     return s || null;
   };
-  const basePayload = {
+  const country = clean(input.country);
+  const baseNoCode = {
     company_name,
-    client_code: code,
     contact_name: clean(input.contact_name),
     email: clean(input.email),
     phone_number: clean(input.phone_number),
-    country: clean(input.country),
+    country,
     starting_sequence_number: Number(input.starting_sequence_number) || 0,
     custom_fields: cleanFields,
   };
@@ -321,34 +333,67 @@ export async function createClientRecord(
   const selectCols =
     "id, company_name, contact_name, email, phone_number, country, client_code, starting_sequence_number, custom_fields";
 
-  let { data: inserted, error } = await supabase
-    .from("clients")
-    .insert({ ...basePayload, ...extraPayload })
-    .select(selectCols)
-    .single();
-  if (
-    error &&
-    /(address|vat_number|default_attention_to|phone_country_code|created_by)/.test(
-      error.message ?? ""
-    )
-  ) {
-    ({ data: inserted, error } = await supabase
+  // One insert attempt for a specific code, tolerating a partial-migration
+  // schema (retry without the newer columns). Returns the PostgREST result.
+  const tryInsert = async (client_code: string) => {
+    let r = await supabase
       .from("clients")
-      .insert(basePayload)
+      .insert({ ...baseNoCode, client_code, ...extraPayload })
       .select(selectCols)
-      .single());
-  }
-  if (error || !inserted) {
-    // Friendly, inline error — never a raw DB string. The common case by far is
-    // a duplicate 3-letter code; catch the unique violation explicitly.
-    const msg = error?.message ?? "";
+      .single();
     if (
+      r.error &&
+      /(address|vat_number|default_attention_to|phone_country_code|created_by)/.test(
+        r.error.message ?? ""
+      )
+    ) {
+      r = await supabase
+        .from("clients")
+        .insert({ ...baseNoCode, client_code })
+        .select(selectCols)
+        .single();
+    }
+    return r;
+  };
+
+  // ATOMIC uniqueness. Try codes in order; a 23505 means another client —
+  // even one RLS hides from us — already owns that code, so we advance to the
+  // next candidate. The DB partial unique index (m006) is the sole arbiter,
+  // so two reps creating clients at the same instant can never both win the
+  // same code: one insert succeeds, the other gets 23505 and rolls to the
+  // next candidate. Bounded so a pathological (non-unique) DB error can't
+  // spin forever; the candidate stream is far longer than this cap.
+  let inserted: CreatedClient | null = null;
+  let lastError: { message?: string; code?: string } | null = null;
+  let attempts = 0;
+  const MAX_CODE_ATTEMPTS = 48;
+  for (const candidate of codeOrder()) {
+    if (attempts++ >= MAX_CODE_ATTEMPTS) break;
+    const { data, error } = await tryInsert(candidate);
+    if (!error && data) {
+      inserted = data as CreatedClient;
+      break;
+    }
+    lastError = error;
+    const isDuplicate =
       (error as { code?: string } | null)?.code === "23505" ||
+      /client_code|unique/i.test(error?.message ?? "");
+    if (isDuplicate) continue; // collision — try the next candidate
+    break; // a non-uniqueness DB error — stop and report it
+  }
+
+  if (!inserted) {
+    const msg = lastError?.message ?? "";
+    if (
+      (lastError as { code?: string } | null)?.code === "23505" ||
       /client_code|unique/i.test(msg)
     ) {
+      // Every attempted code collided (astronomically unlikely) — ask for a
+      // manual one rather than looping forever.
       return {
         ok: false,
-        error: `Client code "${code}" is already used by another client. Pick a different 3-letter code.`,
+        error:
+          "Could not auto-assign a unique 3-letter client code. Please set one manually.",
       };
     }
     return { ok: false, error: msg || "Could not create the client. Please try again." };
@@ -364,7 +409,7 @@ export async function createClientRecord(
     payload: {
       company_name: inserted.company_name,
       client_code: inserted.client_code,
-      country: basePayload.country,
+      country,
     },
     bestEffort: true,
   });
@@ -372,12 +417,63 @@ export async function createClientRecord(
   return { ok: true, client: inserted as CreatedClient };
 }
 
+/**
+ * Live client-code helper for the creation UI — proposes a free 3-letter code
+ * from the company name (and reports whether the rep's typed override is free).
+ *
+ * Cross-rep accurate: the `codes_taken` RPC checks the candidates bypassing RLS
+ * (a rival rep's client is invisible to a plain Sales SELECT, so a naive read
+ * would call an in-use code "free"). Degrades gracefully to a best-effort
+ * in-scope read when the RPC isn't deployed yet — the server-side insert-retry
+ * in createClientRecord stays the hard uniqueness guarantee regardless.
+ */
+export async function suggestClientCodeAction(
+  name: string,
+  preferred?: string
+): Promise<{ suggestion: string; preferredAvailable: boolean | null }> {
+  const supabase = createClient();
+
+  // Probe the most-likely candidates (name-anchored first) in ONE round trip.
+  const candidates: string[] = [];
+  for (const c of clientCodeCandidates(name ?? "")) {
+    candidates.push(c);
+    if (candidates.length >= 40) break;
+  }
+  const pref = normalizeClientCode(preferred);
+  const probe = isValidClientCode(pref)
+    ? [pref, ...candidates.filter((c) => c !== pref)]
+    : candidates;
+  if (probe.length === 0) return { suggestion: "", preferredAvailable: null };
+
+  let takenSet = new Set<string>();
+  const rpc = await supabase.rpc("codes_taken", { codes: probe });
+  if (!rpc.error && Array.isArray(rpc.data)) {
+    takenSet = new Set((rpc.data as string[]).map((c) => (c ?? "").toUpperCase()));
+  } else {
+    const { data } = await supabase
+      .from("clients")
+      .select("client_code")
+      .in("client_code", probe);
+    takenSet = new Set(
+      ((data ?? []) as { client_code: string | null }[])
+        .map((r) => (r.client_code ?? "").toUpperCase())
+        .filter(Boolean)
+    );
+  }
+
+  const preferredAvailable = isValidClientCode(pref) ? !takenSet.has(pref) : null;
+  const suggestion = probe.find((c) => !takenSet.has(c)) ?? candidates[0] ?? "";
+  return { suggestion, preferredAvailable };
+}
+
 // Standalone new-client modal (<form action>). Thin wrapper over
-// createClientRecord that redirects to the new client on success (F6).
+// createClientRecord that redirects to the new client on success (F6). The
+// code field is passed RAW: createClientRecord auto-generates/auto-completes
+// and guarantees a unique one, so a blank or partial code is fine here.
 export async function createClientAction(formData: FormData) {
   const res = await createClientRecord({
     company_name: str(formData, "company_name") ?? "",
-    client_code: clientCode(formData) ?? "",
+    client_code: str(formData, "client_code") ?? "",
     contact_name: str(formData, "contact_name"),
     email: str(formData, "email"),
     phone_number: str(formData, "phone_number"),
@@ -390,8 +486,13 @@ export async function createClientAction(formData: FormData) {
     custom_fields: customFields(formData),
   });
   if (!res.ok) return { error: res.error };
+  const assigned = res.client.client_code
+    ? ` — code ${res.client.client_code}`
+    : "";
   redirect(
-    `/clients/${res.client.id}?flash=${encodeURIComponent("✓ Client created")}`
+    `/clients/${res.client.id}?flash=${encodeURIComponent(
+      `✓ Client created${assigned}`
+    )}`
   );
 }
 

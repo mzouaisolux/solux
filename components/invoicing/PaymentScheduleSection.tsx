@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import type { PaymentMode, PaymentTerms } from "@/lib/types";
 import {
   buildMilestonesFromTerms,
+  canInvoiceDocument,
   computeDepositAmount,
   computePaymentProgress,
   formatInvoiceAmount,
@@ -63,8 +64,10 @@ export default async function PaymentScheduleSection({
   canInvoice: boolean;
   variant?: "full" | "summary";
 }) {
+  // Invoicing decoupled from "Won" (owner 2026-07-03) — available from "sent"
+  // onward via canInvoiceDocument; the proforma command stays eligible too.
   const eligible =
-    (doc.type === "quotation" && doc.status === "won") || doc.type === "proforma";
+    canInvoiceDocument(doc.type, doc.status) || doc.type === "proforma";
 
   const supabase = createClient();
   let family: ShapedFamily | null = null;

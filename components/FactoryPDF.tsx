@@ -58,7 +58,7 @@ const s = StyleSheet.create({
     letterSpacing: 0.8,
     marginBottom: 1,
   },
-  metaValue: { fontSize: 9, fontWeight: 400, color: COLORS.ink },
+  metaValue: { fontFamily: F.cjk, fontSize: 9, fontWeight: 400, color: COLORS.ink },
 
   /* ----- Order summary table (mirrors the quotation table styling) ----- */
   table: { marginTop: 2, marginBottom: GAP_M },
@@ -87,9 +87,9 @@ const s = StyleSheet.create({
   colCategory: { flex: 2, paddingRight: 8 },
   colQty: { width: 40, textAlign: "right", paddingRight: 8 },
   colConfig: { flex: 4 },
-  cellProduct: { fontSize: 8.5, fontWeight: 600, color: COLORS.ink },
-  cellSku: { fontSize: 7.5, fontWeight: 200, color: COLORS.muted },
-  cellText: { fontSize: 8, fontWeight: 200, color: COLORS.body },
+  cellProduct: { fontFamily: F.cjk, fontSize: 8.5, fontWeight: 600, color: COLORS.ink },
+  cellSku: { fontFamily: F.cjk, fontSize: 7.5, fontWeight: 200, color: COLORS.muted },
+  cellText: { fontFamily: F.cjk, fontSize: 8, fontWeight: 200, color: COLORS.body },
   cellQty: { fontSize: 9, fontWeight: 600, color: COLORS.ink },
 
   /* ----- Notes blocks ----- */
@@ -114,7 +114,7 @@ const s = StyleSheet.create({
     letterSpacing: 0.8,
     marginBottom: 3,
   },
-  notesText: { fontSize: 8.5, fontWeight: 200, color: COLORS.body },
+  notesText: { fontFamily: F.cjk, fontSize: 8.5, fontWeight: 200, color: COLORS.body },
 
   /* ----- Per-line block ----- */
   lineBlock: { marginBottom: 14 },
@@ -131,12 +131,13 @@ const s = StyleSheet.create({
   },
   lineHeaderLeft: { flex: 1, paddingRight: 8 },
   lineProductName: {
+    fontFamily: F.cjk,
     fontSize: 11,
     fontWeight: 600,
     color: COLORS.ink,
     letterSpacing: 0.3,
   },
-  lineMeta: { fontSize: 7.5, fontWeight: 200, color: COLORS.muted, marginTop: 1 },
+  lineMeta: { fontFamily: F.cjk, fontSize: 7.5, fontWeight: 200, color: COLORS.muted, marginTop: 1 },
   lineHeaderRight: { alignItems: "flex-end" },
   lineQtyLabel: {
     fontSize: 7,
@@ -168,8 +169,9 @@ const s = StyleSheet.create({
     flexWrap: "wrap",
     marginBottom: 3,
   },
-  fieldName: { fontSize: 9, fontWeight: 600, color: COLORS.ink, marginRight: 8 },
+  fieldName: { fontFamily: F.cjk, fontSize: 9, fontWeight: 600, color: COLORS.ink, marginRight: 8 },
   salesPill: {
+    fontFamily: F.cjk,
     fontSize: 8,
     fontWeight: 400,
     color: COLORS.ink,
@@ -204,6 +206,7 @@ const s = StyleSheet.create({
     letterSpacing: 0.5,
   },
   factoryCodeRow: {
+    fontFamily: F.cjk,
     fontSize: 8,
     fontWeight: 200,
     color: COLORS.muted,
@@ -218,8 +221,9 @@ const s = StyleSheet.create({
     marginTop: 3,
     marginBottom: 1,
   },
-  instructionText: { fontSize: 9, fontWeight: 200, color: COLORS.ink, lineHeight: 1.5 },
+  instructionText: { fontFamily: F.cjk, fontSize: 9, fontWeight: 200, color: COLORS.ink, lineHeight: 1.5 },
   instructionMuted: {
+    fontFamily: F.cjk,
     fontSize: 9,
     fontWeight: 200,
     color: COLORS.dangerText,
@@ -227,6 +231,7 @@ const s = StyleSheet.create({
     lineHeight: 1.5,
   },
   mappingText: {
+    fontFamily: F.cjk,
     fontSize: 8,
     fontWeight: 200,
     color: COLORS.muted,
@@ -245,13 +250,14 @@ const s = StyleSheet.create({
   techGrid: { flexDirection: "row", flexWrap: "wrap" },
   techCell: { width: "50%", marginBottom: 4, paddingRight: 6 },
   techLabel: {
+    fontFamily: F.cjk,
     fontSize: 7,
     fontWeight: 400,
     color: COLORS.muted,
     textTransform: "uppercase",
     letterSpacing: 0.8,
   },
-  techValue: { fontSize: 8.5, fontWeight: 200, color: COLORS.ink, marginTop: 1 },
+  techValue: { fontFamily: F.cjk, fontSize: 8.5, fontWeight: 200, color: COLORS.ink, marginTop: 1 },
 
   /* ----- Internal notes ----- */
   internalNotes: {
@@ -326,7 +332,7 @@ export default function FactoryPDF({ data }: { data: ExportData }) {
             >
               Project
             </Text>
-            <Text style={{ fontSize: 13, fontWeight: 600, color: COLORS.ink }}>
+            <Text style={{ fontFamily: F.cjk, fontSize: 13, fontWeight: 600, color: COLORS.ink }}>
               {data.affair_name}
             </Text>
           </View>

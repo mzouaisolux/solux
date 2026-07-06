@@ -3,6 +3,16 @@
 import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import ProductConfigurator from "@/components/ProductConfigurator";
+import CustomPoleCard from "@/components/CustomPoleCard";
+import {
+  isCustomPoleLine,
+  emptyPoleSpec,
+  poleSpecToConfigValues,
+  poleSpecFromConfigValues,
+  buildPoleDescription,
+  validatePoleSpec,
+} from "@/lib/custom-pole";
+import { shippingFieldsForIncoterm } from "@/lib/incoterm";
 // F3: @react-pdf/renderer + QuotationPDF are browser-only and break SSR if
 // imported at module load — loaded lazily inside the click handlers below.
 import { type QuotationPDFData } from "@/components/QuotationPDF";
@@ -11,6 +21,7 @@ import { ClientSelect } from "@/components/forms/ClientSelect";
 import { createClientRecord } from "@/app/(app)/clients/actions";
 import { PhoneField } from "@/components/forms/PhoneField";
 import { dialForCountry } from "@/lib/countries";
+import { suggestClientCode } from "@/lib/client-code";
 import { createClient as createBrowserSupabase } from "@/lib/supabase/client";
 import { saveBlobAs } from "@/lib/saveBlob";
 import { buildPdfFilename } from "@/lib/pdf-filename";
@@ -29,6 +40,12 @@ import {
   totalFreight,
   validateProductionTime,
   fromProductionColumns,
+  shippingExtrasTotal,
+  totalAdditionalCharges,
+  normalizeAdditionalCharges,
+  insuranceFromRate,
+  insuranceRateFromAmount,
+  type AdditionalCharge,
 } from "@/lib/logistics";
 import { commissionAmount } from "@/lib/commission";
 import type {
@@ -103,29 +120,27 @@ function emptyLine(): DocumentLine {
   };
 }
 
-// P0-5 — suggest a unique 3-letter client code from the company name.
-// Tries the first letters, then per-word initials, then rotates the 3rd
-// letter until it finds one not already taken.
-function suggestClientCode(
-  name: string,
-  clients: { client_code?: string | null }[]
-): string {
-  const taken = new Set(
-    clients.map((c) => (c.client_code || "").toUpperCase()).filter(Boolean)
-  );
-  const letters = (name || "").toUpperCase().replace(/[^A-Z]/g, "");
-  if (!letters) return "";
-  const words = (name || "").toUpperCase().split(/[^A-Z]+/).filter(Boolean);
-  const base = letters.slice(0, 3).padEnd(3, letters[0]);
-  const tries: string[] = [base];
-  if (words.length >= 3) tries.push(words[0][0] + words[1][0] + words[2][0]);
-  if (words.length >= 2) tries.push(words[0].slice(0, 2) + words[1][0]);
-  for (let i = 1; i < letters.length - 1; i++)
-    tries.push(letters[0] + letters[i] + letters[i + 1]);
-  const twoBase = letters.slice(0, 2).padEnd(2, letters[0]);
-  for (const ch of "ABCDEFGHIJKLMNOPQRSTUVWXYZ") tries.push(twoBase + ch);
-  for (const t of tries) if (/^[A-Z]{3}$/.test(t) && !taken.has(t)) return t;
-  return base;
+// A blank CUSTOM POLE line (mât) — a manual, non-catalogue quotation line.
+// product_id "" is coerced to null on save (free-text line), the spec lives in
+// config_values, and the client-facing description in client_product_name.
+function emptyPoleLine(): DocumentLine {
+  const spec = emptyPoleSpec();
+  return {
+    product_id: "",
+    quantity: 1,
+    selected_options: {},
+    unit_price: 0,
+    total_price: 0,
+    pricing_mode: "manual",
+    pricing_tier: "medium",
+    original_unit_price: 0,
+    discount_type: null,
+    discount_value: 0,
+    client_product_name: buildPoleDescription(spec),
+    category_id: null,
+    config_values: poleSpecToConfigValues(spec),
+    pricing_source: "manual",
+  };
 }
 
 export default function NewDocumentForm({
@@ -358,6 +373,27 @@ export default function NewDocumentForm({
   const [containers, setContainers] = useState<DocumentContainer[]>(
     initialDoc?.containers ?? []
   );
+  // Logistics extras (m146): a single Insurance amount + repeatable
+  // Additional Charges (ECTN, BESC, FERI, inspection…). Non-commissionable
+  // disbursements — added to the grand total AFTER commission.
+  // Monetary fields are edited as RAW STRINGS (type="text" inputMode="decimal")
+  // so typing decimals / partial values ("0.", "0.5") or a stray letter never
+  // gets clobbered by a controlled number input (the "can't fill" bug). They're
+  // parsed to numbers only for the totals + save (the pure helpers coerce).
+  // Insurance is RATE-driven (‰): the user types the rate; the amount is always
+  // derived = (goods + transport) × rate/1000. A legacy fixed amount is
+  // converted back to its equivalent rate once, on mount (see effect below).
+  const [insuranceRate, setInsuranceRate] = useState<string>("");
+  const [additionalCharges, setAdditionalCharges] = useState<
+    { label: string; amount: string }[]
+  >(
+    Array.isArray(initialDoc?.additional_charges)
+      ? (initialDoc.additional_charges as any[]).map((c) => ({
+          label: String(c?.label ?? ""),
+          amount: c?.amount != null ? String(c.amount) : "",
+        }))
+      : []
+  );
   const [productionTime, setProductionTime] = useState<ProductionTime | null>(
     initialDoc
       ? fromProductionColumns({
@@ -426,11 +462,10 @@ export default function NewDocumentForm({
     useState<number>(initialDoc?.offer_validity_transport_days ?? 7);
 
   const [lines, setLines] = useState<DocumentLine[]>(
-    initialDoc?.lines?.length
-      ? (initialDoc.lines as DocumentLine[])
-      : products.length
-      ? [emptyLine()]
-      : []
+    // Fresh quotes start EMPTY so the Products empty-state (with its primary
+    // "Add Catalogue Product" CTA) guides the first action. Edit / revise / SR
+    // flows keep their existing lines.
+    initialDoc?.lines?.length ? (initialDoc.lines as DocumentLine[]) : []
   );
 
   const [history, setHistory] = useState<ClientHistoryItem[]>([]);
@@ -448,12 +483,36 @@ export default function NewDocumentForm({
   const anyManual = lines.some((l) => l.pricing_mode === "manual");
   const itemsTotal = lines.reduce((s, l) => s + Number(l.total_price || 0), 0);
   const freightTotal = totalFreight(containers);
+  // Incoterm-aware Shipping: which ports are meaningful for this term.
+  const ship = shippingFieldsForIncoterm(incoterm);
   const subtotal = itemsTotal + freightTotal;
   const commission = commissionAmount(subtotal, {
     enabled: commissionEnabled,
     percentage: commissionPercentage,
   });
-  const grandTotal = subtotal + commission;
+  // Insurance = (goods + transport) × rate‰ — always DERIVED, recomputed live
+  // whenever items, freight OR the rate change (`subtotal` = goods + transport).
+  const insuranceAmount = insuranceFromRate(subtotal, insuranceRate);
+  // Insurance + additional charges are non-commissionable disbursements
+  // (owner decision): added on TOP of commission, never into its base.
+  const shippingExtras = shippingExtrasTotal(insuranceAmount, additionalCharges);
+  const grandTotal = subtotal + commission + shippingExtras;
+
+  // One-time: convert a loaded fixed insurance amount into the equivalent ‰
+  // rate so old quotes (and amounts pushed up from Operations freight costing)
+  // round-trip into the rate field. Mount only; never clobbers a user edit.
+  const insuranceHydrated = useRef(false);
+  useEffect(() => {
+    if (insuranceHydrated.current) return;
+    insuranceHydrated.current = true;
+    const amt = Number(initialDoc?.insurance_cost) || 0;
+    if (amt > 0 && subtotal > 0) {
+      setInsuranceRate(
+        String(Number(insuranceRateFromAmount(amt, subtotal).toFixed(3)))
+      );
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const itemsMargin = isAdmin && costs
     ? lines.reduce((sum, l) => {
@@ -683,7 +742,10 @@ export default function NewDocumentForm({
   // while creating a new client, until the user types their own.
   useEffect(() => {
     if (!showNewClient || codeEdited) return;
-    const suggestion = suggestClientCode(newClient.company_name, clients);
+    const suggestion = suggestClientCode(
+                    newClient.company_name,
+                    clients.map((c) => c.client_code || "")
+                  );
     setNewClient((c) =>
       c.client_code === suggestion ? c : { ...c, client_code: suggestion }
     );
@@ -710,6 +772,28 @@ export default function NewDocumentForm({
         "Every product must have an exact catalogue model selected before continuing."
       );
       return null;
+    }
+    // Custom pole lines — validate the few required fields so a rep can't save
+    // an incomplete or priceless pole. Height rule: at least one of total /
+    // light-point height (never blocks on knowing only one).
+    for (const l of lines) {
+      if (!isCustomPoleLine(l)) continue;
+      const spec = poleSpecFromConfigValues(l.config_values);
+      const specErr = spec
+        ? validatePoleSpec(spec)
+        : "Invalid pole configuration.";
+      if (specErr) {
+        setError(`Custom pole: ${specErr}`);
+        return null;
+      }
+      if (!(Number(l.quantity) > 0)) {
+        setError("Custom pole: enter a quantity of at least 1.");
+        return null;
+      }
+      if (!(Number(l.unit_price) > 0)) {
+        setError("Custom pole: enter the unit selling price.");
+        return null;
+      }
     }
     const normalized = normalizePaymentTerms(paymentMode, paymentTerms);
     const paymentErr = validatePaymentTerms(paymentMode, normalized);
@@ -738,14 +822,25 @@ export default function NewDocumentForm({
       );
       return null;
     }
+    // Additional charges (m146): a typed amount needs a name — mirrors the
+    // client custom-fields rule. Blank rows are dropped by normalize.
+    const cleanCharges = normalizeAdditionalCharges(additionalCharges);
+    if (cleanCharges.some((c) => c.amount > 0 && !c.label)) {
+      setError("Each additional charge needs a name (e.g. ECTN, BESC).");
+      return null;
+    }
     return {
       type: docType,
       client_id: clientId,
       incoterm,
       currency,
-      port_of_loading: portOfLoading.trim() || null,
-      port_of_destination: portOfDestination.trim() || null,
+      port_of_loading: ship.showPortOfLoading ? portOfLoading.trim() || null : null,
+      port_of_destination: ship.showPortOfDestination
+        ? portOfDestination.trim() || null
+        : null,
       containers: containers.filter((c) => c.quantity > 0),
+      insurance_cost: insuranceAmount,
+      additional_charges: cleanCharges,
       manual_pricing: anyManual,
       payment_mode: paymentMode,
       payment_terms: normalized,
@@ -811,8 +906,12 @@ export default function NewDocumentForm({
       currency,
       freight_type: null, // legacy field no longer surfaced
       freight_cost: freightTotal,
-      port_of_loading: portOfLoading.trim() || null,
-      port_of_destination: portOfDestination.trim() || null,
+      insurance_cost: insuranceAmount,
+      additional_charges: normalizeAdditionalCharges(additionalCharges),
+      port_of_loading: ship.showPortOfLoading ? portOfLoading.trim() || null : null,
+      port_of_destination: ship.showPortOfDestination
+        ? portOfDestination.trim() || null
+        : null,
       containers: containers.filter((c) => c.quantity > 0),
       production_time: productionTime,
       bank_account: selectedBank,
@@ -1232,7 +1331,10 @@ export default function NewDocumentForm({
                   const taken = clients.some(
                     (c) => (c.client_code || "").toUpperCase() === code
                   );
-                  const alt = suggestClientCode(newClient.company_name, clients);
+                  const alt = suggestClientCode(
+                    newClient.company_name,
+                    clients.map((c) => c.client_code || "")
+                  );
                   return taken ? (
                     <span className="mt-1 block text-[11px] text-amber-600">
                       Code “{code}” is taken
@@ -1528,17 +1630,23 @@ export default function NewDocumentForm({
                 </span>
               </p>
             )}
-            <div className="flex items-center justify-between">
-              <span className="text-neutral-500 text-xs uppercase tracking-widerx">
-                Affair / Project *
-              </span>
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <span className="text-sm font-semibold text-neutral-900">
+                  Project <span className="text-rose-500">*</span>
+                </span>
+                <p className="mt-0.5 max-w-md text-[11px] leading-snug text-neutral-500">
+                  The hub for this opportunity — every quotation, order, invoice
+                  and production step stays grouped under one project.
+                </p>
+              </div>
               <button
                 type="button"
                 onClick={() => {
                   setNewAffairError(null);
                   setShowNewAffair(true);
                 }}
-                className="text-sm text-solux-dark hover:underline"
+                className="shrink-0 text-sm font-medium text-solux-dark hover:underline"
               >
                 + New Project
               </button>
@@ -1567,32 +1675,70 @@ export default function NewDocumentForm({
                 </button>
               </div>
             ) : selectedAffair && !changingAffair ? (
-              <div className="mt-2 flex items-center justify-between gap-3 rounded-lg border border-solux/40 bg-solux/5 px-3 py-2.5">
-                <span className="flex min-w-0 items-center gap-2">
-                  <span className="text-sm font-semibold text-solux-dark">✓</span>
-                  <span className="min-w-0">
-                    <span className="block truncate text-sm font-medium text-neutral-800">
-                      {selectedAffair.name}
+              <div className="mt-2 rounded-lg border border-solux/40 bg-solux/5 p-3">
+                <div className="flex items-start justify-between gap-3">
+                  <span className="flex min-w-0 items-start gap-2.5">
+                    <span className="mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-solux/15 text-solux-dark">
+                      <svg
+                        viewBox="0 0 20 20"
+                        fill="none"
+                        className="h-4 w-4"
+                        aria-hidden="true"
+                      >
+                        <path
+                          d="M2.5 5.75A1.5 1.5 0 0 1 4 4.25h2.9l1.5 1.6H16A1.5 1.5 0 0 1 17.5 7.35v6.4A1.5 1.5 0 0 1 16 15.25H4a1.5 1.5 0 0 1-1.5-1.5V5.75Z"
+                          stroke="currentColor"
+                          strokeWidth="1.4"
+                          strokeLinejoin="round"
+                        />
+                      </svg>
                     </span>
-                    <span className="block text-[11px] text-neutral-500">
-                      {selectedAffair.status
-                        ? selectedAffair.status.replace(/_/g, " ")
-                        : "Active"}
-                      {selectedAffair.created_at
-                        ? ` · created ${new Date(
-                            selectedAffair.created_at
-                          ).toLocaleDateString("en-GB")}`
-                        : ""}
+                    <span className="min-w-0">
+                      <span className="flex items-center gap-1.5">
+                        <span className="truncate text-sm font-semibold text-neutral-900">
+                          {selectedAffair.name}
+                        </span>
+                        <span className="shrink-0 text-xs font-semibold text-solux-dark">
+                          ✓
+                        </span>
+                      </span>
+                      <span className="block text-[11px] text-neutral-500">
+                        {selectedAffair.status
+                          ? selectedAffair.status.replace(/_/g, " ")
+                          : "Active"}
+                        {selectedAffair.created_at
+                          ? ` · created ${new Date(
+                              selectedAffair.created_at
+                            ).toLocaleDateString("en-GB")}`
+                          : ""}
+                      </span>
                     </span>
                   </span>
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setChangingAffair(true)}
-                  className="shrink-0 text-sm text-solux-dark hover:underline"
-                >
-                  Change
-                </button>
+                  <button
+                    type="button"
+                    onClick={() => setChangingAffair(true)}
+                    className="shrink-0 text-sm text-solux-dark hover:underline"
+                  >
+                    Change
+                  </button>
+                </div>
+                {/* Implicitly explains what the project structures: every part of
+                    this opportunity's commercial life lives under it. */}
+                <div className="mt-2.5 flex flex-wrap items-center gap-1.5 border-t border-solux/20 pt-2.5">
+                  <span className="text-[10px] font-medium uppercase tracking-wide text-neutral-400">
+                    Grouped here
+                  </span>
+                  {["Quotations", "Orders", "Invoices", "Production", "History"].map(
+                    (t) => (
+                      <span
+                        key={t}
+                        className="rounded-full bg-white/70 px-2 py-0.5 text-[10px] font-medium text-neutral-600 ring-1 ring-solux/20"
+                      >
+                        {t}
+                      </span>
+                    )
+                  )}
+                </div>
               </div>
             ) : (
               (() => {
@@ -1737,60 +1883,10 @@ export default function NewDocumentForm({
           </div>
         )}
 
-        {/* ---------- CLIENT HISTORY ---------- */}
-        {clientId && (
-          <div className="mt-2 rounded border bg-neutral-50 p-3">
-            <div className="text-sm font-medium mb-2">
-              Previously used for this client
-              {loadingHistory && (
-                <span className="ml-2 text-xs text-neutral-500">loading…</span>
-              )}
-            </div>
-            {history.length === 0 && !loadingHistory ? (
-              <p className="text-xs text-neutral-500">
-                No prior purchases from this client.
-              </p>
-            ) : (
-              <ul className="divide-y">
-                {history.map((item, i) => (
-                  <li
-                    key={i}
-                    className="flex items-start justify-between gap-3 py-2 text-sm"
-                  >
-                    <div className="flex-1">
-                      <div className="font-medium">{item.product_name}</div>
-                      <div className="text-xs text-neutral-600">
-                        {Object.entries(item.selected_options).length === 0
-                          ? "No options"
-                          : Object.entries(item.selected_options)
-                              .map(([k, v]) => `${k}: ${v}`)
-                              .join(" · ")}
-                        {item.pricing_tier && (
-                          <span className="ml-2 rounded bg-neutral-200 px-1.5 py-0.5 text-[10px] uppercase">
-                            {item.pricing_tier}
-                          </span>
-                        )}
-                      </div>
-                      <div className="text-xs text-neutral-500 mt-0.5">
-                        Last unit price: <b>{item.unit_price.toFixed(2)}</b> ·{" "}
-                        {item.date
-                          ? new Date(item.date).toLocaleDateString("en-GB")
-                          : ""}
-                      </div>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => applySuggestion(item)}
-                      className="shrink-0 rounded border bg-white px-2 py-1 text-xs hover:bg-neutral-50"
-                    >
-                      Use as suggestion
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-        )}
+        {/* Client purchase history intentionally NOT shown here — moved to the
+            Products section (progressive disclosure). While defining the client
+            + project, past sales are noise; they become useful only once the rep
+            starts building the offer. */}
       </section>
 
       {/* Affair / Project is chosen via the single selector above; its label
@@ -1805,15 +1901,79 @@ export default function NewDocumentForm({
       <section className="space-y-3">
         <div className="flex items-center justify-between">
           <h2 className="text-lg font-semibold">Products</h2>
-          <button
-            type="button"
-            onClick={() => setLines((ls) => [...ls, emptyLine()])}
-            className="text-sm text-solux-dark hover:underline"
-            title="Add a standard product from the catalogue (spare parts, accessories, extra luminaires…)"
-          >
-            + Add catalogue product
-          </button>
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => setLines((ls) => [...ls, emptyLine()])}
+              className="btn-primary"
+              title="Add a standard product from the catalogue (spare parts, accessories, extra luminaires…)"
+            >
+              + Add Catalogue Product
+            </button>
+            <button
+              type="button"
+              onClick={() => setLines((ls) => [...ls, emptyPoleLine()])}
+              className="btn-secondary"
+              title="Add a custom pole / mât — a manual quotation line, not a catalogue product"
+            >
+              + Add Custom Pole
+            </button>
+          </div>
         </div>
+
+        {/* Previously sold to this client — moved here from the top (progressive
+            disclosure). Discreet + collapsed: a shortcut to re-add a product the
+            client already bought; "Use as suggestion" appends a line prefilled
+            with its last price + tier. Only useful once building the offer. */}
+        {clientId && history.length > 0 && (
+          <details className="rounded-lg border border-neutral-200 bg-neutral-50/60 px-3 py-2">
+            <summary className="cursor-pointer select-none text-[12px] font-medium text-neutral-600">
+              Previously sold to this client ({history.length})
+              <span className="ml-1 font-normal text-neutral-400">
+                — reuse a line with its last price
+              </span>
+            </summary>
+            <ul className="mt-2 divide-y divide-neutral-100">
+              {history.map((item, i) => (
+                <li
+                  key={i}
+                  className="flex items-start justify-between gap-3 py-2 text-sm"
+                >
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate font-medium">
+                      {item.product_name}
+                    </div>
+                    <div className="text-xs text-neutral-600">
+                      {Object.entries(item.selected_options).length === 0
+                        ? "No options"
+                        : Object.entries(item.selected_options)
+                            .map(([k, v]) => `${k}: ${v}`)
+                            .join(" · ")}
+                      {item.pricing_tier && (
+                        <span className="ml-2 rounded bg-neutral-200 px-1.5 py-0.5 text-[10px] uppercase">
+                          {item.pricing_tier}
+                        </span>
+                      )}
+                    </div>
+                    <div className="mt-0.5 text-xs text-neutral-500">
+                      Last unit price: <b>{item.unit_price.toFixed(2)}</b>
+                      {item.date
+                        ? ` · ${new Date(item.date).toLocaleDateString("en-GB")}`
+                        : ""}
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => applySuggestion(item)}
+                    className="shrink-0 rounded border bg-white px-2 py-1 text-xs hover:bg-neutral-50"
+                  >
+                    Use as suggestion
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </details>
+        )}
 
         {/* Original Sales Request — the project's "cahier des charges", captured
             at the Service Request and READ-ONLY here. Document-level + always
@@ -1836,34 +1996,76 @@ export default function NewDocumentForm({
           </div>
         )}
 
-        {lines.map((line, i) => (
-          <ProductConfigurator
-            key={i}
-            products={products}
-            options={options}
-            tierPrices={tierPrices}
-            hidePrices={hideCataloguePrices}
-            showAdminOnlyPriceBadge={adminPriceOverride}
-            costs={costs}
-            isAdmin={isAdmin}
-            fieldsByCategory={fieldsByCategory}
-            value={line}
-            onChange={(next) =>
-              setLines((ls) => ls.map((l, idx) => (idx === i ? next : l)))
-            }
-            onRemove={
-              lines.length > 1
-                ? () => setLines((ls) => ls.filter((_, idx) => idx !== i))
-                : undefined
-            }
-            onClearSuggestion={
-              line.previous_unit_price !== undefined
-                ? () => clearSuggestion(i)
-                : undefined
-            }
-            onRequestCostingRevision={requestCostingRevision}
-          />
-        ))}
+        {lines.length === 0 ? (
+          <div className="rounded-xl border-2 border-dashed border-neutral-200 bg-neutral-50/60 px-6 py-12 text-center">
+            <p className="text-sm font-semibold text-neutral-700">
+              No products added yet
+            </p>
+            <p className="mx-auto mt-1 max-w-sm text-xs text-neutral-500">
+              Add a catalogue product, or a custom pole (mât), to start this
+              quotation.
+            </p>
+            <div className="mt-5 flex flex-col items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setLines((ls) => [...ls, emptyLine()])}
+                className="btn-primary"
+              >
+                + Add Catalogue Product
+              </button>
+              <button
+                type="button"
+                onClick={() => setLines((ls) => [...ls, emptyPoleLine()])}
+                className="text-xs font-medium text-neutral-500 hover:text-neutral-800 hover:underline"
+              >
+                Add Custom Pole
+              </button>
+            </div>
+          </div>
+        ) : (
+          lines.map((line, i) =>
+            isCustomPoleLine(line) ? (
+            <CustomPoleCard
+              key={i}
+              line={line}
+              currency={currency}
+              onChange={(next) =>
+                setLines((ls) => ls.map((l, idx) => (idx === i ? next : l)))
+              }
+              onRemove={() =>
+                setLines((ls) => ls.filter((_, idx) => idx !== i))
+              }
+            />
+          ) : (
+            <ProductConfigurator
+              key={i}
+              products={products}
+              options={options}
+              tierPrices={tierPrices}
+              hidePrices={hideCataloguePrices}
+              showAdminOnlyPriceBadge={adminPriceOverride}
+              costs={costs}
+              isAdmin={isAdmin}
+              fieldsByCategory={fieldsByCategory}
+              value={line}
+              onChange={(next) =>
+                setLines((ls) => ls.map((l, idx) => (idx === i ? next : l)))
+              }
+              onRemove={
+                lines.length > 1
+                  ? () => setLines((ls) => ls.filter((_, idx) => idx !== i))
+                  : undefined
+              }
+              onClearSuggestion={
+                line.previous_unit_price !== undefined
+                  ? () => clearSuggestion(i)
+                  : undefined
+              }
+              onRequestCostingRevision={requestCostingRevision}
+            />
+          )
+          )
+        )}
       </section>
 
       {/* ---------- SHIPPING ---------- */}
@@ -1902,28 +2104,46 @@ export default function NewDocumentForm({
               ))}
             </select>
           </label>
-          <label className="block">
-            <span className="text-sm font-medium">Port of loading</span>
-            <input
-              type="text"
-              value={portOfLoading}
-              onChange={(e) => setPortOfLoading(e.target.value)}
-              placeholder="e.g. Shanghai"
-              className="mt-1 w-full rounded border px-3 py-2"
-            />
-          </label>
-          <label className="block">
-            <span className="text-sm font-medium">Port of destination</span>
-            <input
-              id="port_of_destination"
-              type="text"
-              value={portOfDestination}
-              onChange={(e) => setPortOfDestination(e.target.value)}
-              placeholder="e.g. Cotonou"
-              className="mt-1 w-full rounded border px-3 py-2 scroll-mt-24"
-            />
-          </label>
+          {/* Port of Loading — shown only when the Incoterm makes it meaningful */}
+          {ship.showPortOfLoading && (
+            <label className="block">
+              <span className="text-sm font-medium">
+                {ship.portOfLoadingLabel}
+                {!ship.portOfLoadingRequired && (
+                  <span className="ml-1 text-[11px] font-normal text-neutral-400">
+                    (optional)
+                  </span>
+                )}
+              </span>
+              <input
+                type="text"
+                value={portOfLoading}
+                onChange={(e) => setPortOfLoading(e.target.value)}
+                placeholder="e.g. Shanghai"
+                className="mt-1 w-full rounded border px-3 py-2"
+              />
+            </label>
+          )}
+          {/* Port of Destination — shown only for destination-relevant terms */}
+          {ship.showPortOfDestination && (
+            <label className="block">
+              <span className="text-sm font-medium">
+                {ship.portOfDestinationLabel}
+              </span>
+              <input
+                id="port_of_destination"
+                type="text"
+                value={portOfDestination}
+                onChange={(e) => setPortOfDestination(e.target.value)}
+                placeholder="e.g. Cotonou"
+                className="mt-1 w-full rounded border px-3 py-2 scroll-mt-24"
+              />
+            </label>
+          )}
         </div>
+        {ship.note && (
+          <p className="text-[12px] text-neutral-500">{ship.note}</p>
+        )}
 
         {/* Containers */}
         <div className="space-y-3">
@@ -2168,6 +2388,130 @@ export default function NewDocumentForm({
                 </tfoot>
               )}
             </table>
+          </div>
+        </div>
+
+        {/* ---------- INSURANCE + ADDITIONAL CHARGES (m146) ---------- */}
+        {/* Stacked (not a 2-col grid) so the Additional-charges rows get the
+            FULL panel width — the description was unusable when squeezed into
+            half the row next to Insurance. */}
+        <div className="space-y-4 border-t pt-4">
+          {/* Insurance — RATE-driven (‰). The user enters ONLY the rate; the
+              amount is computed = (goods + transport) × rate/1000, read-only. */}
+          <label className="block max-w-md">
+            <span className="text-sm font-medium">Insurance rate (‰)</span>
+            <div className="mt-1 flex items-center gap-2">
+              <input
+                type="text"
+                inputMode="decimal"
+                value={insuranceRate}
+                onChange={(e) =>
+                  setInsuranceRate(
+                    e.target.value.replace(",", ".").replace(/[^0-9.]/g, "")
+                  )
+                }
+                placeholder="e.g. 1"
+                aria-label="Insurance rate in per mille"
+                className="w-24 rounded border px-3 py-2 tabular-nums"
+              />
+              <span className="text-sm text-neutral-500">‰</span>
+              <span className="ml-auto text-sm text-neutral-600">
+                Insurance ={" "}
+                <b className="tabular-nums text-neutral-900">
+                  {currency} {insuranceAmount.toFixed(2)}
+                </b>
+              </span>
+            </div>
+            <span className="mt-1 block text-xs text-neutral-500">
+              (Goods + Transport) × rate — calculated automatically. e.g. 1‰ =
+              0.1%, 0.5‰ = 0.05%. Added to the total (not commissionable).
+            </span>
+          </label>
+
+          {/* Additional charges — repeatable name + amount rows */}
+          <div>
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-medium">Additional charges</span>
+              <button
+                type="button"
+                onClick={() =>
+                  setAdditionalCharges((cs) => [...cs, { label: "", amount: "" }])
+                }
+                className="text-sm text-solux-dark hover:underline"
+              >
+                + Add charge
+              </button>
+            </div>
+            <div className="text-xs text-neutral-500">
+              International logistics fees — e.g. ECTN, BESC, FERI, inspection.
+            </div>
+            {additionalCharges.length > 0 && (
+              <div className="mt-2 space-y-2">
+                {additionalCharges.map((c, i) => (
+                  <div key={i} className="flex items-center gap-2">
+                    {/* Widths live on the wrapper DIVs, not the inputs: the
+                        global `.solux-pro input { width:100% }` rule would
+                        otherwise override w-28/flex-1 and collapse the name
+                        field to nothing. Inputs just fill their wrapper. */}
+                    <div className="min-w-0 flex-1">
+                      <input
+                        type="text"
+                        value={c.label}
+                        onChange={(e) =>
+                          setAdditionalCharges((cs) =>
+                            cs.map((x, idx) =>
+                              idx === i ? { ...x, label: e.target.value } : x
+                            )
+                          )
+                        }
+                        placeholder="Name (e.g. ECTN)"
+                        className="w-full rounded border px-3 py-2 text-sm"
+                      />
+                    </div>
+                    <span className="shrink-0 text-sm text-neutral-500">
+                      {currency}
+                    </span>
+                    <div className="w-32 shrink-0">
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        value={c.amount}
+                        onChange={(e) => {
+                          const v = e.target.value
+                            .replace(",", ".")
+                            .replace(/[^0-9.]/g, "");
+                          setAdditionalCharges((cs) =>
+                            cs.map((x, idx) =>
+                              idx === i ? { ...x, amount: v } : x
+                            )
+                          );
+                        }}
+                        placeholder="0.00"
+                        className="w-full rounded border px-3 py-2 text-right text-sm tabular-nums"
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setAdditionalCharges((cs) =>
+                          cs.filter((_, idx) => idx !== i)
+                        )
+                      }
+                      className="shrink-0 text-neutral-400 hover:text-rose-600"
+                      title="Remove charge"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                ))}
+                <div className="flex justify-between border-t pt-1 text-sm">
+                  <span className="text-neutral-500">Charges total</span>
+                  <span className="font-medium tabular-nums">
+                    {totalAdditionalCharges(additionalCharges).toFixed(2)}
+                  </span>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </section>
@@ -2729,6 +3073,23 @@ export default function NewDocumentForm({
             <span>{commission.toFixed(2)}</span>
           </div>
         )}
+        {insuranceAmount > 0 && (
+          <div className="flex items-center justify-between text-sm">
+            <span>Insurance{insuranceRate ? ` (${insuranceRate}‰)` : ""}</span>
+            <span>{insuranceAmount.toFixed(2)}</span>
+          </div>
+        )}
+        {additionalCharges
+          .filter((c) => Number(c.amount) > 0)
+          .map((c, i) => (
+            <div
+              key={i}
+              className="flex items-center justify-between text-sm"
+            >
+              <span>{c.label || "Additional charge"}</span>
+              <span>{Number(c.amount).toFixed(2)}</span>
+            </div>
+          ))}
         <div className="flex items-center justify-between text-lg font-semibold border-t pt-2">
           <span>Grand total</span>
           <span>{grandTotal.toFixed(2)}</span>
@@ -3005,6 +3366,24 @@ export default function NewDocumentForm({
               <span className="text-neutral-500">Commission</span>
               <span className="tabular-nums">
                 {currency} {commission.toFixed(2)}
+              </span>
+            </div>
+          )}
+          {insuranceAmount > 0 && (
+            <div className="flex justify-between">
+              <span className="text-neutral-500">
+                Insurance{insuranceRate ? ` (${insuranceRate}‰)` : ""}
+              </span>
+              <span className="tabular-nums">
+                {currency} {insuranceAmount.toFixed(2)}
+              </span>
+            </div>
+          )}
+          {totalAdditionalCharges(additionalCharges) > 0 && (
+            <div className="flex justify-between">
+              <span className="text-neutral-500">Additional charges</span>
+              <span className="tabular-nums">
+                {currency} {totalAdditionalCharges(additionalCharges).toFixed(2)}
               </span>
             </div>
           )}

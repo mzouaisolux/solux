@@ -236,6 +236,14 @@ export async function generateProductionTaskList(formData: FormData) {
       "Sales orders are created from PROFORMA invoices, not quotations (Solux export workflow). Revise this quotation into a proforma first (Duplicate / Revise → type Proforma), mark it won, then create the task list from the proforma."
     );
   }
+  // Core-mandatory affair: a task list with no affaire is invisible to
+  // affair-keyed views (Orders in Flight groups won-quote ↔ task-list on
+  // affair_id). Refuse rather than mint an orphaned task list.
+  if (!(doc as any).affair_id) {
+    throw new Error(
+      "Ce proforma n'est rattaché à aucune affaire. Rattachez-le à une affaire avant de créer la task list de production (l'affaire est obligatoire pour le suivi)."
+    );
+  }
 
   const { data: srcLines, error: linesErr } = await supabase
     .from("document_lines")
@@ -371,6 +379,15 @@ export async function launchProduction(formData: FormData) {
   if (src.status !== "won") {
     throw new Error("Mark the quotation as Won before launching production.");
   }
+  // Affair is the ERP backbone (core-mandatory). Launching without one would
+  // silently propagate a NULL affair into the proforma → task list → order,
+  // making the whole chain invisible to affair-keyed views (Orders in Flight).
+  // Refuse instead of creating an orphaned production command.
+  if (!src.affair_id) {
+    throw new Error(
+      "Cette cotation n'est rattachée à aucune affaire. Rattachez-la à une affaire avant de lancer la production — l'affaire est obligatoire pour suivre la commande (sinon elle n'apparaît pas dans « Orders in Flight »)."
+    );
+  }
 
   // One command per affair — reuse an existing proforma if there is one.
   let proformaId: string | null = null;
@@ -416,6 +433,9 @@ export async function launchProduction(formData: FormData) {
         incoterm: src.incoterm,
         freight_type: src.freight_type,
         freight_cost: src.freight_cost,
+        // m146 — carry logistics extras (undefined omitted pre-migration).
+        insurance_cost: src.insurance_cost,
+        additional_charges: src.additional_charges,
         manual_pricing: src.manual_pricing,
         total_price: src.total_price,
         created_by: user.id,

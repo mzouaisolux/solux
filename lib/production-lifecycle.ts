@@ -108,22 +108,20 @@ export function isStartedWithoutDeposit(
  *   working_days would invalidate that frozen commitment. So we lock
  *   it.
  *
- * `baseline_locked_at` is stamped by recordPayments / startWithoutDeposit
- * at activation. We also check `isProductionActive` as a safety net in
- * case a legacy row activated before the column existed.
+ * Locked once a COMMITTED FINISH (`initial_production_deadline`) has been
+ * stamped — that frozen value is exactly what the lock protects. Production
+ * can be active WITHOUT a committed finish (the deposit landed before working
+ * days were set); until one exists there is nothing to protect, so working
+ * days must stay EDITABLE and the ETA can still be computed.
+ *
+ * (We deliberately no longer lock on mere `isProductionActive`: that stranded
+ * "started without working days" orders as In production with no ETA and no
+ * way to set one — working days were hidden because the baseline read locked.)
  */
 export function isBaselineLocked(
-  po: Pick<
-    ProductionOrder,
-    | "baseline_locked_at"
-    | "deposit_received_at"
-    | "deposit_override_at"
-  >
+  po: Pick<ProductionOrder, "initial_production_deadline">
 ): boolean {
-  if (po.baseline_locked_at) return true;
-  // Safety net: any activated order is locked, even if the column
-  // wasn't stamped (legacy data, race conditions, etc.).
-  return isProductionActive(po);
+  return !!po.initial_production_deadline;
 }
 
 /**

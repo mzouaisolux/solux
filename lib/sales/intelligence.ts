@@ -21,6 +21,10 @@ export type IntelOrder = PeriodOrder & {
   balance: number | null;
   paymentTerms?: string | null;
   currency?: string | null;
+  shipmentDate?: string | null;
+  transportation?: number | null;
+  bankCharge?: number | null;
+  piAmount?: number | null;
 };
 
 const up = (s: string | null | undefined) => (s ?? "").trim().toUpperCase();

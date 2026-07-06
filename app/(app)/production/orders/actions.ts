@@ -2,6 +2,7 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 import { getCurrentUserRole } from "@/lib/auth";
 import { requireCapability } from "@/lib/permissions";
 import {
@@ -608,52 +609,80 @@ export async function updateProductionOrderPayments(formData: FormData) {
   }
   if (updateAttempt.error) throw new Error(updateAttempt.error.message);
 
-  // Auto-advance: if the deposit is now fully covered and the order was
-  // sitting in awaiting_deposit, move it to deposit_received. Skip if
-  // there's no deposit expected (LC mode etc.) — the workflow stays
-  // wherever it is.
+  // ---- Production activation on deposit receipt (core business rule) -----
+  // Receiving the deposit is the OFFICIAL production trigger. When a
+  // qualifying deposit lands while the order is awaiting it, production
+  // STARTS: status → in_production, the committed finish (initial + current
+  // deadline) is computed and frozen, and the baseline locks. We never fail
+  // silently anymore (the old bug):
+  //   - expected deposit met → start;
+  //   - no computable threshold (missing / zero deposit terms) but a deposit
+  //     was actually recorded on a non-LC order → honour the rule and start
+  //     on that receipt, instead of doing nothing;
+  //   - a deposit recorded but short of the expected amount → stays awaiting
+  //     and the caller is told why (deposit_partial flash).
   const doc = (existing as any).documents;
   let autoAdvanced = false;
-  if (existing.status === "awaiting_deposit" && doc) {
+  let depositPartial = false;
+  // Any pre-production state must react to a covered deposit — not only
+  // `awaiting_deposit`. An order sitting at `deposit_received` (or scheduled)
+  // with the deposit paid MUST run, or it becomes a dead end ("deposit
+  // received but production never started").
+  const preProductionStatuses = [
+    "awaiting_deposit",
+    "deposit_received",
+    "production_scheduled",
+  ];
+  if (preProductionStatuses.includes(existing.status as string) && doc) {
+    const paymentMode = (doc.payment_mode ?? null) as string | null;
     const expectedDeposit = computeExpectedDepositForUpdate(
       Number(doc.total_price ?? 0),
-      doc.payment_mode,
+      paymentMode,
       doc.payment_terms
     );
-    if (
+    const depositRecorded = patch.deposit_received_amount > 0;
+    const thresholdMet =
       expectedDeposit > 0 &&
-      patch.deposit_received_amount + 0.01 >= expectedDeposit
-    ) {
-      // Production ACTIVATES here. Three things happen atomically:
-      //   1. Status flips to deposit_received.
-      //   2. Initial Project Completion is computed and frozen
-      //      (= deposit_received_at + working_days).
-      //   3. Baseline is locked — working_days can no longer change,
-      //      because changing it would invalidate the frozen
-      //      Initial Project Completion.
+      patch.deposit_received_amount + 0.01 >= expectedDeposit;
+    const startedOnRecordedDeposit =
+      expectedDeposit <= 0 && paymentMode !== "lc" && depositRecorded;
+    const shouldStart = thresholdMet || startedOnRecordedDeposit;
+    depositPartial = expectedDeposit > 0 && depositRecorded && !thresholdMet;
+
+    if (shouldStart) {
+      // Production ACTIVATES here. Atomically:
+      //   1. Status → in_production (production has officially started).
+      //   2. Committed finish (initial + current deadline) computed and
+      //      frozen (= start date + working days), when working days exist.
+      //   3. Baseline locks — working days can no longer change.
+      const now = new Date().toISOString();
       const activationPatch: Record<string, any> = {
-        status: "deposit_received",
-        // Lock the baseline at the activation moment. Pre-activation,
-        // working_days stays editable for planning; once we stamp the
-        // completion, we must lock the inputs that produced it.
-        baseline_locked_at: new Date().toISOString(),
+        status: "in_production",
       };
-      const startDate = patch.deposit_received_at as string | null;
+      // Start date anchors to the recorded receipt date; falls back to today
+      // so a deposit saved without a date still starts production cleanly.
+      const startDate =
+        (patch.deposit_received_at as string | null) ?? now.slice(0, 10);
       const workingDays = (existing as any).production_working_days as
         | number
         | null;
       const alreadyStamped = (existing as any).initial_production_deadline;
-      if (startDate && workingDays != null && !alreadyStamped) {
+      if (workingDays != null && !alreadyStamped) {
         const projected = addWorkingDays(startDate, workingDays);
         if (projected) {
           activationPatch.initial_production_deadline = projected;
           activationPatch.current_production_deadline = projected;
         }
       }
+      // Lock the baseline ONLY when a committed finish exists (stamped now or
+      // already present). Starting WITHOUT working days must leave them
+      // editable so the ETA can still be set afterward — otherwise the order
+      // is stranded In production with no finish date and no way to set one.
+      if (activationPatch.initial_production_deadline || alreadyStamped) {
+        activationPatch.baseline_locked_at = now;
+      }
       // Defensive write: if m041 hasn't been applied, baseline_locked_at
-      // doesn't exist — drop it from the patch and retry so the deposit
-      // activation still completes. The lock will then be implicit via
-      // `isProductionActive` (safety net in isBaselineLocked helper).
+      // doesn't exist — drop it and retry so activation still completes.
       let actAttempt = await supabase
         .from("production_orders")
         .update(activationPatch)
@@ -716,14 +745,22 @@ export async function updateProductionOrderPayments(formData: FormData) {
       entity_type: "production_order",
       entity_id: id,
       event_type: "po.status_changed",
-      message:
-        "Status: Awaiting deposit → Deposit received (auto-advance after deposit fully covered)",
-      payload: { from: "awaiting_deposit", to: "deposit_received", auto: true },
+      message: `Status: ${existing.status} → in_production (production started on deposit receipt)`,
+      payload: { from: existing.status, to: "in_production", auto: true },
       bestEffort: true,
     });
   }
 
   await touch(id);
+
+  // Loud feedback on the production-critical moments — an important business
+  // event must never happen silently. Redirect so the cockpit lands on a
+  // confirmation banner (success) or an explanation (deposit short of target).
+  if (autoAdvanced) {
+    redirect(`/production/orders/${id}?flash=production_started`);
+  } else if (depositPartial) {
+    redirect(`/production/orders/${id}?flash=deposit_partial`);
+  }
 }
 
 /**
@@ -996,24 +1033,14 @@ export async function updateProductionOrderShipment(formData: FormData) {
     .eq("id", id)
     .maybeSingle();
 
-  // BL workflow gate: CONFIRMING the booking (unchecked → checked) requires a
-  // COMPLETE Shipping / BL profile on the client. Every other field on this
-  // form can be filled in ahead of time — only the final confirmation is
-  // blocked, so Operations never books a shipment that can't be documented.
-  if (patch.shipment_booked && !prev?.shipment_booked && prev?.client_id) {
-    const { data: cl } = await supabase
-      .from("clients")
-      .select("bl_profile")
-      .eq("id", prev.client_id)
-      .maybeSingle();
-    const status = blProfileStatus(normalizeBlProfile(cl?.bl_profile ?? null));
-    if (status !== "complete") {
-      throw new Error(
-        "Shipping profile must be completed before logistics booking can be confirmed. " +
-          "Use “Request information from Sales” on the Shipping / BL profile block."
-      );
-    }
-  }
+  // NOTE (corrected 2026-07 per ops domain review): booking a shipment must
+  // NOT require a Bill of Lading — nor a complete consignee/"BL profile". The
+  // real freight sequence is the OPPOSITE: you BOOK with the carrier/forwarder
+  // first, the vessel is loaded and sails, and only THEN does the carrier
+  // (CMA CGM / MSC / Maersk…) ISSUE the BL. The BL number + document simply
+  // don't exist at booking time. So marking "booked" is a free operational
+  // fact here; the consignee/BL details and the BL number are captured later,
+  // when they actually exist, and only gate DOCUMENT generation — never booking.
 
   const { error } = await supabase
     .from("production_orders")
@@ -1259,7 +1286,7 @@ export async function startWithoutDeposit(formData: FormData) {
   // production activation moment for the override path — same as a
   // received deposit on the normal path. Three things happen atomically:
   //   1. deposit_override_* columns stamped (audit who/when/why).
-  //   2. Status flips to deposit_received.
+  //   2. Status flips to in_production (production has officially started).
   //   3. Initial Project Completion frozen from `today + working_days`
   //      AND baseline_locked_at stamped (working_days now read-only).
   const now = new Date().toISOString();
@@ -1268,10 +1295,7 @@ export async function startWithoutDeposit(formData: FormData) {
     deposit_override_at: now,
     deposit_override_by: userId,
     deposit_override_reason: reason,
-    status: "deposit_received",
-    // Lock baseline at the activation moment, just like the normal
-    // deposit path. Working_days becomes read-only from here.
-    baseline_locked_at: now,
+    status: "in_production",
   };
   if (
     (prev as any).production_working_days != null &&
@@ -1285,6 +1309,14 @@ export async function startWithoutDeposit(formData: FormData) {
       overridePatch.initial_production_deadline = projected;
       overridePatch.current_production_deadline = projected;
     }
+  }
+  // Lock the baseline ONLY when a committed finish exists (see recordPayments)
+  // — starting without working days keeps them editable so the ETA can be set.
+  if (
+    overridePatch.initial_production_deadline ||
+    (prev as any).initial_production_deadline
+  ) {
+    overridePatch.baseline_locked_at = now;
   }
   // Same defensive fallback as recordPayments: if m041 isn't applied,
   // drop baseline_locked_at from the patch and retry so the override
@@ -1320,7 +1352,7 @@ export async function startWithoutDeposit(formData: FormData) {
     payload: {
       override: true,
       previous_status: "awaiting_deposit",
-      new_status: "deposit_received",
+      new_status: "in_production",
       reason,
       activated_at: now,
     },
@@ -1328,6 +1360,8 @@ export async function startWithoutDeposit(formData: FormData) {
   });
 
   await touch(id);
+  // Loud confirmation — same production-started banner as the deposit path.
+  redirect(`/production/orders/${id}?flash=production_started`);
 }
 
 /* =====================================================================

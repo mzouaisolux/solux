@@ -716,6 +716,11 @@ export default async function ProjectDetailPage({ params }: { params: { id: stri
                       packingContainers.length > 0 ? (
                         <FreightEntryForm
                           projectId={p.id}
+                          goodsValue={
+                            (Number(p.product_final_price ?? 0) +
+                              Number(p.pole_final_price ?? 0)) *
+                            Number(p.quantity ?? 0)
+                          }
                           packingContainers={packingContainers}
                           freightContainers={Array.isArray(freight.containers) ? freight.containers : []}
                           defaults={{
@@ -725,6 +730,10 @@ export default async function ProjectDetailPage({ params }: { params: { id: stri
                             destination_country: freight.destination_country ?? null,
                             notes: freight.notes ?? null,
                             valid_until: freight.valid_until ?? null,
+                            insurance_cost: freight.insurance_cost ?? null,
+                            additional_charges: Array.isArray(freight.additional_charges)
+                              ? freight.additional_charges
+                              : null,
                           }}
                           countryFallback={p.country ?? null}
                           completed={freight.status === "completed"}

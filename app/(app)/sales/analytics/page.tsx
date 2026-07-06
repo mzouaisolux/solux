@@ -19,7 +19,7 @@ export default async function SalesAnalyticsPage() {
   if (!(await canAccessOrAdmin(["sales_analytics.view"], { finance: true }))) return <AccessDenied capability="sales_analytics.view" />;
 
   const supabase = createClient();
-  const COLS = "id, year, month, order_date, country, payment_terms, currency, sales_amount, received_amount, balance, saler:saler_id(name), client:sales_client_id(code, name)";
+  const COLS = "id, year, month, order_date, shipment_date, country, payment_terms, currency, pi_amount, sales_amount, transportation, received_amount, bank_charge, balance, saler:saler_id(name), client:sales_client_id(code, name)";
   const raw: any[] = [];
   for (let from = 0; from < 100000; from += 1000) {
     const { data, error } = await supabase.from("sales_orders").select(COLS).order("id").range(from, from + 999);
@@ -41,6 +41,10 @@ export default async function SalesAnalyticsPage() {
     balance: o.balance == null ? null : Number(o.balance),
     paymentTerms: (o.payment_terms ?? "").trim() || null,
     currency: (o.currency ?? "").trim() || null,
+    shipmentDate: o.shipment_date ?? null,
+    transportation: o.transportation == null ? null : Number(o.transportation),
+    bankCharge: o.bank_charge == null ? null : Number(o.bank_charge),
+    piAmount: o.pi_amount == null ? null : Number(o.pi_amount),
   }));
 
   const uniqSorted = (vals: (string | null)[]) => [...new Set(vals.filter((v): v is string => !!v))].sort((a, b) => a.localeCompare(b));

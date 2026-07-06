@@ -64,11 +64,11 @@ test("production complete + BL ready + not booked → primary is 'book shipment'
   assert.equal(r.primary?.key, "book");
 });
 
-test("production complete + BL missing → primary is 'complete BL profile'", () => {
+test("production complete + BL missing → primary is STILL 'book shipment' (booking is NOT gated on the BL — the carrier issues it only after the vessel sails)", () => {
   const r = computeNextAction(
     base({ status: "production_completed", blStatus: "missing" })
   );
-  assert.equal(r.primary?.key, "bl");
+  assert.equal(r.primary?.key, "book");
 });
 
 test("booked but required docs missing → primary is 'generate CI'", () => {

@@ -15,6 +15,7 @@ import {
   type IntelOrder, type Filters, type ClientProfile, type CountryStat, type SalerStat,
 } from "@/lib/sales/intelligence";
 import { ytdSum, latestMonth, salesByYearPeriod, cumulativeByMonth, growthPct } from "@/lib/sales/periods";
+import { baseForecast, arAging, retentionCohorts, growthDecomposition, clientSignals, clientSignal, collectionRisk, parseTerms, type ClientSignal } from "@/lib/sales/decision";
 
 const MONTHS = ["", "Jan", "Fév", "Mar", "Avr", "Mai", "Juin", "Juil", "Août", "Sep", "Oct", "Nov", "Déc"];
 const fmt = (n: number) => Math.round(n).toLocaleString("fr-FR");
@@ -69,6 +70,7 @@ function Delta({ cur, prev, className = "" }: { cur: number; prev: number; class
 }
 const TREND: Record<string, { c: string; l: string }> = { croissance: { c: "bg-emerald-50 text-emerald-700 ring-emerald-200", l: "Croissance" }, baisse: { c: "bg-rose-50 text-rose-700 ring-rose-200", l: "En baisse" }, stable: { c: "bg-neutral-100 text-neutral-600 ring-neutral-200", l: "Stable" }, nouveau: { c: "bg-blue-50 text-blue-700 ring-blue-200", l: "Nouveau" }, dormant: { c: "bg-amber-50 text-amber-700 ring-amber-200", l: "Dormant" } };
 const TrendBadge = ({ t }: { t: string }) => <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ring-1 ${TREND[t]?.c ?? TREND.stable.c}`}>{TREND[t]?.l ?? t}</span>;
+const CHURN: Record<string, { c: string; l: string }> = { ok: { c: "text-emerald-600", l: "OK" }, watch: { c: "text-amber-600", l: "À surveiller" }, risk: { c: "text-rose-600", l: "Risque" }, lost: { c: "text-rose-700", l: "Quasi perdu" } };
 function Kpi({ v, l, delta, accent, onClick }: { v: string; l: string; delta?: React.ReactNode; accent?: string; onClick?: () => void }) {
   return (
     <button type="button" onClick={onClick} disabled={!onClick} className={`${card} px-4 py-3 text-left ${accent ?? ""} ${onClick ? "transition-shadow hover:shadow-sm" : "cursor-default"}`}>
@@ -78,11 +80,11 @@ function Kpi({ v, l, delta, accent, onClick }: { v: string; l: string; delta?: R
   );
 }
 
-const TABS = [["overview", "Overview"], ["clients", "Clients 360"], ["pays", "Pays"], ["commerciaux", "Commerciaux"], ["tendances", "Tendances"], ["insights", "Insights IA"]] as const;
+const TABS = [["pilotage", "Pilotage"], ["overview", "Overview"], ["clients", "Clients 360"], ["pays", "Pays"], ["commerciaux", "Commerciaux"], ["tendances", "Tendances"], ["insights", "Insights IA"]] as const;
 type Tab = (typeof TABS)[number][0];
 
 export default function AnalyticsShell({ data }: { data: WorkspaceData }) {
-  const [tab, setTab] = useState<Tab>("overview");
+  const [tab, setTab] = useState<Tab>("pilotage");
   const [filters, setFilters] = useState<Filters>({});
   const [refYear, setRefYear] = useState<number>(data.years[data.years.length - 1] ?? 2026);
   const [cohort, setCohort] = useState<Cohort>("all");
@@ -116,6 +118,12 @@ export default function AnalyticsShell({ data }: { data: WorkspaceData }) {
   const series = useMemo(() => computeSeries(scoped, refYear, data.years), [scoped, refYear, data.years]);
   const topByCur = useMemo(() => profiles.reduce<ClientProfile | null>((m, p) => (p.curCA > (m?.curCA ?? -1) ? p : m), null), [profiles]);
   const insights = useMemo(() => buildInsights({ refYear, prevYear, curYTD: kpi.curYTD, prevYTD: kpi.prevYTD, projection: kpi.projection, prevFull: kpi.prevFull, nullCount: kpi.nullCur, profiles, countries, topClientShareOfYear: kpi.curYTD > 0 && topByCur ? topByCur.curCA / kpi.curYTD : 0, topClientName: topByCur?.name ?? "—" }), [refYear, prevYear, kpi, profiles, countries, topByCur]);
+  // decision engine (built only from existing register data)
+  const forecast = useMemo(() => baseForecast(scoped, refYear), [scoped, refYear]);
+  const aging = useMemo(() => arAging(scoped, data.maxDate), [scoped, data.maxDate]);
+  const retention = useMemo(() => retentionCohorts(scoped), [scoped]);
+  const decomp = useMemo(() => growthDecomposition(scoped, refYear), [scoped, refYear]);
+  const signals = useMemo(() => clientSignals(scoped, data.maxDate), [scoped, data.maxDate]);
 
   const nameOf = (code: string) => data.clientsIndex.find((c) => c.code === code)?.name ?? code;
   const activeChips: [string, () => void][] = [];
@@ -171,12 +179,101 @@ export default function AnalyticsShell({ data }: { data: WorkspaceData }) {
         {TABS.map(([id, label]) => (<button key={id} type="button" onClick={() => setTab(id)} className={`-mb-px border-b-2 px-3 py-2 text-[13px] font-semibold transition-colors ${tab === id ? "border-neutral-900 text-neutral-900" : "border-transparent text-neutral-400 hover:text-neutral-700"}`}>{label}</button>))}
       </div>
 
+      {tab === "pilotage" && <Pilotage {...{ kpi, forecast, aging, retention, decomp, signals, profiles, refYear, prevYear, patch, setTab, setCohort }} />}
       {tab === "overview" && <Overview {...{ kpi, series, lists, refYear, prevYear, patch, setTab, setCohort, monthActive: filters.month ?? null }} />}
       {tab === "clients" && <Clients {...{ profiles, lists, base, refYear, dormancyMonths, maxDate: data.maxDate, clientsIndex: data.clientsIndex, filters, patch }} />}
       {tab === "pays" && <Pays {...{ countries, refYear, prevYear, filters, patch }} />}
       {tab === "commerciaux" && <Commerciaux {...{ salers, refYear, filters, patch }} />}
       {tab === "tendances" && <Tendances {...{ series, refYear, prevYear, patch }} />}
       {tab === "insights" && <Insights {...{ insights, kpi, refYear, prevYear, profiles, countries, salers, filters, cohort }} />}
+    </div>
+  );
+}
+
+// ── PILOTAGE (le Brief du matin) ─────────────────────────────────────────────
+function Pilotage({ kpi, forecast, aging, retention, decomp, signals, profiles, refYear, prevYear, patch, setTab, setCohort }: any) {
+  const topClient = profiles.reduce((m: ClientProfile | null, p: ClientProfile) => (p.curCA > (m?.curCA ?? -1) ? p : m), null);
+  const topShare = kpi.curYTD > 0 && topClient ? topClient.curCA / kpi.curYTD : 0;
+
+  // ranked alert feed
+  type Alert = { sev: "danger" | "warning" | "info"; title: string; detail: string; act?: () => void; actLabel?: string; weight: number };
+  const alerts: Alert[] = [];
+  for (const p of profiles as ClientProfile[]) {
+    const s: ClientSignal | undefined = signals.get(p.code);
+    if (s && (s.churnLevel === "risk" || s.churnLevel === "lost") && p.totalCA > 0) {
+      alerts.push({ sev: "danger", title: `${p.name} — ${s.churnLevel === "lost" ? "quasi perdu" : "risque de perte"}`, detail: `${s.daysSinceLast}j sans commande (cadence ~${s.expectedGap ?? "?"}j) · ${fmt(p.totalCA)} de CA en jeu.`, act: () => { patch({ clientCode: p.code }); setTab("clients"); }, actLabel: "Ouvrir la fiche", weight: s.churnProb * p.totalCA });
+    }
+  }
+  for (const d of aging.debtors.filter((x: any) => x.oldestDays > 60).slice(0, 5)) alerts.push({ sev: "warning", title: `${d.name} — ${fmt(d.outstanding)} en attente`, detail: `Le plus ancien remonte à ${d.oldestDays}j (depuis expédition) · ${d.country}.`, act: () => { patch({ clientCode: d.code }); setTab("clients"); }, actLabel: "Voir", weight: d.outstanding });
+  if (topShare >= 0.25 && topClient) alerts.push({ sev: "warning", title: `Concentration : ${topClient.name} = ${Math.round(topShare * 100)}% du CA ${refYear}`, detail: "Dépendance forte à un seul client — diversifier.", weight: topShare * 1e6 });
+  if (kpi.nullCur > 0) alerts.push({ sev: "info", title: `${kpi.nullCur} commandes ${refYear} sans montant`, detail: "Le CA réel est sous-estimé tant qu'elles ne sont pas saisies.", act: () => patch({ amountState: "missing" }), actLabel: "Filtrer", weight: 1 });
+  alerts.sort((a, b) => (a.sev === b.sev ? b.weight - a.weight : ({ danger: 0, warning: 1, info: 2 }[a.sev] - { danger: 0, warning: 1, info: 2 }[b.sev])));
+
+  const SEV: Record<string, string> = { danger: "border-rose-200 bg-rose-50/50", warning: "border-amber-200 bg-amber-50/50", info: "border-neutral-200 bg-white" };
+  const DOT: Record<string, string> = { danger: "bg-rose-500", warning: "bg-amber-500", info: "bg-neutral-400" };
+  const maxD = Math.max(1, Math.abs(decomp.newC), Math.abs(decomp.expansion), Math.abs(decomp.contraction), Math.abs(decomp.churn));
+  const DRow = ({ l, v }: { l: string; v: number }) => (<div className="flex items-center gap-2 text-[12px]"><div className="w-24 text-neutral-500">{l}</div><div className="h-3 flex-1 rounded bg-neutral-100"><div className={`h-full rounded ${v >= 0 ? "bg-emerald-500" : "bg-rose-500"}`} style={{ width: `${(Math.abs(v) / maxD) * 100}%` }} /></div><div className={`w-24 text-right tabular-nums ${v >= 0 ? "text-emerald-600" : "text-rose-600"}`}>{v >= 0 ? "+" : ""}{fmt(v)}</div></div>);
+  const fgrowth = g100(forecast.forecastFullYear, forecast.prevFull);
+
+  return (
+    <div className="space-y-5">
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+        <Kpi v={fmt(forecast.forecastFullYear)} l={`Prévision fin ${refYear} (base installée)`} delta={<Delta cur={forecast.forecastFullYear} prev={forecast.prevFull} />} accent="ring-1 ring-neutral-900/5" />
+        <Kpi v={fmt(kpi.curYTD)} l={`CA ${refYear} à date`} delta={<Delta cur={kpi.curYTD} prev={kpi.prevYTD} />} />
+        <Kpi v={fmt(aging.totalOutstanding)} l="Cash à récupérer" accent={aging.totalOutstanding > 0 ? "ring-1 ring-amber-300" : ""} />
+        <Kpi v={fmt(kpi.nullCur)} l="Cmd. sans montant" accent={kpi.nullCur > 0 ? "ring-1 ring-amber-300" : ""} onClick={() => patch({ amountState: "missing" })} />
+      </div>
+
+      <div className="grid gap-4 lg:grid-cols-[1fr_420px]">
+        {/* alert feed */}
+        <div className="space-y-2">
+          <h3 className="text-sm font-semibold text-neutral-800">🔔 Ce qui a besoin de toi aujourd'hui</h3>
+          {alerts.length === 0 ? <p className="text-[12px] text-neutral-400">Rien d'urgent sur ce périmètre. 🎉</p> : (
+            <div className="space-y-2">
+              {alerts.slice(0, 12).map((a, i) => (
+                <div key={i} className={`flex items-start justify-between gap-3 rounded-xl border p-3 ${SEV[a.sev]}`}>
+                  <div className="flex items-start gap-2"><span className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${DOT[a.sev]}`} /><div><div className="text-[13px] font-semibold text-neutral-900">{a.title}</div><div className="text-[12px] text-neutral-600">{a.detail}</div></div></div>
+                  {a.act && <button type="button" onClick={a.act} className="shrink-0 rounded-md border border-neutral-200 bg-white px-2 py-1 text-[11px] font-semibold text-neutral-700 hover:bg-neutral-50">{a.actLabel}</button>}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* forecast + decomposition */}
+        <div className="space-y-4">
+          <div className={`${card} p-4`}>
+            <h3 className="mb-1 text-sm font-semibold text-neutral-800">Prévision base installée · {refYear}</h3>
+            <div className="text-2xl font-bold tabular-nums text-neutral-900">{fmt(forecast.forecastFullYear)} {fgrowth != null && <span className={`text-[13px] font-semibold ${fgrowth >= 0 ? "text-emerald-600" : "text-rose-600"}`}>{fgrowth >= 0 ? "+" : ""}{fgrowth.toFixed(1)}%</span>}</div>
+            <div className="text-[11px] text-neutral-400">Reste à faire d'ici fin d'année : <strong className="text-neutral-600">{fmt(forecast.remaining)}</strong> · {forecast.activeClients} clients actifs projetés. <span className="text-neutral-400">(vs {fmt(forecast.prevFull)} en {prevYear})</span></div>
+            <div className="mt-2"><Bars data={[{ label: `${prevYear}`, value: forecast.prevFull }, { label: `Prév. ${refYear}`, value: forecast.forecastFullYear }, { label: "À date", value: forecast.curYTD }]} height={100} /></div>
+          </div>
+          <div className={`${card} p-4`}>
+            <h3 className="mb-2 text-sm font-semibold text-neutral-800">D'où vient la variation {refYear} vs {prevYear}</h3>
+            <div className="space-y-1.5">
+              <DRow l="Nouveaux" v={decomp.newC} /><DRow l="Expansion" v={decomp.expansion} /><DRow l="Contraction" v={decomp.contraction} /><DRow l="Clients perdus" v={decomp.churn} />
+            </div>
+            <div className="mt-2 border-t border-neutral-100 pt-1.5 text-[12px] font-semibold text-neutral-800">Variation nette : <span className={decomp.total >= 0 ? "text-emerald-600" : "text-rose-600"}>{decomp.total >= 0 ? "+" : ""}{fmt(decomp.total)}</span></div>
+          </div>
+        </div>
+      </div>
+
+      <div className="grid gap-4 lg:grid-cols-2">
+        {/* aging */}
+        <div className={`${card} p-4`}>
+          <h3 className="mb-2 text-sm font-semibold text-neutral-800">Recouvrement · {fmt(aging.totalOutstanding)} en attente</h3>
+          <Bars data={aging.buckets.map((b: any) => ({ label: b.label, value: b.amount }))} color={C.amber} height={110} />
+          <ul className="mt-2 space-y-1 text-[12px]">
+            {aging.debtors.slice(0, 6).map((d: any) => (<li key={d.code} className="flex items-center justify-between"><button type="button" onClick={() => { patch({ clientCode: d.code }); setTab("clients"); }} className="truncate text-neutral-700 hover:underline">{d.name} <span className="text-neutral-400">· {d.oldestDays}j</span></button><span className="font-semibold tabular-nums text-neutral-900">{fmt(d.outstanding)}</span></li>))}
+          </ul>
+        </div>
+        {/* retention */}
+        <div className={`${card} p-4`}>
+          <h3 className="mb-2 text-sm font-semibold text-neutral-800">Rétention par cohorte <span className="font-normal text-neutral-400">· % de clients encore actifs N années après</span></h3>
+          <Bars data={retention.avg.map((v: number | null, lag: number) => ({ label: `+${lag}`, value: v == null ? 0 : Math.round(v * 100) }))} color={C.blue} height={110} />
+          <p className="mt-2 text-[11px] text-neutral-400">Rétention moyenne à +1 an : <strong className="text-neutral-600">{retention.avg[1] != null ? Math.round(retention.avg[1] * 100) + "%" : "—"}</strong>{retention.avg[2] != null && <> · à +2 ans : <strong className="text-neutral-600">{Math.round(retention.avg[2] * 100)}%</strong></>}. Dit si vous construisez une base ou remplissez un seau percé.</p>
+        </div>
+      </div>
     </div>
   );
 }
@@ -243,7 +340,10 @@ function Clients({ profiles, base, refYear, dormancyMonths, maxDate, clientsInde
   const code = filters.clientCode || localCode || profiles[0]?.code || "";
   const filtered = useMemo(() => { const t = q.trim().toLowerCase(); return (t ? clientsIndex.filter((c: any) => (c.name || "").toLowerCase().includes(t) || c.code.toLowerCase().includes(t)) : clientsIndex).slice(0, 80); }, [q, clientsIndex]);
   // 360 profile = full history of the focused client under the current per-order filters.
-  const p: ClientProfile | undefined = useMemo(() => { if (!code) return undefined; return buildClientProfiles(base.filter((o: IntelOrder) => o.clientCode === code), refYear, { dormancyMonths, referenceDate: maxDate })[0]; }, [base, code, refYear, dormancyMonths, maxDate]);
+  const clientOrders = useMemo(() => (code ? base.filter((o: IntelOrder) => o.clientCode === code) : []), [base, code]);
+  const p: ClientProfile | undefined = useMemo(() => (code ? buildClientProfiles(clientOrders, refYear, { dormancyMonths, referenceDate: maxDate })[0] : undefined), [clientOrders, code, refYear, dormancyMonths, maxDate]);
+  const sig = useMemo(() => (code ? clientSignal(code, clientOrders, maxDate) : null), [code, clientOrders, maxDate]);
+  const crisk = useMemo(() => collectionRisk(clientOrders), [clientOrders]);
 
   return (
     <div className="grid gap-4 lg:grid-cols-[290px_1fr]">
@@ -253,11 +353,11 @@ function Clients({ profiles, base, refYear, dormancyMonths, maxDate, clientsInde
           {filtered.map((c: any) => (<button key={c.code} type="button" onClick={() => setLocalCode(c.code)} className={`flex w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left text-[13px] ${code === c.code ? "bg-neutral-900 text-white" : "hover:bg-neutral-50"}`}><span className="truncate">{c.name || "(sans nom)"}</span><span className={`shrink-0 text-[11px] ${code === c.code ? "text-neutral-300" : "text-neutral-400"}`}>{c.code}</span></button>))}
         </div>
       </div>
-      {p ? <Client360 p={p} onFilterAll={() => patch({ clientCode: p.code })} /> : <div className={`${card} p-6 text-center text-sm text-neutral-400`}>Sélectionne un client.</div>}
+      {p ? <Client360 p={p} sig={sig} crisk={crisk} onFilterAll={() => patch({ clientCode: p.code })} /> : <div className={`${card} p-6 text-center text-sm text-neutral-400`}>Sélectionne un client.</div>}
     </div>
   );
 }
-function Client360({ p, onFilterAll }: { p: ClientProfile; onFilterAll: () => void }) {
+function Client360({ p, sig, crisk, onFilterAll }: { p: ClientProfile; sig: ClientSignal | null; crisk: number; onFilterAll: () => void }) {
   const [ai, setAi] = useState<string | null>(null); const [loading, setLoading] = useState(false); const [err, setErr] = useState<string | null>(null);
   async function run() {
     setLoading(true); setErr(null);
@@ -284,6 +384,15 @@ function Client360({ p, onFilterAll }: { p: ClientProfile; onFilterAll: () => vo
         {err && <div className="mt-2 text-[12px] text-amber-700">{err}</div>}
         {ai && <div className="mt-2 whitespace-pre-wrap rounded-lg border border-neutral-200 bg-white p-3 text-[13px] leading-relaxed text-neutral-700">{ai}</div>}
       </div>
+
+      {sig && (
+        <div className={`${card} flex flex-wrap items-center gap-x-6 gap-y-1 p-3 text-[12px]`}>
+          <span className="text-[10px] uppercase tracking-wider text-neutral-400">Signaux décision</span>
+          <span>Churn : <strong className={CHURN[sig.churnLevel].c}>{CHURN[sig.churnLevel].l} ({Math.round(sig.churnProb * 100)}%)</strong>{sig.daysSinceLast != null && <span className="text-neutral-400"> · {sig.daysSinceLast}j / attendu ~{sig.expectedGap ?? "?"}j</span>}</span>
+          <span>Prochaine commande : <strong className="text-neutral-800">{sig.nextDate ?? "—"}</strong>{sig.nextAmount != null && <span className="text-neutral-400"> (~{fmt(sig.nextAmount)})</span>}</span>
+          <span>Risque encaissement : <strong className={crisk >= 60 ? "text-rose-600" : crisk >= 30 ? "text-amber-600" : "text-emerald-600"}>{crisk}/100</strong></span>
+        </div>
+      )}
 
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-6">
         <Kpi v={fmt(p.orderCount)} l="Commandes" />

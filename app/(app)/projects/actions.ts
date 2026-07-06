@@ -23,6 +23,7 @@ import { emitEvent } from "@/lib/events";
 import { loadPricingSettings } from "@/lib/pricing-settings";
 import { computeSectionPrice, buildCommercialDescription, computeFreightTotal, buildShippingContainers } from "@/lib/project-pricing";
 import { validityFromPeriod } from "@/lib/freight-validity";
+import { normalizeAdditionalCharges } from "@/lib/logistics";
 import { computeWaitingStatus } from "@/lib/project-dashboard";
 import { saveDocument, type SaveDocumentInput } from "@/app/(app)/documents/new/actions";
 import type { DocumentLine, DocumentContainer, Incoterm } from "@/lib/types";
@@ -670,6 +671,17 @@ export async function enterFreight(formData: FormData): Promise<void> {
   }
   const newTotal = computeFreightTotal(containers);
 
+  // Logistics extras (m146) — Insurance + Additional Charges entered by Ops
+  // during costing. Pushed onto the linked quotation alongside freight.
+  const insurance_cost = Math.max(0, Number(str(formData, "insurance_cost")) || 0);
+  let additional_charges: { label: string; amount: number }[] = [];
+  try {
+    const raw = JSON.parse(str(formData, "charges_json") ?? "[]");
+    if (Array.isArray(raw)) additional_charges = normalizeAdditionalCharges(raw);
+  } catch {
+    additional_charges = [];
+  }
+
   // Validity (m098): explicit date wins, else a period (days) from today.
   const todayISO = now().slice(0, 10);
   let validUntil: string | null = (str(formData, "valid_until") || "").trim() || null;
@@ -708,10 +720,19 @@ export async function enterFreight(formData: FormData): Promise<void> {
     status: "completed" as const,
     completed_by: user?.id ?? null,
     completed_at: now(),
+    insurance_cost,
+    additional_charges,
   };
-  const { error } = existingRow?.id
-    ? await supabase.from("freight_cost_requests").update(patch).eq("id", existingRow.id)
-    : await supabase.from("freight_cost_requests").insert({ project_request_id: projectId, ...patch });
+  const upsert = (p: Record<string, unknown>) =>
+    existingRow?.id
+      ? supabase.from("freight_cost_requests").update(p).eq("id", existingRow.id)
+      : supabase.from("freight_cost_requests").insert({ project_request_id: projectId, ...p });
+  let { error } = await upsert(patch);
+  if (error && /(insurance_cost|additional_charges)/.test(error.message ?? "")) {
+    // m146 not applied yet — persist freight without the extras (graceful).
+    const { insurance_cost: _i, additional_charges: _a, ...base } = patch;
+    ({ error } = await upsert(base));
+  }
   if (error) throw new Error(error.message);
 
   if (isRefresh) {
@@ -730,7 +751,7 @@ export async function enterFreight(formData: FormData): Promise<void> {
     });
     // Auto-refresh ONLY the linked quotation's freight — product lines and
     // pricing are untouched; no project request, no director. (m098)
-    await refreshQuotationFreight(supabase, projectId, containers);
+    await refreshQuotationFreight(supabase, projectId, containers, insurance_cost, additional_charges);
     await emitEvent({
       entity_type: "project_request",
       entity_id: projectId,
@@ -760,7 +781,9 @@ export async function enterFreight(formData: FormData): Promise<void> {
 async function refreshQuotationFreight(
   supabase: ReturnType<typeof createClient>,
   projectId: string,
-  freightContainers: Array<{ type: string; quantity: number; freight_per_unit: number }>
+  freightContainers: Array<{ type: string; quantity: number; freight_per_unit: number }>,
+  insuranceCost: number = 0,
+  additionalCharges: { label: string; amount: number }[] = []
 ): Promise<void> {
   try {
     const { data: pr } = await supabase
@@ -798,7 +821,18 @@ async function refreshQuotationFreight(
       }
     }
     const freightTotal = shipping.reduce((s, c) => s + c.quantity * c.unit_price, 0);
-    await supabase.from("documents").update({ freight_cost: freightTotal }).eq("id", docId);
+    // Push freight + m146 extras. Retry without the extras if m146 isn't
+    // applied yet (freight_cost always exists). NB: like freight, this updates
+    // the shipping columns only — total_price refreshes when Sales re-saves.
+    const docPatch: Record<string, unknown> = {
+      freight_cost: freightTotal,
+      insurance_cost: insuranceCost,
+      additional_charges: additionalCharges,
+    };
+    const up = await supabase.from("documents").update(docPatch).eq("id", docId);
+    if (up.error && /(insurance_cost|additional_charges)/.test(up.error.message ?? "")) {
+      await supabase.from("documents").update({ freight_cost: freightTotal }).eq("id", docId);
+    }
     revalidatePath(`/documents/${docId}`);
   } catch {
     // best-effort
@@ -1236,6 +1270,12 @@ export async function generateQuotationFromProject(formData: FormData): Promise<
     port_of_loading: null,
     port_of_destination: portOfDestination,
     containers: shippingContainers,
+    // m146 — carry Operations' insurance + additional charges onto the quote
+    // (saveDocument folds them into total_price, excluded from commission).
+    insurance_cost: includeFreight ? Number(fr?.insurance_cost) || 0 : 0,
+    additional_charges: includeFreight
+      ? normalizeAdditionalCharges(fr?.additional_charges)
+      : [],
     manual_pricing: true,
     payment_mode: "deposit_balance",
     payment_terms: { deposit_percent: 30, balance_condition: "before_shipment" },

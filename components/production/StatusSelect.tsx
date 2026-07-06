@@ -27,8 +27,8 @@ import { SubmitButton } from "@/components/SubmitButton";
  */
 
 const NEXT_STATES: Record<ProductionOrderStatus, ProductionOrderStatus[]> = {
-  awaiting_deposit: ["deposit_received"],
-  deposit_received: ["production_scheduled", "in_production"],
+  awaiting_deposit: ["in_production", "deposit_received"],
+  deposit_received: ["in_production", "production_scheduled"],
   production_scheduled: ["in_production"],
   in_production: ["production_completed", "production_delayed"],
   production_delayed: ["in_production", "production_completed"],

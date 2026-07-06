@@ -17,6 +17,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
+  buildInvoiceCreateOptions,
   buildInvoiceLineDescription,
   buildMilestonesFromTerms,
   computeDepositAmount,
@@ -252,6 +253,40 @@ test("invoice history: cancelled invoice, no sent_at (pre-m142)", async () => {
     entries.map((e) => e.key),
     ["created", "cancelled"]
   );
+});
+
+// ------------------------------------------------------ create-menu options
+
+test("create options: fresh won deal offers Deposit + Full (+ Custom), not Balance", () => {
+  const opts = buildInvoiceCreateOptions(5_000, [], 30);
+  const by = Object.fromEntries(opts.map((o) => [o.key, o]));
+  assert.equal(by.deposit.enabled, true);
+  assert.equal(by.deposit.amount, 1_500);
+  assert.equal(by.full.enabled, true);
+  assert.equal(by.full.amount, 5_000);
+  assert.equal(by.custom.enabled, true);
+  assert.equal(by.balance.enabled, false); // needs a deposit first
+});
+
+test("create options: after a deposit, Balance opens and Full is blocked", () => {
+  const opts = buildInvoiceCreateOptions(5_000, [inv("deposit", 1_500, "draft", "d")], 30);
+  const by = Object.fromEntries(opts.map((o) => [o.key, o]));
+  assert.equal(by.balance.enabled, true);
+  assert.equal(by.balance.amount, 3_500);
+  assert.equal(by.full.enabled, false); // already has invoices
+  assert.equal(by.deposit.enabled, true); // a 2nd 20%... still ≤ remaining? 1500 ≤ 3500 yes
+});
+
+test("create options: no deposit % → deposit disabled with a clear reason", () => {
+  const opts = buildInvoiceCreateOptions(5_000, [], null);
+  const dep = opts.find((o) => o.key === "deposit")!;
+  assert.equal(dep.enabled, false);
+  assert.match(dep.reason, /no deposit %/i);
+});
+
+test("create options: fully invoiced → everything disabled", () => {
+  const opts = buildInvoiceCreateOptions(5_000, [inv("full", 5_000, "sent", "f")], 30);
+  assert.ok(opts.every((o) => !o.enabled));
 });
 
 // ------------------------------------------------------------- formatting

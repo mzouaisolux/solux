@@ -41,6 +41,12 @@ function fontUrl(filename: string): string {
 export const PDF_FONT_FAMILIES = {
   body: "Armin Grotesk",
   title: "Akzidenz Extended",
+  // CJK face — applied explicitly on any Text that can carry user/DB content
+  // (factory instructions, notes, names…). Armin Grotesk & Akzidenz are
+  // Latin-only, so without this Chinese/Japanese/Korean codepoints map to
+  // .notdef and render as mojibake. Noto Sans SC covers Latin too, so mixed
+  // "AOS PRO Plus 测试" strings render fully in one face.
+  cjk: "Noto Sans SC",
 } as const;
 
 /**
@@ -112,6 +118,31 @@ export function registerPdfFonts() {
         src: fontUrl("Armin_Grotesk_Normal.otf"),
         fontWeight: 300,
       },
+    ],
+  });
+
+  // CJK face — Noto Sans SC (SIL Open Font License, safe to ship). Enables
+  // Chinese/Japanese/Korean in the factory PDF (and every other document that
+  // opts in via `F.cjk`). @react-pdf 3.x does NOT do per-glyph cross-font
+  // fallback (its textkit `fontSubstitution` is a no-op), so components must
+  // set `fontFamily: F.cjk` on the Text that can contain CJK — Noto Sans SC
+  // also carries Latin, so mixed strings render in one face.
+  //
+  // Two faces registered:
+  //   • Regular  → the single weight; @react-pdf nearest-matches 200/600/900
+  //     requests down to it (see `Font.resolve` weight resolution).
+  //   • Italic   → a DISTINCT byte-copy src (see the src-collapse note above).
+  //     Required because @react-pdf throws "Could not resolve font" when a
+  //     `fontStyle: "italic"` run has no italic face (there is NO italic→normal
+  //     fallback). CJK has no true italic; the copy just satisfies resolution.
+  // ⚠ Owner: for production, replace the byte-copy with a proper subset (only
+  // the CJK glyphs actually used) to shrink the ~8 MB source files, or drop the
+  // italic styling on CJK fields so a single face suffices.
+  Font.register({
+    family: PDF_FONT_FAMILIES.cjk,
+    fonts: [
+      { src: fontUrl("NotoSansSC-Regular.otf"), fontWeight: 400 },
+      { src: fontUrl("NotoSansSC-Italic.otf"), fontWeight: 400, fontStyle: "italic" },
     ],
   });
 

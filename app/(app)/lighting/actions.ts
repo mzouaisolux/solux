@@ -13,8 +13,9 @@ import { createClient } from "@/lib/supabase/server";
 import { requireCapability } from "@/lib/permissions";
 import { ATTACHMENTS_BUCKET } from "@/lib/attachments";
 import { extractLightingFromEnergyStudy } from "@/lib/lighting/extract-energy-study";
+import { extractDialux } from "@/lib/lighting/extract-dialux";
 import { normalizeLightingProgram } from "@/lib/lighting/validate";
-import type { LightingExtraction } from "@/lib/lighting/types";
+import type { LightingExtraction, DialuxExtraction } from "@/lib/lighting/types";
 
 export type ExtractEnergyStudyResult =
   | { ok: true; extraction: LightingExtraction }
@@ -58,6 +59,66 @@ export async function extractEnergyStudyAction(
       error:
         e?.message ??
         "Auto-fill failed. Please enter the lighting values manually.",
+    };
+  }
+}
+
+export type ExtractDialuxResult =
+  | { ok: true; extraction: DialuxExtraction }
+  | { ok: false; error: string };
+
+/**
+ * Read the uploaded DIALUX report from Storage and extract the
+ * Production-relevant fields (mounting height, power, optics, CCT,
+ * quantities — one entry per lighting configuration, never merged).
+ * Same pipeline / confidence contract as the Energy Study assist; never
+ * throws to the client — any failure keeps the manual path.
+ */
+export async function extractDialuxAction(
+  formData: FormData
+): Promise<ExtractDialuxResult> {
+  try {
+    await requireCapability("quotation.create");
+
+    const path = String(formData.get("storage_path") ?? "").trim();
+    if (!path) {
+      return { ok: false, error: "Upload the Dialux study first." };
+    }
+    if (/\.zip$/i.test(path)) {
+      return {
+        ok: false,
+        error:
+          "AI analysis reads PDF Dialux reports — upload the PDF export to use the assist (ZIP archives are stored but not parsed).",
+      };
+    }
+
+    const supabase = createClient();
+    const { data, error } = await supabase.storage
+      .from(ATTACHMENTS_BUCKET)
+      .download(path);
+    if (error || !data) {
+      return {
+        ok: false,
+        error: error?.message ?? "Could not read the uploaded Dialux study.",
+      };
+    }
+
+    const bytes = new Uint8Array(await data.arrayBuffer());
+    const extraction = await extractDialux({ pdf: bytes });
+    if (!extraction.configurations.length) {
+      return {
+        ok: false,
+        error:
+          "No lighting configuration could be reliably read from this report. Please enter the values manually.",
+      };
+    }
+    return { ok: true, extraction };
+  } catch (e: any) {
+    return {
+      ok: false,
+      error:
+        e?.message ??
+        "Dialux analysis failed. Please enter the values manually.",
     };
   }
 }

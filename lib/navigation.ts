@@ -151,6 +151,14 @@ export const NAVIGATION: NavCategory[] = [
             visibility: { kind: "capability", capability: "project.create" },
           },
           {
+            // Mirrors the page guard exactly: canAccessOrAdmin(["project.view_overview"])
+            // — supervision roles via the m148 grant, admins via the floor.
+            label: "Service Request Overview",
+            href: "/projects/overview",
+            visibility: { kind: "capabilityOrAdmin", capabilities: ["project.view_overview"] },
+            description: "All requests — status & progress",
+          },
+          {
             label: "New quotation",
             href: "/documents/new",
             visibility: { kind: "capability", capability: "quotation.create" },

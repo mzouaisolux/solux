@@ -1,4 +1,4 @@
-import type { PaymentMode, PaymentTerms } from "./types";
+import type { PaymentMode, PaymentTerms, DocStatus } from "./types";
 
 /**
  * lib/invoicing — PURE computation core for the Deposit & Balance
@@ -40,6 +40,35 @@ export type InvoiceLite = {
 };
 
 export type PaymentLite = { invoice_id?: string; amount: number };
+
+/**
+ * Which commercial documents can be invoiced — the SINGLE source of truth,
+ * used by the server guard AND every UI gate so they can never diverge.
+ *
+ * Owner 2026-07-03: a deposit invoice is a FINANCIAL document; "Won" is a
+ * deliberate COMMERCIAL decision — the two must never be coupled. As soon as
+ * the salesperson has the customer's commercial agreement, a deposit invoice
+ * is legitimate, even while the quotation is still a DRAFT. The app must NEVER
+ * force an artificial "Send" click to unlock invoicing. So every ACTIVE
+ * quotation status is invoiceable (draft / sent / negotiating / won); only
+ * terminal deals (lost / cancelled) and the internal order-confirmation
+ * proforma are excluded.
+ */
+export const INVOICEABLE_DOC_STATUSES: DocStatus[] = [
+  "draft",
+  "sent",
+  "negotiating",
+  "won",
+];
+export function canInvoiceDocument(
+  type: string | null | undefined,
+  status: string | null | undefined
+): boolean {
+  return (
+    type === "quotation" &&
+    INVOICEABLE_DOC_STATUSES.includes(status as DocStatus)
+  );
+}
 
 /** A planned payment milestone derived from the quotation's payment terms. */
 export type PaymentMilestone = {
@@ -88,6 +117,75 @@ export function computeDepositAmount(
   percent: number
 ): number {
   return roundMoney((totalAmount * percent) / 100);
+}
+
+/** One entry of the "+ Create invoice" menu on the quotation page. */
+export type InvoiceCreateOption = {
+  key: "deposit" | "balance" | "full" | "custom";
+  label: string;
+  /** precomputed amount; null for custom (the user enters it) */
+  amount: number | null;
+  enabled: boolean;
+  /** short helper line under the label */
+  reason: string;
+};
+
+/**
+ * The four "Create invoice" options for a deal, with amounts precomputed and
+ * enabled/disabled resolved from the ceiling + the deposit %. Single source
+ * for the header dropdown AND the Invoices section, so both always agree.
+ */
+export function buildInvoiceCreateOptions(
+  totalAmount: number,
+  invoices: InvoiceLite[],
+  depositPercent: number | null
+): InvoiceCreateOption[] {
+  const total = roundMoney(totalAmount);
+  const remaining = computeRemainingToInvoice(total, invoices);
+  const hasActive = invoices.some((i) => i.status !== "cancelled");
+  const depositAmount =
+    depositPercent != null ? computeDepositAmount(total, depositPercent) : null;
+
+  return [
+    {
+      key: "deposit",
+      label: "Deposit Invoice",
+      amount: depositAmount,
+      enabled:
+        depositAmount != null && depositAmount > 0 && depositAmount <= remaining + EPSILON,
+      reason:
+        depositPercent == null
+          ? "No deposit % in the payment terms"
+          : depositAmount != null && depositAmount <= remaining + EPSILON
+            ? `${depositPercent}% of the quotation`
+            : "Exceeds the remaining balance",
+    },
+    {
+      key: "balance",
+      label: "Balance Invoice",
+      amount: remaining,
+      enabled: remaining > 0 && hasActive,
+      reason: !hasActive
+        ? "Create a deposit first"
+        : remaining > 0
+          ? "The remaining balance"
+          : "Nothing left to invoice",
+    },
+    {
+      key: "full",
+      label: "Full Invoice",
+      amount: total,
+      enabled: !hasActive && remaining > 0,
+      reason: hasActive ? "Unavailable — this deal already has invoices" : "The whole amount (100%)",
+    },
+    {
+      key: "custom",
+      label: "Custom Invoice",
+      amount: null,
+      enabled: remaining > 0,
+      reason: remaining > 0 ? "Any amount up to the remaining balance" : "Nothing left to invoice",
+    },
+  ];
 }
 
 /**

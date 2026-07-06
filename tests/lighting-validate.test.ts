@@ -47,16 +47,15 @@ test("validateLightingSetup: a fully filled setup passes", () => {
 
 // --- validateLightingSetup: each required field blocks ---------------------
 
-test("validateLightingSetup: missing Energy Study blocks", () => {
-  const v = validateLightingSetup({ ...completeSetup(), energy_study_path: null });
-  assert.equal(v.ok, false);
-  assert.ok(v.missing.includes("energy_study"));
-});
-
-test("validateLightingSetup: blank Energy Study path blocks", () => {
-  const v = validateLightingSetup({ ...completeSetup(), energy_study_path: "   " });
-  assert.equal(v.ok, false);
-  assert.ok(v.missing.includes("energy_study"));
+test("validateLightingSetup: missing Energy Study does NOT block (owner 2026-07-05 — documents are an aid, never an obligation; manual workflow is first-class)", () => {
+  assert.equal(
+    validateLightingSetup({ ...completeSetup(), energy_study_path: null }).ok,
+    true
+  );
+  assert.equal(
+    validateLightingSetup({ ...completeSetup(), energy_study_path: "   " }).ok,
+    true
+  );
 });
 
 test("validateLightingSetup: missing / non-positive Lighting Power blocks", () => {
@@ -89,7 +88,7 @@ test("validateLightingSetup: missing Approved Optics blocks", () => {
   assert.ok(validateLightingSetup({ ...completeSetup(), approved_optics: "  " }).missing.includes("approved_optics"));
 });
 
-test("validateLightingSetup: a totally empty setup reports every missing field", () => {
+test("validateLightingSetup: a totally empty setup reports every missing field (documents excluded — optional)", () => {
   const v = validateLightingSetup({
     lighting_power: null,
     operating_hours: null,
@@ -100,7 +99,7 @@ test("validateLightingSetup: a totally empty setup reports every missing field",
   assert.equal(v.ok, false);
   assert.deepEqual(
     [...v.missing].sort(),
-    ["approved_optics", "energy_study", "lighting_power", "lighting_program", "operating_hours"].sort()
+    ["approved_optics", "lighting_power", "lighting_program", "operating_hours"].sort()
   );
 });
 
@@ -164,4 +163,62 @@ test("isLightingProgramComplete + totalProgramHours", () => {
     ]),
     10
   );
+});
+
+// --- presence detection (SOLUX detector phases) ----------------------------
+
+test("normalizeLightingProgram: preserves presence-detection metadata", () => {
+  const p = normalizeLightingProgram([
+    {
+      output: 10,
+      duration_hours: 11,
+      presence_detection: true,
+      detection_output: 100,
+      detection_hold_seconds: 40,
+      estimated_detections: 80,
+    },
+  ]);
+  assert.deepEqual(p, [
+    {
+      output: 10,
+      duration_hours: 11,
+      presence_detection: true,
+      detection_output: 100,
+      detection_hold_seconds: 40,
+      estimated_detections: 80,
+    },
+  ]);
+});
+
+test("normalizeLightingProgram: infers presence_detection from detection_output alone", () => {
+  const p = normalizeLightingProgram([
+    { output: 10, duration_hours: 5, detection_output: 100 },
+  ]);
+  assert.equal(p[0].presence_detection, true);
+  assert.equal(p[0].detection_output, 100);
+});
+
+test("normalizeLightingProgram: a plain period carries no presence fields", () => {
+  const p = normalizeLightingProgram([{ output: 100, duration_hours: 5 }]);
+  assert.equal(p[0].presence_detection, undefined);
+  assert.deepEqual(p, [{ output: 100, duration_hours: 5 }]);
+});
+
+test("validateLightingSetup: a presence-detection program is still complete", () => {
+  const v = validateLightingSetup({
+    ...completeSetup(),
+    lighting_program: [
+      { output: 100, duration_hours: 3 },
+      {
+        output: 10,
+        duration_hours: 11,
+        presence_detection: true,
+        detection_output: 100,
+        detection_hold_seconds: 40,
+        estimated_detections: 80,
+      },
+      { output: 100, duration_hours: 2 },
+    ],
+  });
+  assert.equal(v.ok, true);
 });

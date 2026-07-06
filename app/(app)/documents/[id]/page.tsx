@@ -3,7 +3,6 @@ import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import GeneratePdfButton from "./GeneratePdfButton";
 import { StatusBadge } from "@/components/StatusBadge";
-import DocQuickActions from "@/components/DocQuickActions";
 import { Timeline } from "@/components/Timeline";
 import { ForecastPanel } from "@/components/forecast/ForecastPanel";
 import { QuotationVersionsPanel } from "@/components/documents/QuotationVersionsPanel";
@@ -20,7 +19,6 @@ import WorkflowStepper, {
 } from "@/components/WorkflowStepper";
 import { computeProductionDelay } from "@/lib/types";
 import {
-  updateDocumentStatus,
   archiveQuotation,
   unarchiveQuotation,
   deleteQuotation,
@@ -45,7 +43,13 @@ import {
   EventDiscussionPanel,
   parseEventSearchParam,
 } from "@/components/dashboard/EventDiscussionPanel";
-import PaymentScheduleSection from "@/components/invoicing/PaymentScheduleSection";
+import InvoicesPanel from "@/components/invoicing/InvoicesPanel";
+import InvoiceCreateMenu from "@/components/invoicing/InvoiceCreateMenu";
+import QuotationActionBar from "@/components/documents/QuotationActionBar";
+import DocumentNextStep from "@/components/documents/DocumentNextStep";
+import { documentKindLabel } from "@/lib/document-label";
+import { fetchFamilyForDocument } from "@/lib/invoicing-server";
+import { buildInvoiceCreateOptions, canInvoiceDocument } from "@/lib/invoicing";
 import { isTechnicalRole, isAdminLike, canSupervise } from "@/lib/types";
 import { computeMargin, formatDiscount } from "@/lib/pricing";
 import { formatPaymentTerms } from "@/lib/payment";
@@ -56,6 +60,7 @@ import {
   totalFreight,
 } from "@/lib/logistics";
 import type { QuotationPDFData } from "@/components/QuotationPDF";
+import { isCustomPoleConfig } from "@/lib/custom-pole";
 import {
   CUSTOM_OPTION_SENTINEL,
   customValueKey,
@@ -98,7 +103,7 @@ export default async function DocumentViewPage({
   let docWithAttention = await supabase
     .from("documents")
     .select(
-      "id, number, type, date, status, incoterm, freight_type, freight_cost, total_price, manual_pricing, pdf_url, payment_mode, payment_terms, port_of_loading, port_of_destination, production_mode, production_days, production_date, currency, include_sales_conditions, sales_conditions_id, bank_account_id, purchase_order_number, commission_enabled, commission_percentage, commission_amount, commission_description, show_commission_in_pdf, client_id, affair_id, attention_to, warranty_years, offer_validity_products_days, offer_validity_transport_days, forecast_probability, forecast_category, forecast_expected_close_date, forecast_updated_at, archived_at, affair_name, version, root_document_id, clients(company_name, contact_name, email, phone_number, country, client_code, custom_fields), sales_conditions(id, title, content, is_default), bank_accounts(id, account_name, business_account_name, currency, bank_name, bank_address, account_number, swift, is_default)"
+      "id, number, type, date, status, incoterm, freight_type, freight_cost, total_price, manual_pricing, pdf_url, payment_mode, payment_terms, port_of_loading, port_of_destination, production_mode, production_days, production_date, currency, include_sales_conditions, sales_conditions_id, bank_account_id, purchase_order_number, commission_enabled, commission_percentage, commission_amount, commission_description, show_commission_in_pdf, client_id, affair_id, attention_to, warranty_years, offer_validity_products_days, offer_validity_transport_days, forecast_probability, forecast_category, forecast_expected_close_date, forecast_updated_at, archived_at, affair_name, version, root_document_id, insurance_cost, additional_charges, clients(company_name, contact_name, email, phone_number, country, client_code, custom_fields), sales_conditions(id, title, content, is_default), bank_accounts(id, account_name, business_account_name, currency, bank_name, bank_address, account_number, swift, is_default)"
     )
     .eq("id", params.id)
     .maybeSingle();
@@ -362,6 +367,9 @@ export default async function DocumentViewPage({
     configValues: Record<string, unknown> | null
   ): Array<{ field_name: string; value: string }> {
     if (!configValues || typeof configValues !== "object") return [];
+    // Custom pole lines carry a structured spec (line_type/pole_spec) that is
+    // NOT customer config — the description already lives in the line name.
+    if (isCustomPoleConfig(configValues)) return [];
     const allowed = categoryId
       ? allowedFieldsByCategory.get(categoryId)
       : null;
@@ -402,6 +410,10 @@ export default async function DocumentViewPage({
     incoterm: doc.incoterm,
     freight_type: doc.freight_type,
     freight_cost: effectiveFreight,
+    insurance_cost: Number(doc.insurance_cost || 0),
+    additional_charges: Array.isArray(doc.additional_charges)
+      ? doc.additional_charges
+      : [],
     port_of_loading: doc.port_of_loading ?? null,
     port_of_destination: doc.port_of_destination ?? null,
     containers,
@@ -623,6 +635,61 @@ export default async function DocumentViewPage({
     (validation.status !== null ||
       ["draft", "sent", "negotiating"].includes(doc.status));
 
+  // ---- Invoicing (m141) — one fetch, shared by the header + Invoices panel ----
+  const invoiceFamily = await fetchFamilyForDocument(supabase, doc.id);
+  const invoiceDepositPercent =
+    typeof paymentTerms?.deposit_percent === "number" &&
+    paymentTerms.deposit_percent > 0 &&
+    paymentTerms.deposit_percent < 100
+      ? paymentTerms.deposit_percent
+      : null;
+  const invoiceTotal = invoiceFamily
+    ? invoiceFamily.total_amount
+    : Number(doc.total_price) || 0;
+  const invoiceLites = (invoiceFamily?.invoices ?? []).map((i) => ({
+    id: i.id,
+    invoice_type: i.invoice_type,
+    amount: i.amount,
+    status: i.status,
+  }));
+  const invoiceOptions = buildInvoiceCreateOptions(
+    invoiceTotal,
+    invoiceLites,
+    invoiceDepositPercent
+  );
+  const hasActiveInvoices = invoiceLites.some((i) => i.status !== "cancelled");
+  const docCurrency = (doc.currency ?? null) as string | null;
+
+  // Proforma-first "Next step" cockpit (owner 2026-07-03) — behind a runtime
+  // flag so it can be toggled off instantly during the live commercial test
+  // (`DOC_COCKPIT=off`). The guided cockpit replaces the scattered header
+  // actions for the commercial document; the internal order-confirmation
+  // proforma keeps the classic layout.
+  const proformaFirst = process.env.DOC_COCKPIT !== "off";
+  const useCockpit = proformaFirst && (doc as any).type === "quotation";
+
+  // One-line "what's next?" so a first-timer never has to search (redesign #5).
+  const nextAction = (() => {
+    if (doc.archived_at) return null;
+    switch (doc.status) {
+      case "draft":
+        return "finish it, then Mark as sent to the client";
+      case "sent":
+      case "negotiating":
+        return "Mark Won once the client accepts, or revise it";
+      case "won":
+        if (existingTaskList || commandDoc) return "invoice the deal and track production";
+        return hasActiveInvoices
+          ? "send your invoices, or Launch Production"
+          : "Create an invoice, or Launch Production";
+      case "lost":
+      case "cancelled":
+        return "this deal is closed";
+      default:
+        return null;
+    }
+  })();
+
   return (
     <div className="mx-auto max-w-screen-2xl px-6 py-8 space-y-8">
       {/* Freight validity warning (m098) — quotation generated from a project. */}
@@ -656,7 +723,9 @@ export default async function DocumentViewPage({
       )}
       <div className="flex items-start justify-between pb-4 border-b border-neutral-200">
         <div>
-          <div className="eyebrow-brand">{doc.type}</div>
+          <div className="eyebrow-brand">
+            {proformaFirst ? documentKindLabel((doc as any).type) : doc.type}
+          </div>
           {doc.affair_name && (
             <div className="text-lg font-semibold text-neutral-900 mt-1 leading-tight">
               {doc.affair_name}
@@ -692,38 +761,42 @@ export default async function DocumentViewPage({
               </>
             )}
           </p>
-          {/* Primary next-action button — prominent, one-click. */}
-          <div className="mt-4">
-            <DocQuickActions
-              doc={{ id: doc.id, status: doc.status, type: (doc as any).type }}
-              taskList={
-                existingTaskList
-                  ? {
-                      id: existingTaskList.id,
-                      number: existingTaskList.number,
-                    }
-                  : null
-              }
-              command={commandDoc}
-              size="md"
-            />
-          </div>
-          {doc.status === "won" && (doc as any).type === "quotation" && (
-            <p className="mt-2 max-w-md text-xs text-neutral-500">
-              {commandDoc ? (
-                <>
-                  ✓ Production launched — the command (proforma{" "}
-                  {commandDoc.number ?? ""}) and its task list carry the order
-                  from here.
-                </>
-              ) : (
-                <>
-                  Won. Click <b>Launch Production</b> to create the proforma
-                  command and the production task list in one step — you
-                  don&apos;t need to handle the proforma yourself.
-                </>
+          {/* Classic scattered header actions — kept for the flag-off path
+              and the internal order-confirmation proforma. The cockpit
+              (below the header) supersedes these for the commercial doc. */}
+          {!useCockpit && (
+            <>
+              {/* Compact "what's next?" — replaces the yellow work-in-progress
+                  card; the actions themselves are grouped right below. */}
+              {nextAction && (
+                <p className="mt-3 text-[13px] text-neutral-500">
+                  Next: <span className="text-neutral-800">{nextAction}</span>
+                </p>
               )}
-            </p>
+
+              {/* PRIMARY workflow actions — all grouped in the header. */}
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                <QuotationActionBar
+                  doc={{ id: doc.id, status: doc.status, type: (doc as any).type }}
+                  taskList={
+                    existingTaskList
+                      ? { id: existingTaskList.id, number: existingTaskList.number }
+                      : null
+                  }
+                  command={commandDoc}
+                />
+                {canInvoice &&
+                  canInvoiceDocument((doc as any).type, doc.status) && (
+                    <InvoiceCreateMenu
+                      documentId={doc.id}
+                      currency={docCurrency}
+                      options={invoiceOptions}
+                      variant="primary"
+                      label="Create invoice"
+                    />
+                  )}
+              </div>
+            </>
           )}
 
           {/* Sales owner (deal owner) — management-only. Attributes the
@@ -819,8 +892,11 @@ export default async function DocumentViewPage({
           {/* Secondary status transitions — compact, for less-common moves.
               Guards live in updateDocumentStatus + DocStatusActions (audit
               H1/H3): a won quote only offers Cancelled/Lost (no editable
-              revert), and the cancel/lost cascade is confirmed first. */}
-          <DocStatusActions docId={doc.id} current={doc.status} />
+              revert), and the cancel/lost cascade is confirmed first. The
+              cockpit renders its own copy of these in-context. */}
+          {!useCockpit && (
+            <DocStatusActions docId={doc.id} current={doc.status} />
+          )}
         </div>
         <div className="flex flex-col items-end gap-3">
           <Link
@@ -908,69 +984,54 @@ export default async function DocumentViewPage({
         </div>
       </div>
 
-      {/* ---------- Payment Schedule (m141) ----------
-          Deposit & Balance invoicing: one commercial invoice (INV-XXXX)
-          split into legal invoices with unique accounting numbers, all
-          amounts computed from the payment terms. Renders only for a WON
-          quotation / proforma command, or when a family already exists. */}
-      <PaymentScheduleSection
+      {/* ---------- NEXT STEP cockpit (proforma-first, guided) ----------
+          One panel that answers "what do I do next?" — one primary action per
+          status, explicit deposit/balance (decoupled from Won), coaching copy.
+          Supersedes the scattered header actions for the commercial doc. */}
+      {useCockpit && (
+        <DocumentNextStep
+          doc={{
+            id: doc.id,
+            status: doc.status,
+            type: (doc as any).type,
+            number: doc.number,
+          }}
+          taskList={
+            existingTaskList
+              ? { id: existingTaskList.id, number: existingTaskList.number }
+              : null
+          }
+          command={commandDoc}
+          hasProductionOrder={!!existingProductionOrder}
+          canInvoice={canInvoice}
+          invoiceOptions={invoiceOptions}
+          currency={docCurrency}
+          hasActiveInvoices={hasActiveInvoices}
+        />
+      )}
+
+      {/* ---------- INVOICES (m141) — redesigned, workflow-first ----------
+          One obvious place to create + find invoices, tied to THIS
+          commercial document (a proforma is never a prerequisite). */}
+      <InvoicesPanel
         doc={{
           id: doc.id,
           number: doc.number ?? null,
           type: (doc as any).type,
           status: doc.status,
           total_price: Number(doc.total_price) || 0,
-          currency: (doc.currency ?? null) as string | null,
+          currency: docCurrency,
           payment_mode: paymentMode,
           payment_terms: paymentTerms,
         }}
         canInvoice={canInvoice}
+        family={invoiceFamily}
       />
 
-      {/* ---------- DRAFT: work-in-progress (no lifecycle yet) ----------
-          A draft hasn't been sent, so it's not in the order lifecycle.
-          We replace the stepper with a clear resume banner — "Continue
-          editing" reopens the builder in edit-in-place mode; "Mark as
-          sent" officially starts the lifecycle. */}
-      {doc.status === "draft" &&
-      !((doc as any).type === "proforma" && existingTaskList) ? (
-        <section className="panel p-4 border-2 border-amber-300 bg-amber-50/70">
-          <div className="flex items-start justify-between gap-4 flex-wrap">
-            <div className="min-w-0">
-              <div className="eyebrow text-amber-800">
-                Draft · work in progress
-              </div>
-              <p className="text-sm text-amber-900 mt-1 max-w-xl">
-                This {doc.type === "proforma" ? "proforma" : "quotation"}{" "}
-                hasn&apos;t been sent yet, so it isn&apos;t in the order
-                lifecycle. Pick up where you left off, then send it to the
-                client to start the flow{" "}
-                <span className="whitespace-nowrap">
-                  {doc.type === "proforma" ? "Proforma" : "Quotation"} → Won →
-                  Task list → Production → Shipped → Delivered
-                </span>
-                .
-              </p>
-            </div>
-            <div className="flex flex-wrap items-center gap-2 shrink-0">
-              <Link
-                href={`/documents/new?edit=${doc.id}`}
-                className="inline-flex items-center gap-1.5 rounded-md bg-solux px-3.5 py-2 text-sm font-semibold text-white shadow-sm hover:bg-solux-dark"
-              >
-                Continue editing
-              </Link>
-              <form action={updateDocumentStatus}>
-                <input type="hidden" name="id" value={doc.id} />
-                <input type="hidden" name="status" value="sent" />
-                <button className="inline-flex items-center gap-1.5 rounded-md border border-amber-400 bg-white px-3.5 py-2 text-sm font-semibold text-amber-900 hover:bg-amber-100">
-                  Mark as sent →
-                </button>
-              </form>
-            </div>
-          </div>
-        </section>
-      ) : (
-        /* ---------- LIFECYCLE STEPPER (sent and beyond) ---------- */
+      {/* ---------- LIFECYCLE STEPPER (sent and beyond) ----------
+          A draft isn't in the order lifecycle yet — the header's action bar
+          covers "Continue editing / Mark as sent", so no card is needed. */}
+      {doc.status !== "draft" && (
         <section className="panel p-4">
           <div className="flex items-start justify-between gap-3 mb-3 flex-wrap">
             <div>
@@ -1181,6 +1242,8 @@ export default async function DocumentViewPage({
                         string,
                         string
                       >;
+                      // Custom pole spec is shown in the line name, not here.
+                      if (isCustomPoleConfig(cfg)) return null;
                       // Skip side-channel keys, resolve "Custom…" sentinels,
                       // render true/false as Yes/No.
                       const rows = Object.entries(cfg)
@@ -1362,6 +1425,23 @@ export default async function DocumentViewPage({
                 <dd>{Number(doc.commission_amount).toFixed(2)}</dd>
               </div>
             )}
+            {Number(doc.insurance_cost || 0) > 0 && (
+              <div className="flex justify-between">
+                <dt className="text-neutral-500">Insurance</dt>
+                <dd>{Number(doc.insurance_cost).toFixed(2)}</dd>
+              </div>
+            )}
+            {Array.isArray(doc.additional_charges) &&
+              doc.additional_charges
+                .filter((c: any) => Number(c?.amount) > 0)
+                .map((c: any, i: number) => (
+                  <div className="flex justify-between" key={`ac-${i}`}>
+                    <dt className="text-neutral-500">
+                      {c.label || "Additional charge"}
+                    </dt>
+                    <dd>{Number(c.amount).toFixed(2)}</dd>
+                  </div>
+                ))}
             <div className="flex justify-between text-lg font-semibold border-t border-neutral-900 pt-2 mt-2">
               <dt>Grand total</dt>
               <dd>{Number(doc.total_price).toFixed(2)}</dd>
@@ -1386,24 +1466,6 @@ export default async function DocumentViewPage({
           </dl>
         </div>
       </section>
-
-      {/* Invoices mirror — right where the user finishes reading the totals,
-          so they don't scroll back to the top Payment Schedule to invoice
-          or open an invoice. Condensed: rows + View/PDF/Send + remaining. */}
-      <PaymentScheduleSection
-        doc={{
-          id: doc.id,
-          number: doc.number ?? null,
-          type: (doc as any).type,
-          status: doc.status,
-          total_price: Number(doc.total_price) || 0,
-          currency: (doc.currency ?? null) as string | null,
-          payment_mode: paymentMode,
-          payment_terms: paymentTerms,
-        }}
-        canInvoice={canInvoice}
-        variant="summary"
-      />
 
       {bankAccount && (
         <section className="panel p-5">

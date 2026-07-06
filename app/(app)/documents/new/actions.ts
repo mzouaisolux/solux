@@ -10,8 +10,16 @@ import {
   toProductionColumns,
   totalFreight,
   validateProductionTime,
+  shippingExtrasTotal,
+  normalizeAdditionalCharges,
 } from "@/lib/logistics";
 import { commissionAmount } from "@/lib/commission";
+import {
+  parseDocumentNumber,
+  formatDocumentNumber,
+  highestVisibleSeq,
+  isDocumentNumberCollision,
+} from "@/lib/document-number";
 import { requireCapability } from "@/lib/permissions";
 import { emitEvent } from "@/lib/events";
 import type {
@@ -67,6 +75,13 @@ export type SaveDocumentInput = {
   commission_amount: number;
   commission_description: string | null;
   show_commission_in_pdf: boolean;
+  /** Logistics extras (m146). Insurance = a single amount; additional_charges
+   *  = repeatable {label, amount} rows (ECTN, BESC, FERI, inspection…). Both
+   *  optional; added to total_price but NOT to the commission base. Persisted
+   *  via the "newer columns" retry-without fallback so saving works even
+   *  before m146 is applied. */
+  insurance_cost?: number | null;
+  additional_charges?: { label: string; amount: number }[];
   /** Advisory validation (m068): when true, flag the saved quote for a
    *  manager's review (sets it pending + emits the request event). Never
    *  blocks the save; soft-fails if m068 isn't applied. */
@@ -168,7 +183,13 @@ export async function saveDocument(
     enabled: input.commission_enabled,
     percentage: input.commission_percentage,
   });
-  const grand_total = subtotal + commission_amount;
+  // Logistics extras (m146) — insurance + additional charges. Non-commissionable
+  // disbursements: added AFTER commission, never into its base. Normalized here
+  // so the persisted rows and the total agree.
+  const insurance_cost = Number(input.insurance_cost) || 0;
+  const clean_charges = normalizeAdditionalCharges(input.additional_charges);
+  const shipping_extras = shippingExtrasTotal(insurance_cost, clean_charges);
+  const grand_total = subtotal + commission_amount + shipping_extras;
 
   const productionCols = toProductionColumns(input.production_time);
   const legacyFreightType =
@@ -183,7 +204,9 @@ export async function saveDocument(
   const buildLineRows = (docId: string) =>
     input.lines.map((l) => ({
       document_id: docId,
-      product_id: l.product_id,
+      // Coerce "" → null: a custom pole / free-text line has no catalogue
+      // product, and "" is not a valid uuid.
+      product_id: l.product_id || null,
       quantity: l.quantity,
       selected_options: l.selected_options,
       unit_price: l.unit_price,
@@ -309,6 +332,8 @@ export async function saveDocument(
       offer_validity_products_days: input.offer_validity_products_days ?? 30,
       offer_validity_transport_days: input.offer_validity_transport_days ?? 7,
       affair_name: input.affair_name?.trim() || null,
+      insurance_cost,
+      additional_charges: clean_charges,
     };
 
     {
@@ -318,7 +343,7 @@ export async function saveDocument(
         .eq("id", input.edit_of);
       if (
         attempt.error &&
-        /(warranty_years|offer_validity|affair_name)/.test(
+        /(warranty_years|offer_validity|affair_name|insurance_cost|additional_charges)/.test(
           attempt.error.message ?? ""
         )
       ) {
@@ -439,9 +464,10 @@ export async function saveDocument(
     numberRow = data as any;
   }
 
-  // Base insert payload — fields that have always existed.
+  // Base insert payload — fields that have always existed. The `number` is
+  // injected per attempt by insertDocOnce (below) so the collision probe can
+  // retry with a fresh candidate without rebuilding this whole object.
   const baseInsert: Record<string, unknown> = {
-    number: numberRow,
     client_id: input.client_id,
     type: input.type,
     status: "draft",
@@ -493,35 +519,97 @@ export async function saveDocument(
     // still visible.
     version: input.revise_of ? reviseVersion : 1,
     root_document_id: input.revise_of ? reviseRootId : null,
+    // m146 — logistics extras (shares the retry-without fallback below).
+    insurance_cost,
+    additional_charges: clean_charges,
   };
 
-  let inserted: { id: string } | null = null;
-  let insErr: { message: string } | null = null;
-  {
-    const attempt = await supabase
+  // One insert attempt for a candidate number. Encapsulates the "newer
+  // columns" retry (m037 sales terms / m056 affair_name / m076 affair_id /
+  // m134 original_sales_request / m059 versioning / m146 logistics extras may
+  // be unapplied on this env → strip them and retry) so the number-collision
+  // probe below only has to reason about the number.
+  const insertDocOnce = (candidate: string) => {
+    const rich = { ...baseInsert, ...salesTermsInsert, number: candidate };
+    return supabase
       .from("documents")
-      .insert({ ...baseInsert, ...salesTermsInsert })
+      .insert(rich)
       .select("id")
-      .single();
-    if (
-      attempt.error &&
-      /(warranty_years|offer_validity|affair_name|affair_id|version|root_document_id|original_sales_request)/.test(
-        attempt.error.message ?? ""
-      )
-    ) {
-      const fallback = await supabase
-        .from("documents")
-        .insert(baseInsert)
-        .select("id")
-        .single();
-      inserted = fallback.data ?? null;
-      insErr = fallback.error;
-    } else {
-      inserted = attempt.data ?? null;
-      insErr = attempt.error;
+      .single()
+      .then((attempt) => {
+        if (
+          attempt.error &&
+          /(warranty_years|offer_validity|affair_name|affair_id|version|root_document_id|original_sales_request|insurance_cost|additional_charges)/.test(
+            attempt.error.message ?? ""
+          )
+        ) {
+          return supabase
+            .from("documents")
+            .insert({ ...baseInsert, number: candidate })
+            .select("id")
+            .single();
+        }
+        return attempt;
+      });
+  };
+
+  // Insert with a GLOBALLY-unique number. next_client_document_number() runs
+  // under the caller's RLS (SECURITY INVOKER) and only counts documents the rep
+  // can see, so it undercounts when the client's number space already holds
+  // rows created by another rep, or by another client sharing the same 3-letter
+  // code. It then hands back an already-taken sequence and the insert trips the
+  // global UNIQUE(number) constraint (documents_number_key) → previously a 500.
+  //
+  // The index is authoritative regardless of RLS, so treat the RPC value as a
+  // starting guess and probe upward until the insert lands. A revision keeps
+  // its derived "-V{n}" number and is never probed. Root-cause DB fix is
+  // migration 147 (SECURITY DEFINER + prefix-scoped counter); this keeps saving
+  // correct with or without it applied.
+  let inserted: { id: string } | null = null;
+  {
+    let res = await insertDocOnce(numberRow!);
+    const parsed = input.revise_of ? null : parseDocumentNumber(numberRow);
+    if (res.error && parsed && isDocumentNumberCollision(res.error)) {
+      // Jump past the highest sequence we CAN see (fast path for admins / own
+      // docs), then linear-probe (covers RLS-hidden rows). The RPC value just
+      // collided, so start strictly above it and never re-try it.
+      let seq = parsed.seq + 1;
+      try {
+        const { data: seen } = await supabase
+          .from("documents")
+          .select("number")
+          .like("number", `${parsed.prefix}%`);
+        const hi = highestVisibleSeq(
+          parsed.prefix,
+          (seen ?? []).map((r) => (r as { number: string | null }).number)
+        );
+        if (hi != null && hi + 1 > seq) seq = hi + 1;
+      } catch {
+        /* best-effort jump only; the probe below guarantees correctness */
+      }
+      const MAX_PROBES = 200;
+      let probes = 0;
+      for (
+        ;
+        probes < MAX_PROBES && res.error && isDocumentNumberCollision(res.error);
+        probes++
+      ) {
+        numberRow = formatDocumentNumber(parsed.prefix, seq++);
+        res = await insertDocOnce(numberRow);
+      }
+      if (probes > 0) {
+        // Diagnostic: the RPC undercounted (RLS-hidden rows / shared code).
+        // The save still succeeded via the probe; apply m147 to fix at source.
+        console.warn(
+          `[saveDocument] next_client_document_number undercounted for prefix ${parsed.prefix}; ` +
+            `probed ${probes} time(s), allocated ${numberRow}.`
+        );
+      }
     }
+    if (res.error) throw new Error(res.error.message);
+    inserted = res.data ?? null;
   }
-  if (insErr) throw new Error(insErr.message);
+  if (!inserted) throw new Error("Document insert returned no id");
 
   // Same row shape + m139-resilient insert as the edit-in-place path.
   await insertLineRows(inserted!.id);

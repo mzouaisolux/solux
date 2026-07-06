@@ -90,13 +90,13 @@ export function OrderOperationsStrip({
   return (
     <section className="grid grid-cols-2 lg:grid-cols-5 gap-3.5">
       <div className="po-kpi">
-        <div className="k">Initial ETA</div>
+        <div className="k">Committed date</div>
         <div className="val">{fmtLongDate(initialEta)}</div>
-        <div className="sub">Baseline · locked at activation</div>
+        <div className="sub">Baseline · locked at start</div>
       </div>
 
       <div className="po-kpi">
-        <div className="k">Current ETA</div>
+        <div className="k">Estimated finish</div>
         <div className="val">{fmtLongDate(currentEta)}</div>
         <div className="sub">
           {daysToEta == null

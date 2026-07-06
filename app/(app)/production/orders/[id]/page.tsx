@@ -93,6 +93,12 @@ import {
   OrderOperationsStrip,
   type OperationsShippingState,
 } from "@/components/production/OrderOperationsStrip";
+import {
+  NextActionBand,
+  AttentionQueue,
+  naSectionFor,
+} from "@/components/production/OrderCockpitSpine";
+import { computeNextAction } from "@/lib/production-next-action";
 import { DelayTimelineCard } from "@/components/production/DelayTimelineCard";
 import { type StageTone } from "@/components/production/LiveStatusSidebar";
 import { Timeline } from "@/components/Timeline";
@@ -125,7 +131,12 @@ export default async function ProductionOrderDetailPage({
   searchParams,
 }: {
   params: { id: string };
-  searchParams?: { event?: string | string[]; tab?: string };
+  searchParams?: {
+    event?: string | string[];
+    tab?: string;
+    flash?: string;
+    open?: string;
+  };
 }) {
   const supabase = createClient();
   const { userId: currentUserId, effectiveRole } = await getEffectiveRole();
@@ -646,7 +657,13 @@ export default async function ProductionOrderDetailPage({
   }
 
   // ---- Order Documents hub (m099) — rows fetched in the parallel wave. ----
-  const activeTab = searchParams?.tab === "documents" ? "documents" : "overview";
+  // Cockpit deep-linking: `?flash=` drives the loud activation banners,
+  // `?open=` expands a specific work-area editor on arrival (Next-action /
+  // attention-queue CTAs). No more Overview/Documents tab split — one page.
+  const flash =
+    typeof searchParams?.flash === "string" ? searchParams.flash : null;
+  const openParam =
+    typeof searchParams?.open === "string" ? searchParams.open : null;
   const docRows = (((docRowsRes as any).data ?? []) as any[]);
   const docAuditRows = (((docAuditRes as any).data ?? []) as any[]);
   const docUserIds = Array.from(
@@ -728,58 +745,42 @@ export default async function ProductionOrderDetailPage({
     shippingRequirements,
     Object.keys(shippingDocsByKind)
   );
-  const ORDER_TABS: { key: string; label: string }[] = [
-    { key: "overview", label: "Overview" },
-    { key: "documents", label: "Documents" },
-  ];
+  // ---- Cognition spine: the one next action + the ranked attention queue ----
+  // Collapses everything already derived above (payment state, BL completeness,
+  // doc readiness, cash timers, lifecycle status) into "what should I do now?".
+  const ciGenerated =
+    !!shippingDocsByKind["commercial_invoice"] ||
+    !!(order as any).commercial_invoice_number;
+  const na = computeNextAction({
+    status: status as any,
+    paymentState: paymentState as any,
+    productionCanStart,
+    shipmentBooked: !!order.shipment_booked,
+    depositOverrideActive: !!(order as any).deposit_override_at,
+    blStatus,
+    docsAllRequiredReady: docsReadiness.allRequiredReady,
+    docsRequiredReady: docsReadiness.requiredReady,
+    docsRequiredTotal: docsReadiness.requiredTotal,
+    ciGenerated,
+    balanceOutstanding,
+    balanceRemainingLabel: `${currency} ${fmtMoney(liveStatus.balanceRemaining)}`,
+    balanceDueLabel: balanceDue.date ? fmtDate(balanceDue.date) : null,
+    balanceDueDaysLate,
+    daysToEta: liveStatus.daysToEta,
+    balanceReminderDaysBeforeEta:
+      ((order as any).balance_reminder_days_before_eta ?? null) as number | null,
+    lcCritical,
+    lcDaysToExpiry,
+    archived: !!(order as any).archived_at,
+  });
+  const baseHref = `/production/orders/${params.id}`;
+  // The section the primary action edits — used to auto-open its editor in
+  // place. An explicit `?open=` always wins over the suggestion.
+  const openSection = openParam ?? naSectionFor(na.primary?.key);
+  const sectionOpen = (name: string) => openSection === name;
 
   return (
     <div className="po-premium mx-auto max-w-screen-2xl px-6 py-8 space-y-5">
-      {/* ---------- TABS (m099) ---------- */}
-      <div className="po-tabbar">
-        {ORDER_TABS.map((t) => (
-          <Link
-            key={t.key}
-            href={`/production/orders/${params.id}${t.key === "documents" ? "?tab=documents" : ""}`}
-            scroll={false}
-            className={`po-tab ${activeTab === t.key ? "active" : ""}`}
-          >
-            {t.label}
-            {t.key === "documents" && docCount > 0 ? (
-              <span className="po-tab-count">{docCount}</span>
-            ) : null}
-          </Link>
-        ))}
-      </div>
-
-      {activeTab === "documents" ? (
-        <div className="space-y-5">
-          {/* m115 — the export documentation package, ABOVE the free-form
-              hub: this is the operational checklist (Generate CI, upload
-              signed docs); the hub below stays the full folder. */}
-          <ShippingDocumentsCard
-            orderId={params.id}
-            canGenerate={technical}
-            ciNumber={
-              (((order as any).commercial_invoice_number ?? null) as
-                | string
-                | null)
-            }
-            requirements={shippingRequirements}
-            docs={shippingDocsByKind}
-            ciData={ciData}
-            clientName={(order as any).clients?.company_name ?? null}
-            affairName={affairName}
-          />
-          <OrderDocumentsTab
-            orderId={params.id}
-            active={activeDocs}
-            archived={archivedDocs}
-            audit={docAuditView}
-          />
-        </div>
-      ) : (
-      <>
       {/* ---------- HEADER ---------- */}
       <div className="flex items-start justify-between gap-4 flex-wrap">
         <div className="min-w-0">
@@ -913,6 +914,82 @@ export default async function ProductionOrderDetailPage({
         <WorkflowStepper stages={lifecycle} premium />
       </section>
 
+      {/* ---------- ACTIVATION / DEPOSIT FLASH (loud feedback) ----------
+          A production-critical event must never happen silently. When the
+          deposit just started production (redirect from the payment action),
+          land on an explicit confirmation; a short deposit lands on a reason. */}
+      {flash === "production_started" && (
+        <section className="rounded-xl border border-emerald-300 bg-emerald-50 px-5 py-4 flex items-start justify-between gap-4">
+          <div className="flex items-start gap-3 min-w-0">
+            <span className="mt-0.5 inline-grid place-items-center h-6 w-6 rounded-full bg-emerald-600 text-white text-[13px] shrink-0">
+              ✓
+            </span>
+            <div className="min-w-0">
+              <div className="font-semibold text-emerald-900">
+                Production started
+                {(order as any).deposit_override_at
+                  ? " — deposit override"
+                  : " — deposit received"}
+                .
+              </div>
+              <p className="text-sm text-emerald-800 mt-0.5">
+                {order.current_production_deadline ? (
+                  <>
+                    Committed finish{" "}
+                    <b>{fmtDate(order.current_production_deadline)}</b>
+                    {(order as any).production_working_days
+                      ? ` · ${(order as any).production_working_days} working days`
+                      : ""}{" "}
+                    — baseline frozen.
+                  </>
+                ) : (
+                  <>
+                    Set the <b>working days</b> in Production to compute the
+                    committed finish date.
+                  </>
+                )}
+              </p>
+            </div>
+          </div>
+          <Link
+            href={baseHref}
+            className="text-sm text-emerald-800 underline shrink-0"
+          >
+            Dismiss
+          </Link>
+        </section>
+      )}
+      {flash === "deposit_partial" && (
+        <section className="rounded-xl border border-amber-300 bg-amber-50 px-5 py-4 flex items-start justify-between gap-4">
+          <div className="min-w-0">
+            <div className="font-semibold text-amber-900">
+              Deposit recorded — production not started yet.
+            </div>
+            <p className="text-sm text-amber-800 mt-0.5">
+              {currency} {fmtMoney(depositReceived)} of {currency}{" "}
+              {fmtMoney(expectedDeposit)} received. Production starts
+              automatically once the full deposit lands.
+            </p>
+          </div>
+          <Link
+            href={baseHref}
+            className="text-sm text-amber-800 underline shrink-0"
+          >
+            Dismiss
+          </Link>
+        </section>
+      )}
+
+      {/* ---------- COGNITION SPINE — next action + ranked attention queue ----
+          The heart of the cockpit: one hero action + everything else
+          outstanding, ranked. CTAs open the matching editor in place. */}
+      {status !== "cancelled" && (
+        <>
+          <NextActionBand na={na} baseHref={baseHref} />
+          <AttentionQueue na={na} baseHref={baseHref} />
+        </>
+      )}
+
       {/* ---------- TOP OPERATIONAL STRIP (m072) — sticky ----------
           The single most important read on the page: who owes what
           right now? Five cards — initial ETA, current ETA, delay
@@ -932,8 +1009,10 @@ export default async function ProductionOrderDetailPage({
       <div className="space-y-6">
 
       {/* ---------- PRODUCTION (status workflow + baseline) ---------- */}
+      <div id="area-production" className="scroll-mt-24">
       <CollapsibleSection
         title="Production"
+        defaultOpen={sectionOpen("production")}
         attention={status === "production_delayed"}
         attentionLabel="Delayed"
         badge={
@@ -958,7 +1037,7 @@ export default async function ProductionOrderDetailPage({
               value={(order as any).production_working_days ?? "—"}
             />
             <SummaryStat
-              label="Current ETA"
+              label="Estimated finish"
               value={fmtDate(order.current_production_deadline)}
             />
             <SummaryStat
@@ -1251,6 +1330,7 @@ export default async function ProductionOrderDetailPage({
         )}
         </div>
       </CollapsibleSection>
+      </div>
 
       {/* ---------- PRODUCT LIGHTING SETUP (m144) ---------- */}
       {/* Read-only handoff of the lighting config Sales approved at Launch
@@ -1278,7 +1358,7 @@ export default async function ProductionOrderDetailPage({
         summary={
           <SummaryRow>
             <SummaryStat
-              label="Current ETA"
+              label="Estimated finish"
               value={fmtDate(liveStatus.currentEta)}
             />
             <SummaryStat
@@ -1357,8 +1437,10 @@ export default async function ProductionOrderDetailPage({
       </CollapsibleSection>
 
       {/* ---------- PAYMENT ---------- */}
+      <div id="area-payment" className="scroll-mt-24">
       <CollapsibleSection
         title="Payment"
+        defaultOpen={sectionOpen("payment")}
         attention={!productionCanStart && !(order as any).deposit_override_at}
         attentionLabel="Deposit due"
         badge={
@@ -1396,7 +1478,7 @@ export default async function ProductionOrderDetailPage({
               }
             />
             <SummaryStat
-              label="Deposit recv'd"
+              label="Deposit received"
               value={`${currency} ${fmtMoney(depositReceived)}`}
             />
             <SummaryStat
@@ -1762,23 +1844,19 @@ export default async function ProductionOrderDetailPage({
           </form>
         )}
       </CollapsibleSection>
+      </div>
 
       {/* ---------- SHIPPING & LOGISTICS (BL summary + shipment) ----------
           Collapsed state MUST surface the booking blockers (UX directive
           2026-06-12): booking status, BL profile completeness and document
           readiness all show as header pills — the Hazard rail (attention)
           fires when something actually blocks the shipment. */}
+      <div id="area-shipping" className="scroll-mt-24">
       <CollapsibleSection
         title="Shipping & logistics"
-        attention={
-          (status === "production_completed" && !order.shipment_booked) ||
-          (!order.shipment_booked && blStatus !== "complete")
-        }
-        attentionLabel={
-          blStatus !== "complete" && !order.shipment_booked
-            ? "BL profile required"
-            : "Book shipment"
-        }
+        defaultOpen={sectionOpen("shipping")}
+        attention={status === "production_completed" && !order.shipment_booked}
+        attentionLabel="Book shipment"
         badge={
           <>
             {order.shipment_booked ? (
@@ -1786,19 +1864,10 @@ export default async function ProductionOrderDetailPage({
             ) : (
               <PremiumPill variant="line">Not booked</PremiumPill>
             )}
-            {blStatus === "complete" ? (
-              <PremiumPill variant="pos">BL profile complete</PremiumPill>
-            ) : (
-              <PremiumPill variant="ink">
-                {blStatus === "missing"
-                  ? "BL profile missing"
-                  : "BL profile incomplete"}
-              </PremiumPill>
-            )}
             {docsReadiness.allRequiredReady ? (
               <PremiumPill variant="pos">Docs ready</PremiumPill>
             ) : (
-              <PremiumPill variant="ink">
+              <PremiumPill variant="line">
                 Docs {docsReadiness.requiredReady}/{docsReadiness.requiredTotal}
               </PremiumPill>
             )}
@@ -1806,52 +1875,42 @@ export default async function ProductionOrderDetailPage({
         }
         summary={
           <SummaryRow>
+            {/* Booking is an operational fact — NOT gated on the BL. You book
+                the carrier first; the BL is issued only after the vessel sails. */}
             <SummaryStat
               label="Shipment"
               value={
                 order.shipment_booked
                   ? "Booked"
-                  : blStatus === "complete"
-                  ? "Ready for booking"
-                  : "Blocked — BL profile"
+                  : status === "production_completed"
+                  ? "Ready to book"
+                  : "Not started"
               }
-              tone={
-                order.shipment_booked
-                  ? "success"
-                  : blStatus === "complete"
-                  ? "default"
-                  : "danger"
-              }
+              tone={order.shipment_booked ? "success" : "default"}
+            />
+            <SummaryStat label="ETD" value={fmtDate(order.etd)} />
+            <SummaryStat label="ETA" value={fmtDate(order.eta)} />
+            <SummaryStat
+              label="BL number"
+              value={ship.bl_number ?? "After sailing"}
+              tone={ship.bl_number ? "default" : "muted"}
             />
             <SummaryStat
-              label="BL profile"
+              label="Consignee details"
               value={
                 blStatus === "complete"
                   ? "Complete"
                   : blStatus === "partial"
                   ? "Incomplete"
-                  : "Missing"
+                  : "Not set"
               }
-              tone={blStatus === "complete" ? "success" : "warn"}
+              tone={blStatus === "complete" ? "success" : "muted"}
             />
             <SummaryStat
               label="Shipping docs"
-              value={`${docsReadiness.requiredReady}/${docsReadiness.requiredTotal} required ready`}
-              tone={docsReadiness.allRequiredReady ? "success" : "warn"}
+              value={`${docsReadiness.requiredReady}/${docsReadiness.requiredTotal} ready`}
+              tone={docsReadiness.allRequiredReady ? "success" : "muted"}
             />
-            <SummaryStat
-              label="Payment"
-              value={PRODUCTION_PAYMENT_STATE_LABEL[paymentState]}
-              tone={
-                paymentState === "paid_in_full" ||
-                paymentState === "deposit_received" ||
-                paymentState === "no_deposit_required"
-                  ? "success"
-                  : "warn"
-              }
-            />
-            <SummaryStat label="ETD" value={fmtDate(order.etd)} />
-            <SummaryStat label="ETA" value={fmtDate(order.eta)} />
           </SummaryRow>
         }
       >
@@ -1912,6 +1971,9 @@ export default async function ProductionOrderDetailPage({
             <label className="block">
               <span className="label">BL number</span>
               <input name="bl_number" defaultValue={ship.bl_number ?? ""} placeholder="e.g. MEDUXX123456" className="input" />
+              <span className="text-[10px] text-neutral-500 mt-1 block">
+                Issued by the carrier after the vessel sails — leave blank until then.
+              </span>
             </label>
             <label className="block">
               <span className="label">Forwarder</span>
@@ -1997,6 +2059,7 @@ export default async function ProductionOrderDetailPage({
         )}
         </div>
       </CollapsibleSection>
+      </div>
 
       {/* ---------- SHIPPING DOCUMENTS (export documentation package) ----------
           UX directive 2026-06-12: the documents must NOT hide behind the
@@ -2004,8 +2067,10 @@ export default async function ProductionOrderDetailPage({
           logistics — collapsed header shows required/optional readiness,
           open state embeds the SAME components as the tab (checklist with
           Generate CI + the full hub with drag&drop, versions, audit). */}
+      <div id="area-documents" className="scroll-mt-24">
       <CollapsibleSection
         title="Shipping documents"
+        defaultOpen={sectionOpen("documents")}
         attention={
           !docsReadiness.allRequiredReady &&
           (order.shipment_booked ||
@@ -2075,6 +2140,7 @@ export default async function ProductionOrderDetailPage({
           />
         </div>
       </CollapsibleSection>
+      </div>
 
       {/* ---------- ORDER DETAILS (value + configuration) ---------- */}
       <CollapsibleSection
@@ -2190,8 +2256,6 @@ export default async function ProductionOrderDetailPage({
         expectedEntityId={order.id}
         currentUserId={currentUserId ?? null}
       />
-      </>
-      )}
     </div>
   );
 }

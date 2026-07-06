@@ -172,27 +172,18 @@ export function computeNextAction(input: NextActionInput): NextAction {
   }
 
   if (input.status === "production_completed" && !input.shipmentBooked) {
-    if (input.blStatus !== "complete") {
-      c.push({
-        key: "bl",
-        tone: "action",
-        icon: "ti-address-book",
-        title: "Complete the BL profile",
-        detail: "Booking is blocked until consignee / notify details are set.",
-        ctaLabel: "Complete BL profile",
-        weight: W.completeBl,
-      });
-    } else {
-      c.push({
-        key: "book",
-        tone: "action",
-        icon: "ti-ship",
-        title: "Book the shipment",
-        detail: "Production's done and the BL profile is ready. Book a carrier.",
-        ctaLabel: "Book shipment",
-        weight: W.bookShipment,
-      });
-    }
+    // Booking is NOT gated on the BL / consignee profile: you book the carrier
+    // or forwarder FIRST; the BL is issued only after the vessel sails. The
+    // consignee details surface later, via the export-documents step.
+    c.push({
+      key: "book",
+      tone: "action",
+      icon: "ti-ship",
+      title: "Book the shipment",
+      detail: "Production's done — book a carrier / forwarder and set ETD & ETA.",
+      ctaLabel: "Book shipment",
+      weight: W.bookShipment,
+    });
   }
 
   // Export docs: relevant once the goods are (about to be) moving.

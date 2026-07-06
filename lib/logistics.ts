@@ -3,7 +3,7 @@ import {
   type DocumentContainer,
   type ProductionMode,
   type ProductionTime,
-} from "./types";
+} from "./types.ts";
 
 /** Per-row line total: (qty × unit) + wooden box (LCL only, 0 otherwise). */
 export function containerLineTotal(c: DocumentContainer): number {
@@ -15,6 +15,92 @@ export function containerLineTotal(c: DocumentContainer): number {
 
 export function totalFreight(containers: DocumentContainer[]): number {
   return containers.reduce((sum, c) => sum + containerLineTotal(c), 0);
+}
+
+// ---------------------------------------------------------------------------
+// Logistics EXTRAS on top of freight — Insurance + repeatable Additional
+// Charges (ECTN, BESC, FERI, inspection… country-specific international
+// logistics fees). Owner req 2026-07-03. They add to the document total (and
+// so to the invoice ceiling) but are PASS-THROUGH DISBURSEMENTS: excluded
+// from the commission base (owner decision). Pure so both the client form and
+// the server save share one source of truth.
+// ---------------------------------------------------------------------------
+
+/** A repeatable logistics surcharge line: ECTN, BESC, FERI, inspection… */
+export type AdditionalCharge = { label: string; amount: number };
+
+/**
+ * Clean raw charge rows: trim the label, coerce the amount to a non-negative
+ * number, and drop fully-empty rows. Order is preserved. Does NOT enforce a
+ * label — callers that persist decide whether a labelled name is required
+ * (the form/save reject an amount without a name, like client custom fields).
+ */
+export function normalizeAdditionalCharges(
+  raw: ReadonlyArray<{ label?: unknown; amount?: unknown }> | null | undefined
+): AdditionalCharge[] {
+  const out: AdditionalCharge[] = [];
+  for (const r of raw ?? []) {
+    const label = String(r?.label ?? "").trim();
+    const n = Number(r?.amount);
+    const amount = Number.isFinite(n) && n > 0 ? n : 0;
+    if (!label && amount === 0) continue; // fully empty → drop
+    out.push({ label, amount });
+  }
+  return out;
+}
+
+/** Sum of every additional-charge amount. */
+export function totalAdditionalCharges(
+  charges: ReadonlyArray<{ amount?: unknown }> | null | undefined
+): number {
+  return (charges ?? []).reduce((s, c) => s + (Number(c?.amount) || 0), 0);
+}
+
+/**
+ * Total logistics extras added on TOP of freight: insurance + every
+ * additional charge. This is what gets appended to the grand total AFTER
+ * commission (extras are non-commissionable disbursements).
+ */
+export function shippingExtrasTotal(
+  insurance: number | string | null | undefined,
+  charges: ReadonlyArray<{ amount?: unknown }> | null | undefined
+): number {
+  return (Number(insurance) || 0) + totalAdditionalCharges(charges);
+}
+
+/**
+ * Cargo insurance is RATE-driven, never a fixed amount. The user types the rate
+ * in per-mille (‰); the amount is always DERIVED from the insured base
+ * (goods value + transport cost):
+ *
+ *   insurance = (goodsValue + transportCost) × (ratePermille / 1000)
+ *
+ * Examples: 1‰ → ×0.001 · 0.5‰ → ×0.0005 · 2‰ → ×0.002.
+ * Pure, so the form preview, the totals and the server save share one formula.
+ */
+export function insuranceFromRate(
+  insuredBase: number | string | null | undefined,
+  ratePermille: number | string | null | undefined
+): number {
+  const base = Number(insuredBase) || 0;
+  const rate = Number(ratePermille) || 0;
+  if (base <= 0 || rate <= 0) return 0;
+  return (base * rate) / 1000;
+}
+
+/**
+ * Recover the ‰ rate from a stored insurance AMOUNT + its base — used to load a
+ * legacy fixed amount (or an amount pushed up from Operations freight costing)
+ * back into the rate field so old quotes round-trip. 0 when the base is 0.
+ */
+export function insuranceRateFromAmount(
+  amount: number | string | null | undefined,
+  insuredBase: number | string | null | undefined
+): number {
+  const a = Number(amount) || 0;
+  const base = Number(insuredBase) || 0;
+  if (a <= 0 || base <= 0) return 0;
+  return (a / base) * 1000;
 }
 
 /**

@@ -651,6 +651,21 @@ body {
   border: 1px solid var(--sx-line-2); background: #fff; color: var(--sx-ink);
   border-radius: 0;
 }
+
+/* Users always type monetary and numeric values manually (Unit Price,
+   Insurance, Freight, quantities…), so hide the browser number-stepper
+   everywhere: it adds visual noise and causes accidental value changes
+   (scroll / arrow keys) on laptops. Numeric validation, typing, pasting and
+   decimals are all preserved — only the spinner UI is removed. */
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+input[type="number"] {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
 .solux-pro textarea { resize: vertical; min-height: 54px; line-height: 1.5; }
 .solux-pro ::placeholder { color: var(--sx-mute-2); }
 .solux-pro select {
@@ -1030,6 +1045,29 @@ body {
 .solux-pro .ce-vh-sub { font-size:12px; color:var(--sx-mute); margin-top:3px; }
 .solux-pro .ce-vh-meta { font-size:12px; color:var(--sx-mute); white-space:nowrap; text-align:right; line-height:1.5; }
 .solux-pro .ce-vh-meta b { color:var(--sx-ink); font-weight:600; }
+
+/* ---------------------------------------------------------------------
+   Factory Mapping — bulk-edit grid (fm-*). Reuses the ce-cost table +
+   toolbar skeleton; these add the spreadsheet bits: sticky header for
+   100+ row sweeps, in-cell inputs, group rows, range-selection tint.
+   --------------------------------------------------------------------- */
+.solux-pro .fm-wrap { max-height: calc(100vh - 260px); overflow: auto; border:1px solid var(--sx-line); }
+.solux-pro .fm-wrap thead th { position: sticky; top: 0; z-index: 2; }
+.solux-pro table.fm-table tbody td { padding:6px 10px; }
+.solux-pro table.fm-table td.fm-cell { padding:3px 6px; }
+.solux-pro .fm-opt { font-weight:600; color:var(--sx-ink); font-size:12.5px; }
+.solux-pro input.fm-input { width:100%; font-size:12.5px; padding:7px 10px; border:1px solid transparent; background:transparent; }
+.solux-pro input.fm-input:hover { background:#f7f8fa; }
+.solux-pro input.fm-input:focus { outline:none; background:#fff; border-color:var(--sx-ink); }
+.solux-pro input.fm-input.dirty { border-color:var(--sx-amber); background:#fffdf6; }
+.solux-pro input.fm-code { font-variant-numeric:tabular-nums; font-weight:600; }
+.solux-pro td.fm-sel { background:#eef6ff; box-shadow: inset 0 0 0 1px #3b82f6; }
+.solux-pro tr.fm-cat td { background:#f3f4f6; font-weight:800; text-transform:uppercase; font-size:11px; letter-spacing:.05em; color:var(--sx-ink); padding:10px 14px; border-top:1px solid var(--sx-line); }
+.solux-pro tr.fm-field td { background:#fafafa; font-weight:700; font-size:12px; color:var(--sx-ink-soft); padding:8px 14px; border-top:1px solid var(--sx-line); }
+.solux-pro .fm-missing-pill { font-size:10px; font-weight:700; color:var(--sx-amber-deep); background:var(--sx-amber-tint); border:1px solid var(--sx-amber-line); padding:2px 7px; text-transform:uppercase; letter-spacing:.03em; white-space:nowrap; }
+.solux-pro .fm-dirty-note { font-size:10.5px; font-weight:700; color:var(--sx-amber-deep); text-transform:uppercase; letter-spacing:.03em; }
+.solux-pro .fm-copybtn { border:0; background:transparent; cursor:pointer; color:var(--sx-mute); font-size:12px; padding:0 3px; }
+.solux-pro .fm-copybtn:hover { color:var(--sx-ink); }
 
 /* =====================================================================
    Admin — solux-admin-offline.html reconstruction (multi-page)

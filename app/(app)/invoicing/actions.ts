@@ -7,6 +7,7 @@ import type { PaymentMode, PaymentTerms } from "@/lib/types";
 import {
   buildInvoiceLineDescription,
   buildMilestonesFromTerms,
+  canInvoiceDocument,
   computeDepositAmount,
   computePaidForInvoice,
   computeRemainingToInvoice,
@@ -76,13 +77,23 @@ async function fetchSourceDocument(
   return data as unknown as SourceDoc;
 }
 
-/** A won quotation or a proforma command can be invoiced — nothing else. */
+/**
+ * Invoices attach to the commercial document (the proforma) — never to the
+ * internal order-confirmation proforma command. Anchoring to it also
+ * guarantees a single invoice family per deal.
+ *
+ * Owner 2026-07-03 — invoicing is DECOUPLED from "Won" (and from "Send"): a
+ * deposit invoice is a financial document the rep can issue as soon as the
+ * customer has agreed, even while the quotation is still a DRAFT — the app
+ * never forces an artificial "Send". Any ACTIVE quotation is invoiceable; only
+ * lost/cancelled deals and the internal order-confirmation proforma are not.
+ * The rule lives in `canInvoiceDocument` (lib/invoicing) so the server and
+ * every UI gate agree.
+ */
 function assertInvoiceable(doc: SourceDoc): void {
-  const ok =
-    (doc.type === "quotation" && doc.status === "won") || doc.type === "proforma";
-  if (!ok) {
+  if (!canInvoiceDocument(doc.type, doc.status)) {
     throw new Error(
-      "Invoices can only be created from a WON quotation (or its proforma command)."
+      "Only an active quotation can be invoiced — not a lost, cancelled, or internal order-confirmation document."
     );
   }
 }

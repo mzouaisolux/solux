@@ -1,3 +1,4 @@
+import { cache } from "react";
 import { cookies } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
 import {
@@ -19,7 +20,7 @@ export const VIEW_AS_COOKIE = "solux_view_as_role";
  * **This function never reads the View As cookie.** Use it everywhere
  * permission decisions are made — server actions, requireAdmin, etc.
  */
-export async function getCurrentUserRole(): Promise<{
+export const getCurrentUserRole = cache(async function getCurrentUserRole(): Promise<{
   userId: string | null;
   role: Role | null;
   isSuperAdmin: boolean;
@@ -43,7 +44,7 @@ export async function getCurrentUserRole(): Promise<{
   const role: Role | null = isSuperAdmin ? "super_admin" : dbRole;
 
   return { userId: user.id, role, isSuperAdmin };
-}
+});
 
 /**
  * Returns what the UI should render as. For super-admins, honors the
@@ -53,7 +54,7 @@ export async function getCurrentUserRole(): Promise<{
  *
  * **Never use this for permission checks.** It only affects rendering.
  */
-export async function getEffectiveRole(): Promise<{
+export const getEffectiveRole = cache(async function getEffectiveRole(): Promise<{
   userId: string | null;
   realRole: Role | null;
   effectiveRole: Role | null;
@@ -96,7 +97,7 @@ export async function getEffectiveRole(): Promise<{
     isSuperAdmin,
     isSimulating: true,
   };
-}
+});
 
 /**
  * Throws unless the caller has admin-level write access. Accepts both

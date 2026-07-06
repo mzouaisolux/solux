@@ -51,6 +51,9 @@ import { completePlannedAction } from "@/app/(app)/affairs/actions";
 import { markReminderDone } from "@/app/(app)/documents/[id]/reminder-actions";
 import { getT } from "@/lib/i18n/server";
 import type { TFunction } from "@/lib/i18n";
+import { enableQueryProfiling, profStep, profMark } from "@/lib/dash-profile";
+
+enableQueryProfiling(); // TEMP perf: no-op unless DASH_PROFILE is set
 
 export const dynamic = "force-dynamic";
 
@@ -202,6 +205,8 @@ export default async function HomeDashboardPage({
 
   const today = new Date().toISOString().slice(0, 10);
 
+  profMark("LOAD START");
+
   // ---- ONE parallel wave (perf rule from the 2026-06-12 pass) ----
   const [
     actionData,
@@ -213,7 +218,7 @@ export default async function HomeDashboardPage({
     sentDocsRes,
     userRes,
     profileRes,
-  ] = await Promise.all([
+  ] = await profStep("parallel-wave (9 sources)", () => Promise.all([
     getOperationsActions(userId, effectiveRole),
     getNumberSetting(supabase, PREVENTIVE_DAYS_KEY, PREVENTIVE_DAYS_DEFAULT),
     hasUiCapability("quotation.create"),
@@ -242,7 +247,7 @@ export default async function HomeDashboardPage({
       .is("archived_at", null),
     supabase.auth.getUser(),
     supabase.from("user_profiles").select("user_id, display_name").eq("user_id", userId).maybeSingle(),
-  ]);
+  ]));
 
   // Quote FAMILIES: the latest version decides whether a quote is still
   // an active sent one — fetch every doc of the candidate families
@@ -251,24 +256,27 @@ export default async function HomeDashboardPage({
   const roots = [...new Set(sentDocs.map((d) => d.root_document_id ?? d.id))] as string[];
   const familyDocs: any[] = [...sentDocs];
   const seenDocIds = new Set(sentDocs.map((d) => d.id));
-  for (const chunk of chunkByUrlBudget(roots, 6000, 60)) {
-    const list = chunk.join(",");
-    const { data } = await supabase
-      .from("documents")
-      .select(
-        "id, number, status, total_price, currency, date, created_by, sales_owner_id, affair_id, root_document_id, version, archived_at"
-      )
-      .or(`root_document_id.in.(${list}),id.in.(${list})`);
-    for (const d of (data ?? []) as any[]) {
-      if (!seenDocIds.has(d.id)) {
-        seenDocIds.add(d.id);
-        familyDocs.push(d);
+  const chunks = chunkByUrlBudget(roots, 6000, 60);
+  await profStep(`quote-family loop (${chunks.length} sequential chunks, ${roots.length} roots)`, async () => {
+    for (const chunk of chunks) {
+      const list = chunk.join(",");
+      const { data } = await supabase
+        .from("documents")
+        .select(
+          "id, number, status, total_price, currency, date, created_by, sales_owner_id, affair_id, root_document_id, version, archived_at"
+        )
+        .or(`root_document_id.in.(${list}),id.in.(${list})`);
+      for (const d of (data ?? []) as any[]) {
+        if (!seenDocIds.has(d.id)) {
+          seenDocIds.add(d.id);
+          familyDocs.push(d);
+        }
       }
     }
-  }
+  });
 
   // ---- compute the buckets (pure libs) ----
-  const sales = buildSalesItems({
+  const sales = await profStep("buildSalesItems (pure JS)", () => buildSalesItems({
     actions: ((actionsRes.data ?? []) as any[]).filter((a) => a.affairs || a.tenders),
     affairs: (affairsRes.data ?? []) as any[],
     quoteFamilyDocs: familyDocs,
@@ -276,7 +284,9 @@ export default async function HomeDashboardPage({
     today,
     preventiveDays,
     scopeUserId,
-  });
+  }));
+
+  profMark("LOAD END (data ready, rendering)");
 
   // Rule 3 — cross-tab urgency badges (ops = Action Center "urgent").
   const salesCritCount = sales.critical.length;
@@ -344,12 +354,25 @@ export default async function HomeDashboardPage({
             </span>
           )}
           {canCreateQuotation && (
-            <Link
-              href="/documents/new"
-              className="rounded-lg bg-neutral-900 px-3 py-1.5 text-[13px] font-semibold text-white hover:bg-neutral-700"
-            >
-              {t("dashboard.new_quotation")}
-            </Link>
+            <>
+              {/* Client creation is the most frequent sales action — give it a
+                  direct, one-click entry point right beside New quotation
+                  (was menu-only). Deep-links to the F6-proven ?new=1 modal.
+                  Same audience as the quote CTA (sales-oriented roles); other
+                  roles keep the mega-menu path and an uncluttered dashboard. */}
+              <Link
+                href="/clients?new=1"
+                className="rounded-lg border border-neutral-300 bg-white px-3 py-1.5 text-[13px] font-semibold text-neutral-800 hover:bg-neutral-50"
+              >
+                {t("dashboard.new_client")}
+              </Link>
+              <Link
+                href="/documents/new"
+                className="rounded-lg bg-neutral-900 px-3 py-1.5 text-[13px] font-semibold text-white hover:bg-neutral-700"
+              >
+                {t("dashboard.new_quotation")}
+              </Link>
+            </>
           )}
         </div>
       </div>

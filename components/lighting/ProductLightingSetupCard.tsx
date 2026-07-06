@@ -121,7 +121,6 @@ export default async function ProductLightingSetupCard({
           </div>
           <StudyLink
             label="Energy Study"
-            required
             url={energyUrl}
             name={row.energy_study_name}
           />
@@ -145,6 +144,9 @@ export default async function ProductLightingSetupCard({
                 <tr className="bg-neutral-50 text-[11px] uppercase tracking-wide text-neutral-500">
                   <th className="text-left font-semibold px-3 py-2">Output</th>
                   <th className="text-left font-semibold px-3 py-2">Duration</th>
+                  <th className="text-left font-semibold px-3 py-2">
+                    Presence detection
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -153,6 +155,19 @@ export default async function ProductLightingSetupCard({
                     <td className="px-3 py-2 tabular-nums">{p.output}%</td>
                     <td className="px-3 py-2 tabular-nums">
                       {p.duration_hours} h
+                    </td>
+                    <td className="px-3 py-2 text-xs">
+                      {p.presence_detection ? (
+                        <span className="text-amber-700">
+                          ⚡ boost {p.detection_output ?? 100}% ·{" "}
+                          {p.detection_hold_seconds ?? "—"} s
+                          {p.estimated_detections != null
+                            ? ` · ~${p.estimated_detections}/night`
+                            : ""}
+                        </span>
+                      ) : (
+                        <span className="text-neutral-400">—</span>
+                      )}
                     </td>
                   </tr>
                 ))}
@@ -164,10 +179,70 @@ export default async function ProductLightingSetupCard({
         )}
       </div>
 
+      {/* Dialux configurations (AI-extracted at setup, reviewed by Sales) */}
+      {row.ai_extracted?.dialux?.configurations?.length ? (
+        <div className="mt-4">
+          <div className="text-[11px] font-semibold uppercase tracking-wide text-neutral-700 mb-2">
+            Dialux configurations
+          </div>
+          <div className="overflow-x-auto rounded-md border border-neutral-200">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="bg-neutral-50 text-[11px] uppercase tracking-wide text-neutral-500">
+                  <th className="text-left font-semibold px-3 py-2">
+                    Configuration
+                  </th>
+                  <th className="text-left font-semibold px-3 py-2">Power</th>
+                  <th className="text-left font-semibold px-3 py-2">
+                    Mounting height
+                  </th>
+                  <th className="text-left font-semibold px-3 py-2">Optic</th>
+                  <th className="text-left font-semibold px-3 py-2">CCT</th>
+                  <th className="text-left font-semibold px-3 py-2">Qty</th>
+                </tr>
+              </thead>
+              <tbody>
+                {row.ai_extracted.dialux.configurations.map((c, i) => {
+                  const optic = [
+                    c.optic_code,
+                    c.optic_lens_type,
+                    c.optic_beam_distribution,
+                  ]
+                    .filter(Boolean)
+                    .join(" · ");
+                  return (
+                    <tr key={i} className="border-t border-neutral-100">
+                      <td className="px-3 py-2 text-xs text-neutral-600">
+                        {c.label ?? `Configuration ${i + 1}`}
+                      </td>
+                      <td className="px-3 py-2 tabular-nums">
+                        {c.power != null ? `${c.power} W` : "—"}
+                      </td>
+                      <td className="px-3 py-2 tabular-nums">
+                        {c.mounting_height != null
+                          ? `${c.mounting_height} m`
+                          : "—"}
+                      </td>
+                      <td className="px-3 py-2">{optic || "—"}</td>
+                      <td className="px-3 py-2 tabular-nums">
+                        {c.cct != null ? `${c.cct} K` : "—"}
+                      </td>
+                      <td className="px-3 py-2 tabular-nums">
+                        {c.quantity != null ? c.quantity : "—"}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ) : null}
+
       {row.ai_extracted ? (
         <p className="mt-3 text-[11px] text-neutral-400">
-          Some values were pre-filled from the Energy Study by AI and confirmed
-          by Sales.
+          Some values were pre-filled from the technical studies by AI and
+          confirmed by Sales.
         </p>
       ) : null}
     </CollapsibleSection>

@@ -125,6 +125,7 @@ export const fr: Record<string, string> = {
   "dashboard.scope.my": "Mes dossiers",
   "dashboard.scope.all": "Tout",
   "dashboard.new_quotation": "+ Nouveau devis",
+  "dashboard.new_client": "+ Nouveau client",
   "dashboard.bucket.critical": "Critique — à traiter maintenant",
   "dashboard.bucket.due_today": "Pour aujourd'hui",
   "dashboard.bucket.due_today_input": "Pour aujourd'hui — votre action requise",

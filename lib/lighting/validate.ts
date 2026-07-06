@@ -62,6 +62,16 @@ export function normalizeLightingProgram(raw: unknown): LightingProgram {
       output: clamp(outputNum, 0, 100),
       duration_hours: durNum,
     };
+    // Preserve presence-detection metadata (SOLUX detector phases) — kept as a
+    // first-class part of the program so it is never silently flattened.
+    const detOutput = toNum(rec.detection_output);
+    const hasDetection = rec.presence_detection === true || detOutput != null;
+    if (hasDetection) {
+      period.presence_detection = true;
+      period.detection_output = detOutput == null ? 100 : clamp(detOutput, 0, 100);
+      period.detection_hold_seconds = toNum(rec.detection_hold_seconds);
+      period.estimated_detections = toNum(rec.estimated_detections);
+    }
     out.push(period);
   }
   return out;
@@ -83,18 +93,21 @@ export function isLightingProgramComplete(program: LightingProgram): boolean {
 }
 
 /**
- * The launch gate. Required (owner spec): Energy Study uploaded, Lighting Power,
- * Lighting Program, Approved Optics. Operating Hours is also required ("should
- * also be completed") — it drives battery sizing / the factory profile.
+ * The completeness rule. Required: Lighting Power, Lighting Program, Approved
+ * Optics, Operating Hours (drives battery sizing / the factory profile).
+ *
+ * Technical documents are NOT required (owner rule 2026-07-05, supersedes the
+ * original Energy-Study-required spec): some projects create a production
+ * configuration directly, with no Energy Study nor Dialux — "l'analyse IA doit
+ * être une aide, jamais une obligation". Both workflows must be first-class:
+ *   assisted: upload → analyze → validate → production
+ *   manual:   direct entry → production
  */
 export function validateLightingSetup(
   input: LightingSetupInput
 ): LightingValidation {
   const missing: LightingField[] = [];
 
-  if (!input.energy_study_path || !input.energy_study_path.trim()) {
-    missing.push("energy_study");
-  }
   if (!isPositiveNumber(input.lighting_power)) {
     missing.push("lighting_power");
   }

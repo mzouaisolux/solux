@@ -127,6 +127,7 @@ export const en: Record<string, string> = {
   "dashboard.scope.my": "My items",
   "dashboard.scope.all": "All items",
   "dashboard.new_quotation": "+ New quotation",
+  "dashboard.new_client": "+ New client",
   "dashboard.bucket.critical": "Critical — handle now",
   "dashboard.bucket.due_today": "Due today",
   "dashboard.bucket.due_today_input": "Due today — needs your input",

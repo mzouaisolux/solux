@@ -44,11 +44,31 @@ const LIGHTING_TOOL = {
           properties: {
             output: {
               type: "number",
-              description: "Output level as a percentage 0..100 (e.g. 100, 70, 50).",
+              description:
+                "Output level held during this period as a percentage 0..100. For a presence-detection phase this is the LOW baseline (e.g. 10), NOT the boost.",
             },
             duration_hours: {
               type: "number",
               description: "How long that level is held, in hours (e.g. 5, 2).",
+            },
+            presence_detection: {
+              type: ["boolean", "null"],
+              description:
+                "true if a presence/motion DETECTOR governs this phase: the luminaire holds the baseline `output`% and boosts to `detection_output`% for a few seconds on each detection.",
+            },
+            detection_output: {
+              type: ["number", "null"],
+              description: "Boost output % reached on each detection (e.g. 100).",
+            },
+            detection_hold_seconds: {
+              type: ["number", "null"],
+              description:
+                "Seconds the luminaire holds the boost level per detection (e.g. 40).",
+            },
+            estimated_detections: {
+              type: ["number", "null"],
+              description:
+                "Estimated number of detections per night the study assumed (e.g. 80).",
             },
           },
           required: ["output", "duration_hours"],
@@ -70,12 +90,20 @@ const LIGHTING_TOOL = {
 };
 
 const SYSTEM_PROMPT = [
-  "You are a meticulous data-entry engine reading a street/area lighting ENERGY STUDY and transcribing its approved operating parameters into structured fields.",
+  "You are a meticulous data-entry engine reading a street/area lighting ENERGY STUDY (for a SOLUX autonomous solar luminaire) and transcribing its approved operating parameters into structured fields.",
   "Rules:",
   "- Transcribe ONLY what the study states. Do not compute, infer, or round values that are not on the page.",
-  "- lighting_power is the luminaire's nominal power in watts (not the panel/battery wattage).",
+  "- lighting_power is the luminaire's nominal power in watts (the luminaire/LED power, NOT the solar panel or battery wattage). E.g. 'PUISSANCE: 15 W'.",
   "- lighting_program is the dimming schedule: for each period give the output percentage and its duration in hours, in chronological order.",
-  "- operating_hours is the total hours the luminaire runs per night.",
+  "- operating_hours is the total hours the luminaire runs per night (dusk to dawn), i.e. the sum of the period durations.",
+  "",
+  "PRESENCE DETECTOR (critical — do NOT miss this):",
+  "- These luminaires often use a PRESENCE / MOTION DETECTOR ('détecteur de présence', 'détection') on one phase of the night — usually the long middle phase between the first hours after dusk and the last hours before dawn.",
+  "- During that phase the luminaire holds a LOW baseline (e.g. 10%) and BOOSTS to full (e.g. 100%) for a few seconds (e.g. 40s) on each detection; the study estimates a number of detections per night (e.g. 80).",
+  "- For such a period set: output = the baseline % (e.g. 10), presence_detection = true, detection_output = the boost % (e.g. 100), detection_hold_seconds = the hold time (e.g. 40), estimated_detections = the per-night estimate (e.g. 80).",
+  "- NEVER flatten a presence-detection phase to a single fixed level and NEVER drop the detection — it is essential for manufacturing and controller programming.",
+  "- A typical profile: full power for the first hours after dusk → a long presence-detection phase (dimmed baseline + boost on detection) → full power for the last hours before dawn.",
+  "",
   "- If a field is not clearly present, return null (or an empty program) and lower its confidence.",
   "- Numbers must be plain numbers (no units, no thousands separators, dot as decimal).",
   "Call the emit_lighting tool with your result. Do not write prose.",

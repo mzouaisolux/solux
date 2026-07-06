@@ -1,11 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { enterFreight } from "../actions";
 import { toast } from "@/components/feedback/toast-store";
 import { SubmitButton } from "@/components/feedback/ActionForm";
 import { computeFreightTotal } from "@/lib/project-pricing";
+import { insuranceFromRate, insuranceRateFromAmount } from "@/lib/logistics";
 import { validityFromPeriod } from "@/lib/freight-validity";
 import {
   TRANSPORT_MODES,
@@ -30,6 +31,7 @@ const TYPE_LABEL: Record<string, string> = {
  */
 export default function FreightEntryForm({
   projectId,
+  goodsValue,
   packingContainers,
   freightContainers,
   defaults,
@@ -37,6 +39,9 @@ export default function FreightEntryForm({
   completed,
 }: {
   projectId: string;
+  /** Approved product value (product+pole finals × qty). 0 until pricing is
+   *  approved — insurance is finalized on the quotation in that case. */
+  goodsValue: number;
   packingContainers: PackingContainer[];
   freightContainers: FreightContainer[];
   defaults: {
@@ -46,6 +51,8 @@ export default function FreightEntryForm({
     destination_country: string | null;
     notes: string | null;
     valid_until: string | null;
+    insurance_cost: number | null;
+    additional_charges: { label: string; amount: number }[] | null;
   };
   countryFallback: string | null;
   completed: boolean;
@@ -64,6 +71,18 @@ export default function FreightEntryForm({
       return v != null ? String(v) : "";
     })
   );
+  // Insurance is RATE-driven (‰): Ops types ONLY the rate; the amount is
+  // derived = (goods + transport) × rate/1000. A stored amount is converted
+  // back to its equivalent rate once, on mount (see effect below).
+  const [insuranceRate, setInsuranceRate] = useState<string>("");
+  const [charges, setCharges] = useState<{ label: string; amount: number }[]>(
+    Array.isArray(defaults.additional_charges)
+      ? defaults.additional_charges.map((c) => ({
+          label: String(c?.label ?? ""),
+          amount: Number(c?.amount) || 0,
+        }))
+      : []
+  );
 
   const num = (s: string) => Math.max(0, Number((s || "").replace(",", ".")) || 0);
   const money = (n: number) => `$${n.toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
@@ -74,6 +93,24 @@ export default function FreightEntryForm({
     freight_per_unit: num(perUnit[i] ?? ""),
   }));
   const total = computeFreightTotal(lines);
+
+  // Insurance = (approved goods value + transport) × rate‰, derived live.
+  const insuranceBase = (Number(goodsValue) || 0) + total;
+  const insuranceAmount = insuranceFromRate(insuranceBase, insuranceRate);
+  // One-time: convert a stored insurance amount into the equivalent ‰ rate so
+  // an existing freight record round-trips into the rate field.
+  const insHydrated = useRef(false);
+  useEffect(() => {
+    if (insHydrated.current) return;
+    insHydrated.current = true;
+    const amt = Number(defaults.insurance_cost) || 0;
+    if (amt > 0 && insuranceBase > 0) {
+      setInsuranceRate(
+        String(Number(insuranceRateFromAmount(amt, insuranceBase).toFixed(3)))
+      );
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <form
@@ -90,6 +127,8 @@ export default function FreightEntryForm({
     >
       <input type="hidden" name="project_id" value={projectId} />
       <input type="hidden" name="containers_json" value={JSON.stringify(lines)} />
+      <input type="hidden" name="insurance_cost" value={String(insuranceAmount)} />
+      <input type="hidden" name="charges_json" value={JSON.stringify(charges)} />
 
       <div className="grid grid-cols-2 gap-2">
         <label className="block">
@@ -151,6 +190,98 @@ export default function FreightEntryForm({
         <div className="flex items-center justify-between border-t border-neutral-100 bg-neutral-50 px-2 py-1.5 text-sm">
           <span className="text-neutral-500">Total freight</span>
           <span className="font-semibold tabular-nums">{money(total)}</span>
+        </div>
+      </div>
+
+      {/* Insurance + Additional charges (m146). Full-width STACK (not a 2-col
+          grid) so each charge's DESCRIPTION has room — it was unusable when
+          squeezed into half the row next to the amount. */}
+      <div className="space-y-3">
+        <label className="block">
+          <span className="text-[11px] text-neutral-500">Insurance rate (‰)</span>
+          <div className="mt-0.5 flex items-center gap-2">
+            <input
+              type="text"
+              inputMode="decimal"
+              value={insuranceRate}
+              onChange={(e) =>
+                setInsuranceRate(
+                  e.target.value.replace(",", ".").replace(/[^0-9.]/g, "")
+                )
+              }
+              placeholder="e.g. 1"
+              aria-label="Insurance rate in per mille"
+              className="w-20 rounded border px-2 py-1.5 text-sm tabular-nums"
+            />
+            <span className="text-sm text-neutral-500">‰</span>
+            <span className="ml-auto text-[13px] text-neutral-700">
+              = <b className="tabular-nums">{money(insuranceAmount)}</b>
+            </span>
+          </div>
+          <span className="mt-0.5 block text-[10px] leading-snug text-neutral-400">
+            (Goods + Transport) × rate.{" "}
+            {Number(goodsValue) > 0
+              ? "Calculated automatically."
+              : "Goods value applies once pricing is approved — insurance is finalized on the quotation."}
+          </span>
+        </label>
+        <div className="block">
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] text-neutral-500">
+              Additional charges
+            </span>
+            <button
+              type="button"
+              onClick={() => setCharges((cs) => [...cs, { label: "", amount: 0 }])}
+              className="text-[11px] text-solux-dark hover:underline"
+            >
+              + Add (ECTN, BESC…)
+            </button>
+          </div>
+          {charges.map((c, i) => (
+            <div key={i} className="mt-1 flex items-center gap-1">
+              <input
+                type="text"
+                value={c.label}
+                onChange={(e) =>
+                  setCharges((cs) =>
+                    cs.map((x, idx) =>
+                      idx === i ? { ...x, label: e.target.value } : x
+                    )
+                  )
+                }
+                placeholder="Name"
+                className="min-w-0 flex-1 rounded border px-2 py-1 text-sm"
+              />
+              <input
+                type="number"
+                min={0}
+                step="0.01"
+                value={c.amount || ""}
+                onChange={(e) =>
+                  setCharges((cs) =>
+                    cs.map((x, idx) =>
+                      idx === i
+                        ? { ...x, amount: Number(e.target.value) || 0 }
+                        : x
+                    )
+                  )
+                }
+                placeholder="0.00"
+                className="w-20 rounded border px-2 py-1 text-right text-sm tabular-nums"
+              />
+              <button
+                type="button"
+                onClick={() =>
+                  setCharges((cs) => cs.filter((_, idx) => idx !== i))
+                }
+                className="shrink-0 text-neutral-400 hover:text-rose-600"
+                title="Remove"
+              >
+                ✕
+              </button>
+            </div>
+          ))}
         </div>
       </div>
 
