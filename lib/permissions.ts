@@ -29,82 +29,27 @@
  *   - User validates DB state, then we move to 3.B (refactor actions).
  */
 
+import { cache } from "react";
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentUserRole, getEffectiveRole } from "@/lib/auth";
 import { isAdminLike, type Role } from "@/lib/types";
+import type { Capability } from "@/lib/capabilities";
 
 /* ===========================================================================
-   CAPABILITY KEY CATALOG
+   CAPABILITY KEY CATALOG — single source of truth in `lib/capabilities.ts`.
    ===========================================================================
-   The full set of capability keys, mirroring migration 026's seed. The
-   `Capability` type provides autocomplete + compile-time typo catching
-   so a refactored server action can't accidentally check
-   "production_order.cancel" (which doesn't exist) instead of
-   "production_order.edit_status".
+   The `Capability` union is DERIVED from that catalog (not a hand-maintained
+   list here), so `requireCapability()` below can ONLY be called with a
+   catalogued key — and every capability the app enforces appears in the
+   Permissions matrix automatically. Re-exported so existing
+   `import { Capability } from "@/lib/permissions"` call sites keep working.
 
-   When you add a new capability, ALWAYS:
-     1. Add it to the migration (insert into permissions ...).
-     2. Add the matrix rows (insert into role_permissions ...).
-     3. Add the key to this `Capability` union below.
+   To add a capability: add ONE line to `CAPABILITY_CATALOG` in
+   lib/capabilities.ts. No migration needed for it to appear + be toggleable;
+   `npm run check:capabilities` verifies there are no orphans/stale keys.
 */
-
-export type Capability =
-  // quotation
-  | "quotation.create"
-  | "quotation.cancel"
-  | "quotation.archive"
-  | "quotation.delete"
-  // task list
-  | "task_list.validate"
-  | "task_list.reject"
-  | "task_list.archive"
-  | "task_list.delete"
-  | "task_list.sync_orphans"
-  // factory mapping (production configuration tool)
-  | "factory_mapping.access"
-  // production order
-  | "production_order.edit_status"
-  | "production_order.edit_deadline"
-  | "production_order.edit_payments"
-  | "production_order.edit_shipment"
-  | "production_order.set_timeline"
-  | "production_order.start_without_deposit"
-  | "production_order.archive"
-  | "production_order.delete"
-  // forecast
-  | "forecast.view_global"
-  // project requests (m090)
-  | "project.create"
-  | "project.approve"
-  | "project.enter_cost"
-  | "project.enter_logistics"
-  | "project.set_pricing"
-  | "project.generate_quotation"
-  | "project.view_cost"
-  | "project.override_cost"
-  // CRM sandbox (m104)
-  | "prospect.access"
-  // finance
-  | "finance.view"
-  // admin
-  | "admin.manage_permissions"
-  | "admin.manage_users"
-  | "admin.diagnostics"
-  // admin master data (m122 — governance: was hardcoded requireAdmin)
-  | "admin.manage_products"
-  | "admin.manage_categories"
-  | "admin.manage_banks"
-  | "admin.manage_sales_conditions"
-  // pricing (m122 — was requireAdmin / requireAdminOrFinance)
-  | "pricing.manage"
-  | "pricing.manage_costs"
-  // m142 — exemption from the test-phase "hide catalogue prices" flag
-  | "pricing.view_catalogue_prices"
-  // sales & analytics register (m138 — standalone module; seed in a follow-up
-  // matrix migration. Until then admins pass via the anti-lockout floor.)
-  | "sales_analytics.view"
-  | "sales_order.edit"
-  | "sales_client.merge";
+export type { Capability };
+export { ALL_CAPABILITY_KEYS } from "@/lib/capabilities";
 
 /* ===========================================================================
    CACHE
@@ -133,7 +78,7 @@ const CACHE = new Map<Role, CacheEntry>();
  * Fetch the set of enabled capability keys for a role, with caching.
  * Internal helper — callers should use hasCapability() or requireCapability().
  */
-async function loadEnabledCapabilities(role: Role): Promise<Set<string>> {
+const loadEnabledCapabilities = cache(async function loadEnabledCapabilities(role: Role): Promise<Set<string>> {
   const cached = CACHE.get(role);
   if (cached && cached.expiresAt > Date.now()) {
     return cached.enabledSet;
@@ -159,7 +104,7 @@ async function loadEnabledCapabilities(role: Role): Promise<Set<string>> {
   const set = new Set((data ?? []).map((r: any) => r.permission_key));
   CACHE.set(role, { enabledSet: set, expiresAt: Date.now() + CACHE_TTL_MS });
   return set;
-}
+});
 
 /**
  * SECURITY check — uses the REAL role from getCurrentUserRole().

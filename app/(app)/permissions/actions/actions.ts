@@ -6,6 +6,7 @@ import { getCurrentUserRole } from "@/lib/auth";
 import {
   requireCapability,
   clearCapabilityCache,
+  ALL_CAPABILITY_KEYS,
 } from "@/lib/permissions";
 import { emitEvent } from "@/lib/events";
 import { VIEW_AS_ROLES } from "@/lib/types";
@@ -37,12 +38,11 @@ export async function updatePermissionsMatrix(formData: FormData) {
   const supabase = createClient();
   const { userId } = await getCurrentUserRole();
 
-  // 1. Load the full catalog so we know every (role, key) pair to consider.
-  const { data: catalogRows, error: catalogErr } = await supabase
-    .from("permissions")
-    .select("key");
-  if (catalogErr) throw new Error(`Could not load permissions catalog: ${catalogErr.message}`);
-  const allKeys = (catalogRows ?? []).map((r: any) => r.key as string);
+  // 1. The full capability catalog (CODE = single source of truth) → every
+  //    (role, key) pair to persist. No dependency on a DB `permissions` catalog
+  //    table, so a newly-added capability is toggleable here immediately, with
+  //    no migration.
+  const allKeys = ALL_CAPABILITY_KEYS;
 
   // 2. Load current matrix state for diff computation.
   const { data: currentRows, error: currentErr } = await supabase

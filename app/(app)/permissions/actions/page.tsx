@@ -1,95 +1,75 @@
 import { createClient } from "@/lib/supabase/server";
+import { requireCapability, hasUiCapability } from "@/lib/permissions";
 import {
-  requireCapability,
-  hasUiCapability,
-} from "@/lib/permissions";
+  groupCapabilities,
+  ALL_CAPABILITY_KEYS,
+  type CapabilityGroup,
+} from "@/lib/capabilities";
 import { VIEW_AS_ROLES, ROLE_LABEL, type Role } from "@/lib/types";
 import { updatePermissionsMatrix } from "./actions";
 import { SubmitButton } from "@/components/SubmitButton";
 import AccessDenied from "@/components/AccessDenied";
 
 /**
- * Super-admin permissions matrix.
+ * Super-admin permissions matrix — SELF-MAINTAINING.
  *
- * Rows: every capability in the catalog, grouped by category.
- * Columns: the 4 roles (super_admin, admin, task_list_manager, sales).
- * Cells: checkboxes bound to `role_permissions.enabled`.
+ * Rows: EVERY capability in `lib/capabilities.ts` (the single source of truth),
+ * grouped by module (derived from the `module.action` key convention). There is
+ * NO hardcoded capability list or group list on this page — add a capability to
+ * the catalog and it appears here automatically, with zero edits to this file.
+ * Because `requireCapability()` is typed against the SAME catalog, every
+ * capability the app actually enforces is guaranteed to show up.
+ *
+ * Columns: the roles in `VIEW_AS_ROLES`.
+ * Cells: checkboxes bound to `role_permissions.enabled` — the who-has-what
+ * state. A capability with no `role_permissions` row simply renders OFF for
+ * every role until a super-admin enables it (fail-closed).
  *
  * Gating
  * ------
- * Page-level: `requireCapability("admin.manage_permissions")` —
- * non-super-admins hit the error boundary's amber permission panel.
+ * Page-level: `requireCapability("admin.manage_permissions")` — non-super-admins
+ * hit the error boundary's amber permission panel.
  *
  * Save mechanics
  * --------------
- * One single `<form>` POST → `updatePermissionsMatrix` action. The
- * action persists the FULL matrix state (not a diff) so we don't have
- * to track dirty cells client-side. After save:
- *   - The capability cache is cleared in this process for immediate effect.
- *   - A high-severity event is emitted with the cell-level diff.
- *   - Every (app) route is revalidated so capability-gated nav links
- *     and buttons reflect the new state on the next click.
+ * One single `<form>` POST → `updatePermissionsMatrix`. The action persists the
+ * FULL matrix state (walking the catalog × roles product), clears the capability
+ * cache, emits a high-severity audit event, and revalidates every (app) route.
  */
 
-type PermissionRow = {
-  key: string;
-  category: string;
-  label: string;
-  description: string | null;
-  sort_order: number;
-};
-
-type RolePermissionRow = {
-  role: string;
-  permission_key: string;
-  enabled: boolean;
-};
+type Cap = CapabilityGroup["caps"][number];
 
 export default async function PermissionsAdminPage() {
   // Two-layer gate:
-  //  - View-As simulation: redirect early if the EFFECTIVE role can't
-  //    see this page. A super-admin viewing as sales gets bounced to
-  //    /dashboard just like a real sales user would.
-  //  - Security: requireCapability uses the REAL role and throws (caught
-  //    by error.tsx). Belt-and-suspenders.
+  //  - View-As simulation: hide the page if the EFFECTIVE role can't see it.
+  //  - Security: requireCapability uses the REAL role and throws (error.tsx).
   const canSeePage = await hasUiCapability("admin.manage_permissions");
   if (!canSeePage) return <AccessDenied capability="admin.manage_permissions" />;
   await requireCapability("admin.manage_permissions");
 
   const supabase = createClient();
 
-  const [{ data: catalogRows }, { data: matrixRows }] = await Promise.all([
-    supabase
-      .from("permissions")
-      .select("key, category, label, description, sort_order")
-      .order("sort_order"),
-    supabase
-      .from("role_permissions")
-      .select("role, permission_key, enabled"),
-  ]);
+  // ROWS come from the code catalog (self-maintaining); only the checkbox STATE
+  // comes from the DB. No dependency on a DB `permissions` catalog table.
+  const { data: matrixRows } = await supabase
+    .from("role_permissions")
+    .select("role, permission_key, enabled");
 
-  const catalog = (catalogRows ?? []) as PermissionRow[];
-  const matrix = (matrixRows ?? []) as RolePermissionRow[];
+  const groups = groupCapabilities();
+  const totalCaps = ALL_CAPABILITY_KEYS.length;
 
-  // Build a lookup: enabledMap.get("role:key") → boolean
+  // Lookup: enabledMap.get("role:key") → boolean.
   const enabledMap = new Map<string, boolean>();
-  for (const row of matrix) {
-    enabledMap.set(`${row.role}:${row.permission_key}`, row.enabled);
-  }
-
-  // Group capabilities by category, preserving sort_order within each.
-  const grouped = new Map<string, PermissionRow[]>();
-  for (const cap of catalog) {
-    if (!grouped.has(cap.category)) grouped.set(cap.category, []);
-    grouped.get(cap.category)!.push(cap);
+  for (const row of matrixRows ?? []) {
+    enabledMap.set(`${row.role}:${row.permission_key}`, !!row.enabled);
   }
 
   // Per-role tally of enabled capabilities — shown in the column header.
   const enabledCountByRole = new Map<string, number>();
   for (const role of VIEW_AS_ROLES) {
     let c = 0;
-    for (const cap of catalog) {
-      if (enabledMap.get(`${role}:${cap.key}`)) c++;
+    for (const key of ALL_CAPABILITY_KEYS) {
+      if (enabledMap.get(`${role}:${key}`)) c++;
     }
     enabledCountByRole.set(role, c);
   }
@@ -108,10 +88,13 @@ export default async function PermissionsAdminPage() {
           </p>
 
           <div className="ad-callout">
-            <b>Heads up</b> · changing the matrix is logged as a critical event. Disabling{" "}
-            <code>admin.manage_permissions</code> for super-admin would lock you out of this page — use
-            with care. Sales rows for production capabilities are intentionally off to enforce the
-            operational separation.
+            <b>Self-maintaining</b> · this matrix is built from the capability catalog
+            (<code>lib/capabilities.ts</code>), the single source of truth that also types{" "}
+            <code>requireCapability()</code>. All <b>{totalCaps}</b> capabilities across{" "}
+            <b>{groups.length}</b> modules are listed automatically — add a new capability and it
+            shows up here with no edit to this page. Changing the matrix is logged as a critical
+            event; disabling <code>admin.manage_permissions</code> for super-admin is force-kept on
+            to avoid a lock-out.
           </div>
 
           {/* MATRIX FORM */}
@@ -129,15 +112,15 @@ export default async function PermissionsAdminPage() {
                       <th key={role} className="role">
                         {ROLE_LABEL[role]}
                         <span className="ct">
-                          {enabledCountByRole.get(role) ?? 0} / {catalog.length}
+                          {enabledCountByRole.get(role) ?? 0} / {totalCaps}
                         </span>
                       </th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
-                  {Array.from(grouped.entries()).map(([category, caps]) => (
-                    <CategoryGroup key={category} category={category} caps={caps} enabledMap={enabledMap} />
+                  {groups.map((group) => (
+                    <CategoryGroup key={group.moduleId} group={group} enabledMap={enabledMap} />
                   ))}
                 </tbody>
               </table>
@@ -158,25 +141,34 @@ export default async function PermissionsAdminPage() {
 }
 
 /**
- * One category section — renders a sub-header row + N capability rows.
- * Visually compact: the category label is in a tinted strip above
- * the first capability row.
+ * One module section — a tinted sub-header strip + its capability rows.
+ * The module label is derived from the key convention, not hardcoded here.
  */
 function CategoryGroup({
-  category,
-  caps,
+  group,
   enabledMap,
 }: {
-  category: string;
-  caps: PermissionRow[];
+  group: CapabilityGroup;
   enabledMap: Map<string, boolean>;
 }) {
   return (
     <>
       <tr className="catrow">
-        <td colSpan={1 + VIEW_AS_ROLES.length}>{category}</td>
+        <td colSpan={1 + VIEW_AS_ROLES.length}>
+          {group.label}
+          <span
+            style={{
+              marginLeft: 8,
+              fontWeight: 400,
+              opacity: 0.6,
+              fontSize: "0.8em",
+            }}
+          >
+            {group.caps.length}
+          </span>
+        </td>
       </tr>
-      {caps.map((cap) => (
+      {group.caps.map((cap) => (
         <CapabilityRow key={cap.key} cap={cap} enabledMap={enabledMap} />
       ))}
     </>
@@ -184,14 +176,14 @@ function CategoryGroup({
 }
 
 /**
- * One capability row — label + description (in a hover title) + 4
- * checkboxes named `cap[<role>:<key>]`.
+ * One capability row — human label + technical key (smaller) + one checkbox
+ * per role.
  */
 function CapabilityRow({
   cap,
   enabledMap,
 }: {
-  cap: PermissionRow;
+  cap: Cap;
   enabledMap: Map<string, boolean>;
 }) {
   return (
@@ -213,12 +205,8 @@ function CapabilityRow({
 }
 
 /**
- * The actual checkbox. We rely on native form semantics:
- *   - Checked = present in formData (action enables it)
- *   - Unchecked = absent (action disables it)
- *
- * No client state — the form submits the current DOM state of all
- * checkboxes. Defaults are pulled from the DB on the server render.
+ * The actual checkbox. Native form semantics: checked = present in formData
+ * (enable), unchecked = absent (disable). No client state.
  */
 function Checkbox({
   role,
@@ -241,9 +229,7 @@ function Checkbox({
       defaultChecked={locked ? true : enabled}
       disabled={locked}
       title={
-        locked
-          ? "Always on — protects super-admin access to this page"
-          : undefined
+        locked ? "Always on — protects super-admin access to this page" : undefined
       }
     />
   );

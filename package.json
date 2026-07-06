@@ -11,6 +11,7 @@
     "e2e:bootstrap": "node --env-file=.env.e2e --experimental-strip-types e2e/auth/bootstrap.ts",
     "e2e:regression": "node --env-file=.env.e2e --experimental-strip-types e2e/audit/regression.ts",
     "check:schema": "node --experimental-strip-types e2e/audit/schema-check.ts",
+    "check:capabilities": "node --experimental-strip-types e2e/audit/capabilities-check.ts",
     "gen:types": "npx supabase@latest gen types typescript --project-id brqhcqaagzfiozzamzon --schema public > lib/database.types.ts",
     "db:migrate": "node --env-file=.env.local --env-file=.env.e2e --experimental-strip-types scripts/migrate.ts",
     "import:sales": "node --env-file=.env.local --experimental-strip-types scripts/import-sales-history.ts",
