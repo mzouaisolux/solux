@@ -198,6 +198,21 @@ export const EVENT_HELP: Record<EventType, EventHelp> = {
     why: "Sales must revise the offer before resubmitting it.",
     recipients: ["Sales"],
   },
+  "doc.shipping_update_requested": {
+    when: "Sales asks Operations to refresh the transport cost of a document.",
+    why: "Operations must quote the freight again before the offer goes out.",
+    recipients: ["Operations"],
+  },
+  "doc.shipping_update_completed": {
+    when: "Operations enters the new freight and completes the request.",
+    why: "The requester gets the refreshed shipping cost on their document.",
+    recipients: ["Sales"],
+  },
+  "doc.shipping_update_cancelled": {
+    when: "A shipping update request is withdrawn or declined.",
+    why: "Keeps the document timeline honest about abandoned refreshes.",
+    recipients: ["Sales"],
+  },
 
   // ---------------------------------------------------------------- client
   "client.created": {

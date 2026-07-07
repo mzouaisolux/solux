@@ -11,7 +11,15 @@ import { createClient } from "@/lib/supabase/server";
 import { resolveUserLabelStrings } from "@/lib/user-display";
 import { listAssignableOwners } from "@/lib/owner";
 import { getCurrentUserRole } from "@/lib/auth";
+import { hasUiCapability } from "@/lib/permissions";
 import { isTechnicalRole } from "@/lib/types";
+import { loadShippingStatuses } from "@/lib/shipping-status-server";
+import { getNumberSetting } from "@/lib/app-settings";
+import {
+  FRESHNESS_WARN_DAYS_KEY,
+  FRESHNESS_CRITICAL_DAYS_KEY,
+  FRESHNESS_DEFAULTS,
+} from "@/lib/shipping-update";
 import {
   groupIntoAffairs,
   buildAffairFiles,
@@ -336,11 +344,28 @@ export default async function AffairDetailPage({ params }: { params: { id: strin
     invoiceFamilies = [];
   }
 
+  // Shipping status per quotation — one batch load for the whole affair, so
+  // the freight-freshness badge + Request Shipping Update action sit right on
+  // each version in the deal workspace.
+  const [shippingWarn, shippingCritical, canRequestShipping] = await Promise.all([
+    getNumberSetting(supabase, FRESHNESS_WARN_DAYS_KEY, FRESHNESS_DEFAULTS.warnDays),
+    getNumberSetting(supabase, FRESHNESS_CRITICAL_DAYS_KEY, FRESHNESS_DEFAULTS.criticalDays),
+    hasUiCapability("shipping.request_update"),
+  ]);
+  const shippingStatusMap = await loadShippingStatuses(
+    supabase,
+    group.documents.map((d) => d.id)
+  );
+  const shippingStatuses = Object.fromEntries(shippingStatusMap);
+
   return (
     <AffairDetail
       affair={group}
       affairId={id}
       clientName={clientName}
+      shippingStatuses={shippingStatuses}
+      canRequestShipping={canRequestShipping}
+      freshnessThresholds={{ warnDays: shippingWarn, criticalDays: shippingCritical }}
       owners={owners}
       canAssignOwner={canAssignOwner}
       assignableDocs={assignableDocs}

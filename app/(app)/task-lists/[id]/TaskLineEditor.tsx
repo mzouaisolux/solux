@@ -685,6 +685,21 @@ export default function TaskLineEditor({
     [technicalFields, technical]
   );
 
+  // Battery Cell Type (production-only) — the manufacturing cell technology the
+  // TLM selects from Factory Mapping. Stored in technical_values so it stays
+  // INVISIBLE to sales, saves with the task list, and auto-appears on the
+  // factory PDF (technical refs — via exportData's raw-key fallback). Shown
+  // only for battery-bearing catalogue products (not manual items).
+  const BATTERY_CELL_KEY = "Battery Cell Type";
+  const BATTERY_CELL_OPTIONS = ["32700", "26650", "18650", "G2W"];
+  // Gate on `technicalEditable` (= technical role: TLM / operations / admin) so
+  // the field is strictly INVISIBLE to sales — not merely read-only. Only for
+  // battery-bearing catalogue lines.
+  const showBatteryCell =
+    technicalEditable &&
+    !isManual &&
+    salesFields.some((f) => /batter/i.test(f.field_name));
+
   return (
     <div className="panel p-4 space-y-5">
       {/* Header: line + quantity (mockup .cfg-line) */}
@@ -1224,7 +1239,7 @@ export default function TaskLineEditor({
       )}
 
       {/* ---------- TECHNICAL SECTION (TLM-curated fields) ---------- */}
-      {technicalFields.length > 0 && (
+      {(technicalFields.length > 0 || showBatteryCell) && (
         <section className="rounded-lg border border-amber-300 bg-amber-50/40 p-4 space-y-3">
           <div className="flex items-start justify-between gap-3">
             <div>
@@ -1248,6 +1263,42 @@ export default function TaskLineEditor({
                 technicalEditable ? "" : "opacity-60 pointer-events-none"
               }`}
             >
+              {/* Battery Cell Type — production-only manufacturing spec chosen
+                  from Factory Mapping. Sits with the battery configuration,
+                  hidden from sales, saved on the task list + printed on the
+                  factory documents. */}
+              {showBatteryCell && (
+                <div>
+                  <label
+                    htmlFor={`batt-cell-${lineId}`}
+                    className="block text-[11px] font-semibold uppercase tracking-widerx text-neutral-600 mb-1"
+                  >
+                    Battery Cell Type
+                  </label>
+                  <select
+                    id={`batt-cell-${lineId}`}
+                    value={technical[BATTERY_CELL_KEY] ?? ""}
+                    disabled={!technicalEditable}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      setTechnical((prev) => ({ ...prev, [BATTERY_CELL_KEY]: v }));
+                      setIsTechDirty(true);
+                    }}
+                    className="w-full max-w-[240px] rounded-md border border-neutral-300 bg-white px-3 py-1.5 text-sm disabled:bg-neutral-50"
+                  >
+                    <option value="">— select —</option>
+                    {BATTERY_CELL_OPTIONS.map((o) => (
+                      <option key={o} value={o}>
+                        {o}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="text-[10px] text-neutral-500 mt-1">
+                    Manufacturing cell technology — saved with the task list and
+                    printed on the factory documents. Not visible to sales.
+                  </p>
+                </div>
+              )}
               {technicalFields.map((f) => (
                 <ConfigFieldInput
                   key={f.id}

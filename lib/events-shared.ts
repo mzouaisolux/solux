@@ -130,6 +130,10 @@ export type EventType =
   | "doc.validation_requested"
   | "doc.validation_approved"
   | "doc.validation_rejected"
+  // shipping rate refresh (m149) — doc-centric freight update loop
+  | "doc.shipping_update_requested"
+  | "doc.shipping_update_completed"
+  | "doc.shipping_update_cancelled"
   // client events
   | "client.created"
   | "client.updated"
@@ -195,6 +199,9 @@ export const ACTIONABLE_MEDIUM_EVENTS: ReadonlySet<EventType> = new Set<EventTyp
   "pr.freight_entered", // → director
   "pr.freight_update_requested", // → operations
   "pr.freight_updated", // → sales
+  // Shipping rate refresh (m149) — same handoff logic, doc-centric
+  "doc.shipping_update_requested", // → operations
+  "doc.shipping_update_completed", // → sales (requester)
   "pr.ready_for_pricing", // → director
   "pr.priced", // → sales
   "pr.quotation_generated", // → sales
@@ -384,6 +391,9 @@ export function eventTypeLabel(t: EventType): string {
     "doc.validation_requested": "Validation requested",
     "doc.validation_approved": "Validation approved",
     "doc.validation_rejected": "Changes requested",
+    "doc.shipping_update_requested": "Shipping update requested",
+    "doc.shipping_update_completed": "Shipping quotation updated",
+    "doc.shipping_update_cancelled": "Shipping update cancelled",
     "client.created": "Client created",
     "client.updated": "Client details updated",
     "client.deleted": "Client deleted",

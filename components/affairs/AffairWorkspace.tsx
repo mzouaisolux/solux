@@ -13,9 +13,19 @@
 
 import Link from "next/link";
 import type { AffairGroup } from "@/lib/affairs-prototype";
+import type { ShippingStatusLite } from "@/lib/shipping-status-server";
+import type { FreshnessThresholds } from "@/lib/shipping-update";
 import { fmtDate } from "@/components/affairs/badges";
 import { AffairProgressStrip } from "@/components/affairs/AffairProgressStrip";
 import { AffairQuotations } from "@/components/affairs/AffairQuotations";
+
+/** Shipping status bundle threaded from the server page to the quotation list. */
+export type ShippingWorkspaceProps = {
+  clientName: string;
+  shippingStatuses: Record<string, ShippingStatusLite>;
+  canRequestShipping: boolean;
+  freshnessThresholds: FreshnessThresholds;
+};
 import { AffairDocumentsCard } from "@/components/affairs/AffairDocumentsCard";
 import { AffairActionsCard, type PlannedActionRow } from "@/components/affairs/AffairActionsCard";
 import type { AssignableDoc } from "@/components/affairs/AssignDocumentPanel";
@@ -33,6 +43,10 @@ export function AffairWorkspace({
   affairId,
   assignableDocs = [],
   plannedActions,
+  clientName,
+  shippingStatuses,
+  canRequestShipping,
+  freshnessThresholds,
 }: {
   affair: AffairGroup;
   affairId: string;
@@ -40,7 +54,7 @@ export function AffairWorkspace({
   /** CRM step 4 (m103). Omitted (undefined/null) in the client-hub inline
    *  expansion and pre-migration — the card simply doesn't render. */
   plannedActions?: PlannedActionRow[] | null;
-}) {
+} & Partial<ShippingWorkspaceProps>) {
   const fileDocId = affair.latest?.id ?? affair.documents[0]?.id ?? null;
 
   return (
@@ -54,7 +68,14 @@ export function AffairWorkspace({
       <AffairProgressStrip affair={affair} />
 
       {/* 2. Quotations — the primary deal surface. */}
-      <AffairQuotations affair={affair} affairId={affairId} />
+      <AffairQuotations
+        affair={affair}
+        affairId={affairId}
+        clientName={clientName}
+        shippingStatuses={shippingStatuses}
+        canRequestShipping={canRequestShipping}
+        freshnessThresholds={freshnessThresholds}
+      />
 
       {/* 3. Conversation — preview + count + open. */}
       <section>

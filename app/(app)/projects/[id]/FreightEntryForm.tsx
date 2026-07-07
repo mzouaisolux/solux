@@ -94,9 +94,10 @@ export default function FreightEntryForm({
   }));
   const total = computeFreightTotal(lines);
 
-  // Insurance = (approved goods value + transport) × rate‰, derived live.
-  const insuranceBase = (Number(goodsValue) || 0) + total;
-  const insuranceAmount = insuranceFromRate(insuranceBase, insuranceRate);
+  // Insurance = Product Value × 1.10 × rate‰ — PRODUCTS ONLY (freight EXCLUDED
+  // per the business rule; goodsValue = approved product+pole value × qty).
+  const productValue = Number(goodsValue) || 0;
+  const insuranceAmount = insuranceFromRate(productValue, insuranceRate);
   // One-time: convert a stored insurance amount into the equivalent ‰ rate so
   // an existing freight record round-trips into the rate field.
   const insHydrated = useRef(false);
@@ -104,9 +105,9 @@ export default function FreightEntryForm({
     if (insHydrated.current) return;
     insHydrated.current = true;
     const amt = Number(defaults.insurance_cost) || 0;
-    if (amt > 0 && insuranceBase > 0) {
+    if (amt > 0 && productValue > 0) {
       setInsuranceRate(
-        String(Number(insuranceRateFromAmount(amt, insuranceBase).toFixed(3)))
+        String(Number(insuranceRateFromAmount(amt, productValue).toFixed(3)))
       );
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -219,10 +220,10 @@ export default function FreightEntryForm({
             </span>
           </div>
           <span className="mt-0.5 block text-[10px] leading-snug text-neutral-400">
-            (Goods + Transport) × rate.{" "}
+            Product value × 110% × rate (freight excluded).{" "}
             {Number(goodsValue) > 0
               ? "Calculated automatically."
-              : "Goods value applies once pricing is approved — insurance is finalized on the quotation."}
+              : "Product value applies once pricing is approved — insurance is finalized on the quotation."}
           </span>
         </label>
         <div className="block">

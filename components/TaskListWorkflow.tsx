@@ -483,7 +483,7 @@ export default function TaskListWorkflowActions({
       return (
         <p className="text-xs text-emerald-700">
           Production ready. The production team can now generate the
-          factory PDF.
+          production dossier PDF.
         </p>
       );
     }
@@ -492,8 +492,8 @@ export default function TaskListWorkflowActions({
         {workflowModals}
         <div className="space-y-2">
           <p className="text-xs text-emerald-700">
-            Ready for factory release. Use the <b>Factory PDF</b> button at
-            the top to generate the final production document.
+            Ready for factory release. Use <b>Generate Production PDF</b>{" "}
+            just below to produce the complete production dossier.
           </p>
           {capNote}
           <div className="flex flex-wrap items-center gap-2">

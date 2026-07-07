@@ -13,7 +13,7 @@ import {
   affairAccent,
   affairPhaseLabel,
 } from "@/components/affairs/AffairProgressStrip";
-import { AffairWorkspace } from "@/components/affairs/AffairWorkspace";
+import { AffairWorkspace, type ShippingWorkspaceProps } from "@/components/affairs/AffairWorkspace";
 import {
   AffairInvoicesCard,
   type AffairInvoiceFamily,
@@ -65,6 +65,9 @@ export function AffairDetail({
   source,
   plannedActions,
   tenderOrigin,
+  shippingStatuses,
+  canRequestShipping,
+  freshnessThresholds,
 }: {
   affair: AffairGroup;
   affairId: string;
@@ -80,7 +83,7 @@ export function AffairDetail({
   plannedActions?: PlannedActionRow[] | null;
   /** m109 — tender origin (banner + inherited documents). */
   tenderOrigin?: TenderOrigin | null;
-}) {
+} & Partial<ShippingWorkspaceProps>) {
   const accent = affairAccent(affair);
   const value = affair.totalValue ? formatMoney(affair.totalValue, affair.currency) : "";
   const phaseLabel = affairPhaseLabel(affair);
@@ -235,6 +238,10 @@ export function AffairDetail({
           affairId={affairId}
           assignableDocs={assignableDocs}
           plannedActions={plannedActions}
+          clientName={clientName}
+          shippingStatuses={shippingStatuses}
+          canRequestShipping={canRequestShipping}
+          freshnessThresholds={freshnessThresholds}
         />
 
         {invoiceFamilies.length > 0 && (

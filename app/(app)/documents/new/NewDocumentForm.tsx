@@ -490,9 +490,10 @@ export default function NewDocumentForm({
     enabled: commissionEnabled,
     percentage: commissionPercentage,
   });
-  // Insurance = (goods + transport) × rate‰ — always DERIVED, recomputed live
-  // whenever items, freight OR the rate change (`subtotal` = goods + transport).
-  const insuranceAmount = insuranceFromRate(subtotal, insuranceRate);
+  // Insurance = Product Value × 1.10 × rate‰ — always DERIVED, recomputed live.
+  // Base = itemsTotal (PRODUCTS ONLY — freight is EXCLUDED per the business
+  // rule; the 1.10 insured-value factor lives in insuranceFromRate).
+  const insuranceAmount = insuranceFromRate(itemsTotal, insuranceRate);
   // Insurance + additional charges are non-commissionable disbursements
   // (owner decision): added on TOP of commission, never into its base.
   const shippingExtras = shippingExtrasTotal(insuranceAmount, additionalCharges);
@@ -506,9 +507,9 @@ export default function NewDocumentForm({
     if (insuranceHydrated.current) return;
     insuranceHydrated.current = true;
     const amt = Number(initialDoc?.insurance_cost) || 0;
-    if (amt > 0 && subtotal > 0) {
+    if (amt > 0 && itemsTotal > 0) {
       setInsuranceRate(
-        String(Number(insuranceRateFromAmount(amt, subtotal).toFixed(3)))
+        String(Number(insuranceRateFromAmount(amt, itemsTotal).toFixed(3)))
       );
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -2423,8 +2424,8 @@ export default function NewDocumentForm({
               </span>
             </div>
             <span className="mt-1 block text-xs text-neutral-500">
-              (Goods + Transport) × rate — calculated automatically. e.g. 1‰ =
-              0.1%, 0.5‰ = 0.05%. Added to the total (not commissionable).
+              Product value × 110% × rate — calculated automatically (freight
+              excluded). e.g. 1‰ = 0.1%. Added to the total (not commissionable).
             </span>
           </label>
 

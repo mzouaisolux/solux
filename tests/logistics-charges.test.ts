@@ -21,28 +21,28 @@ import {
 const near = (a: number, b: number) =>
   assert.ok(Math.abs(a - b) < 1e-9, `${a} ≈ ${b}`);
 
-test("insuranceFromRate — spec examples: (goods + transport) × rate‰", () => {
-  const base = 100_000; // e.g. goods 90k + transport 10k
-  near(insuranceFromRate(base, 1), 100); // 1‰  = 0.001 → 100
-  near(insuranceFromRate(base, 0.5), 50); // 0.5‰ = 0.0005 → 50
-  near(insuranceFromRate(base, 2), 200); // 2‰  = 0.002 → 200
+test("insuranceFromRate — Product Value × 1.10 × rate‰ (owner formula 2026-07-07)", () => {
+  const pv = 100_000; // PRODUCTS ONLY (freight excluded)
+  near(insuranceFromRate(pv, 1), 110); // 1‰   → 100000 × 1.1 × 0.001
+  near(insuranceFromRate(pv, 0.5), 55); // 0.5‰ → 55
+  near(insuranceFromRate(pv, 2), 220); // 2‰   → 220
 });
 
-test("insuranceFromRate — 0 / missing base or rate → 0 (no insurance)", () => {
+test("insuranceFromRate — 0 / missing product value or rate → 0 (no insurance)", () => {
   assert.equal(insuranceFromRate(0, 1), 0);
   assert.equal(insuranceFromRate(100_000, 0), 0);
   assert.equal(insuranceFromRate(null, 1), 0);
   assert.equal(insuranceFromRate(100_000, undefined), 0);
-  assert.equal(insuranceFromRate("55000", "1"), 55); // string coercion
+  near(insuranceFromRate("50000", "1"), 55); // 50000 × 1.1 × 0.001 = 55 (strings)
 });
 
-test("insuranceRateFromAmount round-trips insuranceFromRate", () => {
-  const base = 184_500;
+test("insuranceRateFromAmount round-trips insuranceFromRate (incl. the 1.10 factor)", () => {
+  const pv = 184_500;
   for (const rate of [1, 0.5, 2, 1.75]) {
-    const amount = insuranceFromRate(base, rate);
-    near(insuranceRateFromAmount(amount, base), rate);
+    const amount = insuranceFromRate(pv, rate);
+    near(insuranceRateFromAmount(amount, pv), rate);
   }
-  assert.equal(insuranceRateFromAmount(100, 0), 0); // unknown base → 0
+  assert.equal(insuranceRateFromAmount(100, 0), 0); // unknown product value → 0
   assert.equal(insuranceRateFromAmount(0, 100_000), 0); // no insurance → 0
 });
 

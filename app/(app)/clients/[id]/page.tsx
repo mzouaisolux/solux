@@ -48,6 +48,14 @@ import type { CustomerHistory } from "@/lib/import/history-stats";
 import { ClientMessageComposer } from "@/components/clients/ClientMessageComposer";
 import { AffairRow } from "@/components/affairs/AffairRow";
 import { getClientAffairs } from "@/lib/client-affairs";
+import { loadShippingStatuses, type ShippingStatusLite } from "@/lib/shipping-status-server";
+import { getNumberSetting } from "@/lib/app-settings";
+import {
+  FRESHNESS_WARN_DAYS_KEY,
+  FRESHNESS_CRITICAL_DAYS_KEY,
+  FRESHNESS_DEFAULTS,
+  type FreshnessThresholds,
+} from "@/lib/shipping-update";
 import {
   ACTIVE_PIPELINE,
   COMMERCIAL_STATUS_LABEL,
@@ -313,6 +321,12 @@ export default async function ClientWorkspacePage({
   let clientAffairs: AffairGroup[] = [];
   let affairOwners: { id: string; name: string }[] = [];
   let canAssignOwner = false;
+  // Shipping status per quotation for the Affairs tab — one batch load for the
+  // whole client, so the freight-freshness badge + Request Shipping Update
+  // action sit right on each version in the expanded workspace.
+  let shippingStatuses: Record<string, ShippingStatusLite> = {};
+  let canRequestShipping = false;
+  let freshnessThresholds: FreshnessThresholds = FRESHNESS_DEFAULTS;
   if (tab === "affairs") {
     const [affs, ownersRaw] = await Promise.all([
       getClientAffairs(params.id),
@@ -321,6 +335,18 @@ export default async function ClientWorkspacePage({
     clientAffairs = affs;
     affairOwners = ownersRaw.map((o) => ({ id: o.id, name: o.name }));
     canAssignOwner = isTechnicalRole(role);
+
+    const [warnDays, criticalDays, canReqShip] = await Promise.all([
+      getNumberSetting(supabase, FRESHNESS_WARN_DAYS_KEY, FRESHNESS_DEFAULTS.warnDays),
+      getNumberSetting(supabase, FRESHNESS_CRITICAL_DAYS_KEY, FRESHNESS_DEFAULTS.criticalDays),
+      hasUiCapability("shipping.request_update"),
+    ]);
+    freshnessThresholds = { warnDays, criticalDays };
+    canRequestShipping = canReqShip;
+    const allDocIds = clientAffairs.flatMap((a) => a.documents.map((d) => d.id));
+    shippingStatuses = Object.fromEntries(
+      await loadShippingStatuses(supabase, allDocIds)
+    );
   }
   // "Assign existing quotation" candidates for an affair = the client's OTHER
   // families (latest version each), derived from the already-loaded affairs —
@@ -657,6 +683,10 @@ export default async function ClientWorkspacePage({
                   owners={affairOwners}
                   canAssignOwner={canAssignOwner}
                   assignableDocs={assignableFor(a)}
+                  clientName={client.company_name ?? undefined}
+                  shippingStatuses={shippingStatuses}
+                  canRequestShipping={canRequestShipping}
+                  freshnessThresholds={freshnessThresholds}
                 />
               ))}
             </div>

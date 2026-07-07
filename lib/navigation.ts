@@ -257,6 +257,14 @@ export const NAVIGATION: NavCategory[] = [
             description: "Fast inline editing — auto-saves",
           },
           {
+            // Mirrors the page guard: canAccessOrAdmin(["shipping.process_update"])
+            // — the Operations freight-refresh queue (m149).
+            label: "Shipping Updates",
+            href: "/operations/shipping-updates",
+            visibility: { kind: "capabilityOrAdmin", capabilities: ["shipping.process_update"] },
+            description: "Freight refresh requests from Sales",
+          },
+          {
             label: "In Production",
             href: "/operations?status=in_production",
             visibility: { kind: "always" },

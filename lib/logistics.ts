@@ -68,39 +68,48 @@ export function shippingExtrasTotal(
   return (Number(insurance) || 0) + totalAdditionalCharges(charges);
 }
 
+/** Standard insured value: goods are insured at 110% of their value. */
+export const INSURED_VALUE_FACTOR = 1.1;
+
 /**
- * Cargo insurance is RATE-driven, never a fixed amount. The user types the rate
- * in per-mille (‰); the amount is always DERIVED from the insured base
- * (goods value + transport cost):
+ * Cargo insurance is RATE-driven, never a fixed amount. Business rule
+ * (owner, 2026-07-07):
  *
- *   insurance = (goodsValue + transportCost) × (ratePermille / 1000)
+ *   Insurance = Product Value × 1.10 × (ratePermille / 1000)
  *
- * Examples: 1‰ → ×0.001 · 0.5‰ → ×0.0005 · 2‰ → ×0.002.
- * Pure, so the form preview, the totals and the server save share one formula.
+ * where **Product Value = the value of the PRODUCTS ONLY** (excludes freight
+ * AND insurance) and 1.10 is the standard 110% insured value. `ratePermille`
+ * is the per-mille (‰) rate Operations enters (1 = 1‰ = 0.1%).
+ * Examples (product value 100 000): 1‰ → 110 · 0.5‰ → 55 · 2‰ → 220.
+ *
+ * SINGLE SOURCE OF TRUTH — the SR form, the quotation form, the totals, the
+ * PDF and any server recompute all go through this, so screens + generated
+ * documents can never disagree.
  */
 export function insuranceFromRate(
-  insuredBase: number | string | null | undefined,
+  productValue: number | string | null | undefined,
   ratePermille: number | string | null | undefined
 ): number {
-  const base = Number(insuredBase) || 0;
+  const pv = Number(productValue) || 0;
   const rate = Number(ratePermille) || 0;
-  if (base <= 0 || rate <= 0) return 0;
-  return (base * rate) / 1000;
+  if (pv <= 0 || rate <= 0) return 0;
+  return pv * INSURED_VALUE_FACTOR * (rate / 1000);
 }
 
 /**
- * Recover the ‰ rate from a stored insurance AMOUNT + its base — used to load a
- * legacy fixed amount (or an amount pushed up from Operations freight costing)
- * back into the rate field so old quotes round-trip. 0 when the base is 0.
+ * Recover the ‰ rate from a stored insurance AMOUNT + the PRODUCT VALUE it was
+ * based on — inverse of `insuranceFromRate` (accounts for the 1.10 factor).
+ * Loads an existing amount back into the rate field so old quotes / freight
+ * records round-trip. 0 when the product value is 0.
  */
 export function insuranceRateFromAmount(
   amount: number | string | null | undefined,
-  insuredBase: number | string | null | undefined
+  productValue: number | string | null | undefined
 ): number {
   const a = Number(amount) || 0;
-  const base = Number(insuredBase) || 0;
-  if (a <= 0 || base <= 0) return 0;
-  return (a / base) * 1000;
+  const pv = Number(productValue) || 0;
+  if (a <= 0 || pv <= 0) return 0;
+  return (a / (pv * INSURED_VALUE_FACTOR)) * 1000;
 }
 
 /**

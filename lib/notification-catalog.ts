@@ -81,6 +81,10 @@ export const NOTIFICATION_CATALOG: Record<EventType, NotificationCatalogEntry> =
   "doc.validation_requested": { entity: "document", category: "workflow", severity: "high", label: "Quotation validation requested" },
   "doc.validation_approved": { entity: "document", category: "workflow", severity: "medium", label: "Quotation validation approved" },
   "doc.validation_rejected": { entity: "document", category: "workflow", severity: "high", label: "Quotation validation rejected" },
+  // ---- shipping rate refresh (m149) ----
+  "doc.shipping_update_requested": { entity: "document", category: "shipping", severity: "medium", label: "Shipping update requested" },
+  "doc.shipping_update_completed": { entity: "document", category: "shipping", severity: "medium", label: "Shipping quotation updated" },
+  "doc.shipping_update_cancelled": { entity: "document", category: "shipping", severity: "low", label: "Shipping update cancelled" },
   // ---- client ----
   "client.created": { entity: "client", category: "crm", severity: "low", label: "Client created" },
   "client.updated": { entity: "client", category: "crm", severity: "low", label: "Client updated" },

@@ -53,6 +53,19 @@ export const CAPABILITY_CATALOG = [
     description:
       "Read-only central list of EVERY service request in the system (status, owner, dates) — supervision visibility, no workflow actions.",
   },
+  // Shipping rate refresh (m149)
+  {
+    key: "shipping.request_update",
+    label: "Request a shipping cost update",
+    description:
+      "Ask Operations to refresh the transport cost of a quotation / invoice (modal with editable shipping summary + reason).",
+  },
+  {
+    key: "shipping.process_update",
+    label: "Process shipping update requests",
+    description:
+      "Work the Shipping Updates queue: enter the new freight / insurance / charges and complete the request (updates the document).",
+  },
   // Task lists
   { key: "task_list.validate", label: "Validate / release task lists" },
   { key: "task_list.reject", label: "Reject a task list" },
@@ -120,6 +133,7 @@ export function capabilityModuleId(key: string): string {
 const MODULE_LABEL: Record<string, string> = {
   quotation: "Quotations",
   project: "Service Requests",
+  shipping: "Shipping",
   task_list: "Task Lists",
   factory_mapping: "Factory Mapping",
   production_order: "Production Orders",

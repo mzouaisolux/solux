@@ -9,6 +9,17 @@ import { QuotationVersionsPanel } from "@/components/documents/QuotationVersions
 import { listEventsForEntity } from "@/lib/events";
 import { computeFreightStatus, type FreightValidityStatus } from "@/lib/freight-validity";
 import { requestFreightUpdate } from "@/app/(app)/projects/actions";
+import { ShippingStatusCard, type ShippingUpdateLite } from "@/components/shipping/ShippingStatusCard";
+import { loadShippingStatuses } from "@/lib/shipping-status-server";
+import { getNumberSetting } from "@/lib/app-settings";
+import {
+  containerSummary,
+  FRESHNESS_WARN_DAYS_KEY,
+  FRESHNESS_CRITICAL_DAYS_KEY,
+  FRESHNESS_DEFAULTS,
+  type ShippingSnapshot,
+  type FreshnessThresholds,
+} from "@/lib/shipping-update";
 import { ActionForm, SubmitButton } from "@/components/feedback/ActionForm";
 import {
   DelayBadge,
@@ -499,6 +510,80 @@ export default async function DocumentViewPage({
     params.id,
     currentUserId
   ).catch(() => null);
+
+  // Shipping Rate Refresh (m149) — soft-fails to "unavailable" until the
+  // migration is applied (table missing), so the page keeps rendering.
+  let shippingUpdatesAvailable = false;
+  let shippingOpenRequest: ShippingUpdateLite | null = null;
+  let shippingHistory: ShippingUpdateLite[] = [];
+  {
+    const { data: surRows, error: surErr } = await supabase
+      .from("shipping_update_requests")
+      .select(
+        "id, status, priority, reason, requested_at, requested_by, completed_at, previous_freight_cost, previous_insurance_cost, new_freight_cost, new_insurance_cost"
+      )
+      .eq("document_id", params.id)
+      .order("requested_at", { ascending: false });
+    if (!surErr) {
+      shippingUpdatesAvailable = true;
+      const lite = (surRows ?? []).map((r: any): ShippingUpdateLite => ({
+        id: r.id,
+        status: r.status,
+        priority: r.priority,
+        reason: r.reason,
+        requested_at: r.requested_at,
+        completed_at: r.completed_at,
+        previous_freight_cost: r.previous_freight_cost,
+        previous_insurance_cost: r.previous_insurance_cost,
+        new_freight_cost: r.new_freight_cost,
+        new_insurance_cost: r.new_insurance_cost,
+        mine: r.requested_by === currentUserId,
+      }));
+      shippingOpenRequest =
+        lite.find((r) => r.status === "waiting" || r.status === "in_progress") ??
+        null;
+      shippingHistory = lite.filter((r) => r.status === "completed").slice(0, 6);
+    }
+  }
+  const canRequestShippingUpdate = await hasUiCapability("shipping.request_update");
+  // Freight-freshness signal + context for the permanent Shipping Status card.
+  // Freshness works regardless of m149; the loader soft-fails the request bits.
+  const [warnDays, criticalDays] = await Promise.all([
+    getNumberSetting(supabase, FRESHNESS_WARN_DAYS_KEY, FRESHNESS_DEFAULTS.warnDays),
+    getNumberSetting(supabase, FRESHNESS_CRITICAL_DAYS_KEY, FRESHNESS_DEFAULTS.criticalDays),
+  ]);
+  const freshnessThresholds: FreshnessThresholds = { warnDays, criticalDays };
+  const shippingStatus =
+    (await loadShippingStatuses(supabase, [params.id])).get(params.id) ?? {
+      documentId: params.id,
+      available: shippingUpdatesAvailable,
+      currentFreight: effectiveFreight,
+      currentInsurance: (doc as any).insurance_cost ?? null,
+      destination: doc.port_of_destination ?? null,
+      incoterm: doc.incoterm ?? null,
+      portOfLoading: doc.port_of_loading ?? null,
+      quoteDate: doc.date ?? null,
+      lastUpdateDate: doc.date ?? null,
+      previousUpdateDate: null,
+      ageDays: null,
+      hasOpenRequest: Boolean(shippingOpenRequest),
+      updateCount: shippingHistory.length,
+    };
+  // Prefill of the modal's editable "Shipping Summary" — best data we hold.
+  const shippingPrefill: ShippingSnapshot = {
+    customer: client?.company_name ?? "",
+    project: (doc as any).affair_name ?? "",
+    destination_country: client?.country ?? "",
+    destination_port: doc.port_of_destination ?? "",
+    port_of_loading: doc.port_of_loading ?? "",
+    incoterm: doc.incoterm ?? "",
+    shipping_method: "Sea freight",
+    ...containerSummary(containers),
+    product_family:
+      (lines ?? [])
+        .map((l: any) => l.products?.category ?? l.product_category)
+        .find((c: any) => typeof c === "string" && c.trim()) ?? "",
+  };
 
   // Audit timeline — read events for this document. 100 is the same cap
   // used on /production/orders/[id]; plenty for any realistic history
@@ -1378,6 +1463,15 @@ export default async function DocumentViewPage({
                 </>
               )}
             </dl>
+            <ShippingStatusCard
+              documentId={doc.id}
+              canRequest={canRequestShippingUpdate}
+              status={shippingStatus}
+              thresholds={freshnessThresholds}
+              prefill={shippingPrefill}
+              openRequest={shippingOpenRequest}
+              history={shippingHistory}
+            />
           </div>
           {productionLabel && (
             <div>

@@ -41,11 +41,11 @@ async function main(): Promise<void> {
 
   const rateInput = page.locator('input[aria-label="Insurance rate in per mille"]');
   await rateInput.waitFor({ state: "visible", timeout: 8000 }).catch(() => {});
-  console.log("base (goods) = 5000, no freight\n");
+  console.log("product value = 5000 (freight excluded) · formula = PV × 1.10 × rate‰\n");
   const cases: { rate: string; expect: number }[] = [
-    { rate: "1", expect: 5 },     // 1‰   → 5000 × 0.001
-    { rate: "2", expect: 10 },    // 2‰   → 5000 × 0.002
-    { rate: "0.5", expect: 2.5 }, // 0.5‰ → 5000 × 0.0005
+    { rate: "1", expect: 5.5 },    // 1‰   → 5000 × 1.1 × 0.001
+    { rate: "2", expect: 11 },     // 2‰   → 5000 × 1.1 × 0.002
+    { rate: "0.5", expect: 2.75 }, // 0.5‰ → 5000 × 1.1 × 0.0005
   ];
   let pass = 0;
   for (const c of cases) {

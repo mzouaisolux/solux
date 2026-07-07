@@ -19,7 +19,7 @@ import {
 } from "@/components/affairs/AffairProgressStrip";
 import { Collapse } from "@/components/ui/Collapse";
 import { AffairVersionsTable } from "@/components/affairs/AffairVersionsTable";
-import { AffairWorkspace } from "@/components/affairs/AffairWorkspace";
+import { AffairWorkspace, type ShippingWorkspaceProps } from "@/components/affairs/AffairWorkspace";
 import { ProjectActionsMenu } from "@/components/affairs/ProjectActionsMenu";
 import { AssignableDoc } from "@/components/affairs/AssignDocumentPanel";
 import type { Option } from "@/components/affairs/NewProjectPanel";
@@ -66,12 +66,16 @@ export function AffairRow({
   owners = [],
   canAssignOwner = false,
   assignableDocs = [],
+  clientName,
+  shippingStatuses,
+  canRequestShipping,
+  freshnessThresholds,
 }: {
   affair: AffairGroup;
   owners?: Option[];
   canAssignOwner?: boolean;
   assignableDocs?: AssignableDoc[];
-}) {
+} & Partial<ShippingWorkspaceProps>) {
   const [open, setOpen] = useState(false);
   const [opened, setOpened] = useState(false);
 
@@ -165,6 +169,10 @@ export function AffairRow({
                     affair={affair}
                     affairId={affair.affairId}
                     assignableDocs={assignableDocs}
+                    clientName={clientName}
+                    shippingStatuses={shippingStatuses}
+                    canRequestShipping={canRequestShipping}
+                    freshnessThresholds={freshnessThresholds}
                   />
                 ) : (
                   <div className="space-y-2">

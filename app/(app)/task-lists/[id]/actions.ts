@@ -830,18 +830,19 @@ export async function markProductionReady(formData: FormData) {
 }
 
 /**
- * Validation → operational handoff. The production order already exists (the
- * transition ensured it); jump the user straight into its tracking/setup page.
- * Falls back to the task list if the order can't be resolved.
+ * Validation handoff. The production order already exists (the transition
+ * ensured it) — but the TLM's workflow now ENDS on the task list: right after
+ * "Validate" they generate the Production Dossier PDF / send it by email
+ * without leaving the page (owner spec 2026-07-07). We stay on the task list
+ * with ?validated=1 so the page surfaces those actions + a link to the PO.
  */
 async function handoffToProductionOrder(taskListId: string) {
-  let poId: string | null = null;
   try {
-    poId = await ensureProductionOrderForTaskList(taskListId);
+    await ensureProductionOrderForTaskList(taskListId);
   } catch {
-    poId = null;
+    // PO creation is retried by transition()/the PO page — never block here.
   }
-  redirect(poId ? `/production/orders/${poId}` : `/task-lists/${taskListId}`);
+  redirect(`/task-lists/${taskListId}?validated=1`);
 }
 
 /**
