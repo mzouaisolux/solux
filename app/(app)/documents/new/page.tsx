@@ -72,9 +72,9 @@ export default async function NewDocumentPage({
     // Full select first; fall back to a legacy shape if a newer column
     // (m037 sales terms / m056 affair) is missing in this env.
     const fullCols =
-      "id, number, type, client_id, incoterm, currency, freight_cost, freight_type, purchase_order_number, affair_name, commission_enabled, commission_percentage, commission_description, show_commission_in_pdf, port_of_loading, port_of_destination, payment_mode, payment_terms, production_mode, production_days, production_date, include_sales_conditions, sales_conditions_id, bank_account_id, warranty_years, offer_validity_products_days, offer_validity_transport_days, version, root_document_id, created_by, sales_owner_id, original_sales_request, insurance_cost, additional_charges";
+      "id, number, type, status, client_id, incoterm, currency, freight_cost, freight_type, purchase_order_number, affair_name, commission_enabled, commission_percentage, commission_description, show_commission_in_pdf, port_of_loading, port_of_destination, payment_mode, payment_terms, production_mode, production_days, production_date, include_sales_conditions, sales_conditions_id, bank_account_id, warranty_years, offer_validity_products_days, offer_validity_transport_days, version, root_document_id, created_by, sales_owner_id, original_sales_request, insurance_cost, additional_charges";
     const legacyCols =
-      "id, number, type, client_id, incoterm, currency, freight_cost, freight_type, purchase_order_number, commission_enabled, commission_percentage, commission_description, show_commission_in_pdf, port_of_loading, port_of_destination, payment_mode, payment_terms, production_mode, production_days, production_date, include_sales_conditions, sales_conditions_id, bank_account_id, created_by, original_sales_request";
+      "id, number, type, status, client_id, incoterm, currency, freight_cost, freight_type, purchase_order_number, commission_enabled, commission_percentage, commission_description, show_commission_in_pdf, port_of_loading, port_of_destination, payment_mode, payment_terms, production_mode, production_days, production_date, include_sales_conditions, sales_conditions_id, bank_account_id, created_by, original_sales_request";
     let srcRes = await supabase
       .from("documents")
       .select(fullCols)
@@ -326,8 +326,18 @@ export default async function NewDocumentPage({
         configFields={(configFields ?? []) as any}
         configFieldOptions={(configFieldOptions ?? []) as any}
         initialDoc={initialDoc}
-        reviseOfId={reviseOfId}
-        editOfId={editOfId}
+        {...(() => {
+          // Auto-versioning (owner 2026-07-06): "Edit" on a document that is
+          // no longer a draft silently becomes "create the next version" —
+          // the form opens in revision mode (clear banner, save = V{n+1});
+          // the sent original stays untouched. Sales never think about it.
+          const editTargetLocked =
+            !!editOfId && initialDoc && initialDoc.status !== "draft";
+          return {
+            reviseOfId: reviseOfId ?? (editTargetLocked ? editOfId : null),
+            editOfId: editTargetLocked ? null : editOfId,
+          };
+        })()}
         affairId={projectCtx?.id ?? null}
         projectName={projectCtx?.name ?? null}
         presetClientId={projectCtx?.client_id ?? clientParamId}

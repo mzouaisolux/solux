@@ -4,6 +4,9 @@ import { useState } from "react";
 import { saveBlobAs } from "@/lib/saveBlob";
 import { buildDossierEmail } from "@/lib/production-dossier";
 import { generateProductionDossier } from "./dossier";
+import { createClient as createBrowserSupabase } from "@/lib/supabase/client";
+import { ATTACHMENTS_BUCKET } from "@/lib/attachments";
+import { recordGeneratedDossier } from "./dossier-record-action";
 
 /**
  * Post-validation actions — the natural END of the Task List Manager's
@@ -38,6 +41,28 @@ export default function ProductionDossierActions({
     try {
       const result = await generateProductionDossier(taskListId);
       await saveBlobAs(result.blob, result.fileName);
+
+      // SSoT Lot 3 — generated documents are first-class: store the dossier
+      // and register it in the project repository (order_documents, category
+      // 'production', versioned per task list). Best-effort: a storage or
+      // registration failure never blocks the download the user already got.
+      try {
+        const supabase = createBrowserSupabase();
+        const path = `task-lists/${taskListId}/${Date.now()}-${result.fileName}`;
+        const { error: upErr } = await supabase.storage
+          .from(ATTACHMENTS_BUCKET)
+          .upload(path, result.blob, { contentType: "application/pdf" });
+        if (!upErr) {
+          const fd = new FormData();
+          fd.set("task_list_id", taskListId);
+          fd.set("storage_path", path);
+          fd.set("file_name", result.fileName);
+          fd.set("file_size", String(result.blob.size));
+          await recordGeneratedDossier(fd);
+        }
+      } catch {
+        // best-effort — the dossier was still downloaded
+      }
 
       const notes: string[] = [];
       if (result.skipped.length > 0) {

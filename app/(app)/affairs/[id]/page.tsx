@@ -14,6 +14,7 @@ import { getCurrentUserRole } from "@/lib/auth";
 import { hasUiCapability } from "@/lib/permissions";
 import { isTechnicalRole } from "@/lib/types";
 import { loadShippingStatuses } from "@/lib/shipping-status-server";
+import { loadProjectRepositories } from "@/lib/project-documents-server";
 import { getNumberSetting } from "@/lib/app-settings";
 import {
   FRESHNESS_WARN_DAYS_KEY,
@@ -150,7 +151,7 @@ export default async function AffairDetailPage({ params }: { params: { id: strin
         : Promise.resolve({ data: [] as any[] }),
       supabase
         .from("attachments")
-        .select("id, affair_id, file_name, file_size, attachment_type, created_at"),
+        .select("id, affair_id, file_name, file_size, attachment_type, created_at, uploaded_by"),
     ]);
 
   const taskListStatusByDoc = new Map<string, string>();
@@ -347,16 +348,23 @@ export default async function AffairDetailPage({ params }: { params: { id: strin
   // Shipping status per quotation — one batch load for the whole affair, so
   // the freight-freshness badge + Request Shipping Update action sit right on
   // each version in the deal workspace.
-  const [shippingWarn, shippingCritical, canRequestShipping] = await Promise.all([
-    getNumberSetting(supabase, FRESHNESS_WARN_DAYS_KEY, FRESHNESS_DEFAULTS.warnDays),
-    getNumberSetting(supabase, FRESHNESS_CRITICAL_DAYS_KEY, FRESHNESS_DEFAULTS.criticalDays),
-    hasUiCapability("shipping.request_update"),
-  ]);
+  const [shippingWarn, shippingCritical, canRequestShipping, canSetDocStatus] =
+    await Promise.all([
+      getNumberSetting(supabase, FRESHNESS_WARN_DAYS_KEY, FRESHNESS_DEFAULTS.warnDays),
+      getNumberSetting(supabase, FRESHNESS_CRITICAL_DAYS_KEY, FRESHNESS_DEFAULTS.criticalDays),
+      hasUiCapability("shipping.request_update"),
+      hasUiCapability("document.set_status"),
+    ]);
   const shippingStatusMap = await loadShippingStatuses(
     supabase,
     group.documents.map((d) => d.id)
   );
   const shippingStatuses = Object.fromEntries(shippingStatusMap);
+
+  // SSoT document repository — every document of this project, from every
+  // module, folder-categorised (renders in the Documents section).
+  group.repository =
+    (await loadProjectRepositories(supabase, [group])).get(group.anchorId) ?? [];
 
   return (
     <AffairDetail
@@ -366,6 +374,7 @@ export default async function AffairDetailPage({ params }: { params: { id: strin
       shippingStatuses={shippingStatuses}
       canRequestShipping={canRequestShipping}
       freshnessThresholds={{ warnDays: shippingWarn, criticalDays: shippingCritical }}
+      canSetDocStatus={canSetDocStatus}
       owners={owners}
       canAssignOwner={canAssignOwner}
       assignableDocs={assignableDocs}

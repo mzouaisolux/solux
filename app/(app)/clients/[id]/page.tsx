@@ -49,6 +49,7 @@ import { ClientMessageComposer } from "@/components/clients/ClientMessageCompose
 import { AffairRow } from "@/components/affairs/AffairRow";
 import { getClientAffairs } from "@/lib/client-affairs";
 import { loadShippingStatuses, type ShippingStatusLite } from "@/lib/shipping-status-server";
+import { loadProjectRepositories } from "@/lib/project-documents-server";
 import { getNumberSetting } from "@/lib/app-settings";
 import {
   FRESHNESS_WARN_DAYS_KEY,
@@ -326,6 +327,7 @@ export default async function ClientWorkspacePage({
   // action sit right on each version in the expanded workspace.
   let shippingStatuses: Record<string, ShippingStatusLite> = {};
   let canRequestShipping = false;
+  let canSetDocStatus = false;
   let freshnessThresholds: FreshnessThresholds = FRESHNESS_DEFAULTS;
   if (tab === "affairs") {
     const [affs, ownersRaw] = await Promise.all([
@@ -336,17 +338,24 @@ export default async function ClientWorkspacePage({
     affairOwners = ownersRaw.map((o) => ({ id: o.id, name: o.name }));
     canAssignOwner = isTechnicalRole(role);
 
-    const [warnDays, criticalDays, canReqShip] = await Promise.all([
+    const [warnDays, criticalDays, canReqShip, canSetStatus] = await Promise.all([
       getNumberSetting(supabase, FRESHNESS_WARN_DAYS_KEY, FRESHNESS_DEFAULTS.warnDays),
       getNumberSetting(supabase, FRESHNESS_CRITICAL_DAYS_KEY, FRESHNESS_DEFAULTS.criticalDays),
       hasUiCapability("shipping.request_update"),
+      hasUiCapability("document.set_status"),
     ]);
     freshnessThresholds = { warnDays, criticalDays };
     canRequestShipping = canReqShip;
+    canSetDocStatus = canSetStatus;
     const allDocIds = clientAffairs.flatMap((a) => a.documents.map((d) => d.id));
     shippingStatuses = Object.fromEntries(
       await loadShippingStatuses(supabase, allDocIds)
     );
+
+    // SSoT document repositories — one batch for the whole client, attached
+    // per affair so the expanded workspace renders the full folder view.
+    const repos = await loadProjectRepositories(supabase, clientAffairs);
+    for (const a of clientAffairs) a.repository = repos.get(a.anchorId) ?? [];
   }
   // "Assign existing quotation" candidates for an affair = the client's OTHER
   // families (latest version each), derived from the already-loaded affairs —
@@ -687,6 +696,7 @@ export default async function ClientWorkspacePage({
                   shippingStatuses={shippingStatuses}
                   canRequestShipping={canRequestShipping}
                   freshnessThresholds={freshnessThresholds}
+                  canSetDocStatus={canSetDocStatus}
                 />
               ))}
             </div>

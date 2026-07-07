@@ -68,6 +68,7 @@ export function AffairDetail({
   shippingStatuses,
   canRequestShipping,
   freshnessThresholds,
+  canSetDocStatus,
 }: {
   affair: AffairGroup;
   affairId: string;
@@ -83,6 +84,8 @@ export function AffairDetail({
   plannedActions?: PlannedActionRow[] | null;
   /** m109 — tender origin (banner + inherited documents). */
   tenderOrigin?: TenderOrigin | null;
+  /** hasUiCapability("document.set_status") — Documents status setter. */
+  canSetDocStatus?: boolean;
 } & Partial<ShippingWorkspaceProps>) {
   const accent = affairAccent(affair);
   const value = affair.totalValue ? formatMoney(affair.totalValue, affair.currency) : "";
@@ -242,6 +245,7 @@ export function AffairDetail({
           shippingStatuses={shippingStatuses}
           canRequestShipping={canRequestShipping}
           freshnessThresholds={freshnessThresholds}
+          canSetDocStatus={canSetDocStatus}
         />
 
         {invoiceFamilies.length > 0 && (

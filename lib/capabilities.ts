@@ -66,6 +66,13 @@ export const CAPABILITY_CATALOG = [
     description:
       "Work the Shipping Updates queue: enter the new freight / insurance / charges and complete the request (updates the document).",
   },
+  // Project documents (SSoT repository)
+  {
+    key: "document.set_status",
+    label: "Set document status (Draft / Approved / Final)",
+    description:
+      "Change the lifecycle status of a project document in the repository (uploads and production-order files).",
+  },
   // Task lists
   { key: "task_list.validate", label: "Validate / release task lists" },
   { key: "task_list.reject", label: "Reject a task list" },
@@ -134,6 +141,7 @@ const MODULE_LABEL: Record<string, string> = {
   quotation: "Quotations",
   project: "Service Requests",
   shipping: "Shipping",
+  document: "Documents",
   task_list: "Task Lists",
   factory_mapping: "Factory Mapping",
   production_order: "Production Orders",

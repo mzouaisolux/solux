@@ -70,11 +70,13 @@ export function AffairRow({
   shippingStatuses,
   canRequestShipping,
   freshnessThresholds,
+  canSetDocStatus,
 }: {
   affair: AffairGroup;
   owners?: Option[];
   canAssignOwner?: boolean;
   assignableDocs?: AssignableDoc[];
+  canSetDocStatus?: boolean;
 } & Partial<ShippingWorkspaceProps>) {
   const [open, setOpen] = useState(false);
   const [opened, setOpened] = useState(false);
@@ -173,6 +175,7 @@ export function AffairRow({
                     shippingStatuses={shippingStatuses}
                     canRequestShipping={canRequestShipping}
                     freshnessThresholds={freshnessThresholds}
+                    canSetDocStatus={canSetDocStatus}
                   />
                 ) : (
                   <div className="space-y-2">

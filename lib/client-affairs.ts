@@ -10,6 +10,7 @@ import { resolveUserLabelStrings } from "@/lib/user-display";
 import {
   groupIntoAffairs,
   buildAffairFiles,
+  affairAnchorId,
   type AffairGroup,
   type AttachmentLite,
   type ClientAffairs,
@@ -19,7 +20,7 @@ import {
   type EventLite,
 } from "@/lib/affairs-prototype";
 
-const ATTACH_COLS = "id, affair_id, file_name, file_size, attachment_type, created_at";
+const ATTACH_COLS = "id, affair_id, file_name, file_size, attachment_type, created_at, uploaded_by";
 
 const DOC_COLS =
   "id, number, client_id, root_document_id, version, affair_name, status, type, date, total_price, currency, forecast_probability, archived_at, affair_id, pdf_url";
@@ -56,8 +57,10 @@ function enrichAffairs(
     arr.push(at.attachment_type ?? "other");
     attachTypesByAnchor.set(at.affair_id, arr);
   }
+  // Same anchor rule as the grouping (affair_id first) — otherwise messages
+  // land on a per-chain key and split across an affair's document chains.
   const anchorByDoc = new Map<string, string>();
-  for (const d of docs) anchorByDoc.set(d.id, d.root_document_id ?? d.id);
+  for (const d of docs) anchorByDoc.set(d.id, affairAnchorId(d));
   const msgByAnchor = new Map<
     string,
     { count: number; latest: string | null; latestText: string | null }
@@ -124,12 +127,12 @@ export async function getClientAffairs(clientId: string): Promise<AffairGroup[]>
     .order("date", { ascending: false });
   const docs = (docsRaw ?? []) as PrototypeDoc[];
   const docIds = docs.map((d) => d.id);
-  const anchorIds = Array.from(
-    new Set(docs.map((d) => d.root_document_id ?? d.id)),
-  );
+  // Attachments are stored by REAL affair_id — the anchor rule (affair_id
+  // first) makes these keys line up so uploads actually surface on the rows.
+  const anchorIds = Array.from(new Set(docs.map(affairAnchorId)));
 
   const empty = Promise.resolve({ data: [] as any[] });
-  const [clientRes, tlRes, poRes, affRes, attachRes, msgRes, eventsRes] =
+  const [clientRes, tlRes, poRes, affRes, msgRes, eventsRes] =
     await Promise.all([
     supabase
       .from("clients")
@@ -152,12 +155,6 @@ export async function getClientAffairs(clientId: string): Promise<AffairGroup[]>
       .from("affairs")
       .select("id, client_id, name, status, owner_id, archived_at")
       .eq("client_id", clientId),
-    anchorIds.length
-      ? supabase
-          .from("attachments")
-          .select(ATTACH_COLS)
-          .in("affair_id", anchorIds)
-      : empty,
     docIds.length
       ? supabase
           .from("entity_messages")
@@ -175,6 +172,19 @@ export async function getClientAffairs(clientId: string): Promise<AffairGroup[]>
           .limit(300)
       : empty,
   ]);
+
+  // Attachments belong to the AFFAIR (attachments.affair_id) — fetch for every
+  // affair of this client (incl. document-less ones), plus the doc-derived
+  // anchors so legacy unlinked groups keep matching. Second wave on purpose:
+  // the affair ids are only known once affRes resolves.
+  const attachKeys = new Set<string>(anchorIds);
+  for (const a of affRes.data ?? []) attachKeys.add(a.id);
+  const attachRes = attachKeys.size
+    ? await supabase
+        .from("attachments")
+        .select(ATTACH_COLS)
+        .in("affair_id", Array.from(attachKeys))
+    : { data: [] as any[] };
 
   const tlByDoc = new Map<string, string>();
   for (const t of tlRes.data ?? []) {
@@ -268,12 +278,12 @@ export async function getAllClientAffairs(): Promise<ClientAffairs[]> {
     .limit(5000);
   const docs = (docsRaw ?? []) as PrototypeDoc[];
   const docIds = docs.map((d) => d.id);
-  const anchorIds = Array.from(
-    new Set(docs.map((d) => d.root_document_id ?? d.id)),
-  );
+  // Attachments are stored by REAL affair_id — the anchor rule (affair_id
+  // first) makes these keys line up so uploads actually surface on the rows.
+  const anchorIds = Array.from(new Set(docs.map(affairAnchorId)));
 
   const empty = Promise.resolve({ data: [] as any[] });
-  const [clientsRes, tlRes, poRes, affRes, attachRes, msgRes] = await Promise.all([
+  const [clientsRes, tlRes, poRes, affRes, msgRes] = await Promise.all([
     supabase
       .from("clients")
       .select("id, company_name, client_code, country, contact_name, sales_owner_id"),
@@ -292,12 +302,6 @@ export async function getAllClientAffairs(): Promise<ClientAffairs[]> {
     supabase
       .from("affairs")
       .select("id, client_id, name, status, owner_id, archived_at"),
-    anchorIds.length
-      ? supabase
-          .from("attachments")
-          .select(ATTACH_COLS)
-          .in("affair_id", anchorIds)
-      : empty,
     docIds.length
       ? supabase
           .from("entity_messages")
@@ -306,6 +310,18 @@ export async function getAllClientAffairs(): Promise<ClientAffairs[]> {
           .in("entity_id", docIds)
       : empty,
   ]);
+
+  // Attachments keyed by REAL affair_id — union of doc anchors + every affair
+  // row so document-less projects surface their uploads too (second wave; the
+  // affair ids are only known once affRes resolves).
+  const attachKeys = new Set<string>(anchorIds);
+  for (const a of affRes.data ?? []) attachKeys.add(a.id);
+  const attachRes = attachKeys.size
+    ? await supabase
+        .from("attachments")
+        .select(ATTACH_COLS)
+        .in("affair_id", Array.from(attachKeys))
+    : { data: [] as any[] };
 
   const tlByDoc = new Map<string, string>();
   for (const t of tlRes.data ?? []) {

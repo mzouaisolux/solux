@@ -47,6 +47,7 @@ export function AffairWorkspace({
   shippingStatuses,
   canRequestShipping,
   freshnessThresholds,
+  canSetDocStatus,
 }: {
   affair: AffairGroup;
   affairId: string;
@@ -54,6 +55,8 @@ export function AffairWorkspace({
   /** CRM step 4 (m103). Omitted (undefined/null) in the client-hub inline
    *  expansion and pre-migration — the card simply doesn't render. */
   plannedActions?: PlannedActionRow[] | null;
+  /** hasUiCapability("document.set_status") — Documents status setter. */
+  canSetDocStatus?: boolean;
 } & Partial<ShippingWorkspaceProps>) {
   const fileDocId = affair.latest?.id ?? affair.documents[0]?.id ?? null;
 
@@ -113,7 +116,7 @@ export function AffairWorkspace({
         </div>
       </section>
 
-      {/* 4. Documents — operational. */}
+      {/* 4. Documents — the project's Single Source of Truth repository. */}
       <AffairDocumentsCard
         files={affair.files}
         affairId={affairId}
@@ -121,6 +124,8 @@ export function AffairWorkspace({
         taskListId={affair.taskListId}
         productionOrderId={affair.productionOrderId}
         assignableDocs={assignableDocs}
+        repository={affair.repository}
+        canSetDocStatus={canSetDocStatus}
       />
     </div>
   );

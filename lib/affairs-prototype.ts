@@ -10,8 +10,14 @@
 // NOT introduce an affairs table and does NOT duplicate the Dashboard /
 // Action Center logic. See docs/AFFAIRS_AND_DOCUMENTS_MODEL.md.
 //
-// Anchor rule: root_document_id ?? id.
-// Display name: first non-empty affair_name -> root number -> "Affair <id>".
+// Anchor rule: affair_id ?? root_document_id ?? id.
+//   The AFFAIR is the business entity (owner ruling 2026-07-07): every
+//   document that carries an affair_id groups under that affair, no matter
+//   which version chain it belongs to (a won quotation and the proforma that
+//   Launch Production created are ONE affair, not two). root_document_id is
+//   ONLY a version-history concept — it is used as the grouping key solely
+//   for legacy documents that predate the affairs table (affair_id null).
+// Display name: affairs.name -> first non-empty affair_name -> root number.
 // =====================================================================
 
 import type { DocStatus, DocType } from "@/lib/types";
@@ -135,6 +141,12 @@ export type AffairGroup = {
   /** Linked operational records (for quick Documents links); null if none. */
   taskListId: string | null;
   productionOrderId: string | null;
+  /**
+   * SSoT document repository — EVERY document of the project from every
+   * module, folder-categorised (loadProjectRepositories). Optional: pages
+   * that don't load it fall back to the legacy files list.
+   */
+  repository?: import("@/lib/project-documents").ProjectDocument[];
 };
 
 /** A single clickable file in a project (generated PDF or uploaded attachment). */
@@ -160,6 +172,10 @@ export type AffairFile = {
   version: number | null;
   /** quotation draft → offer "Continue editing". */
   isDraft: boolean;
+  /** attachments.created_at — upload date (null for quotations). */
+  createdAt: string | null;
+  /** attachments.uploaded_by — author uuid (label resolved server-side). */
+  uploadedBy: string | null;
 };
 
 /** Minimal attachment row shape needed to build the file list. */
@@ -170,6 +186,7 @@ export type AttachmentLite = {
   file_size: number | null;
   attachment_type: string | null;
   created_at: string | null;
+  uploaded_by?: string | null;
 };
 
 function fileSizeLabel(bytes: number | null): string | null {
@@ -212,6 +229,8 @@ export function buildAffairFiles(
       status: d.status,
       version: d.version ?? 1,
       isDraft: d.status === "draft",
+      createdAt: d.date ?? null,
+      uploadedBy: null,
     });
   }
 
@@ -235,6 +254,8 @@ export function buildAffairFiles(
       status: null,
       version: null,
       isDraft: false,
+      createdAt: r.created_at,
+      uploadedBy: r.uploaded_by ?? null,
     });
   }
 
@@ -258,8 +279,13 @@ export type ClientAffairs = {
   affairs: AffairGroup[];
 };
 
+/**
+ * The grouping key for "which affair does this document belong to".
+ * affair_id (the business entity) always wins; the version-chain root is only
+ * a fallback for legacy documents never linked to a real affair.
+ */
 export function affairAnchorId(doc: PrototypeDoc): string {
-  return doc.root_document_id ?? doc.id;
+  return doc.affair_id ?? doc.root_document_id ?? doc.id;
 }
 
 function shortId(id: string): string {
@@ -359,8 +385,13 @@ export function groupIntoAffairs(
   // 2) build one enriched AffairGroup per anchor
   const affairs: AffairGroup[] = [];
   for (const [anchorId, members] of byAnchor) {
+    // Version asc, then date asc: an affair can now hold SEVERAL version
+    // chains (e.g. quotation v1 + the proforma v1 Launch Production created),
+    // so the date tiebreaks equal versions and `latest` lands on the most
+    // recent commercial document deterministically.
     const sorted = [...members].sort(
-      (a, b) => (a.version ?? 1) - (b.version ?? 1),
+      (a, b) =>
+        (a.version ?? 1) - (b.version ?? 1) || memberTime(a) - memberTime(b),
     );
     const rootDoc = sorted.find((d) => d.id === anchorId) ?? sorted[0];
     // P2a: enrich with the REAL affairs row (matched via any member's affair_id).
@@ -445,7 +476,9 @@ export function groupIntoAffairs(
   for (const [id, rec] of affairsById) {
     if (usedAffairIds.has(id) || rec.archived_at) continue;
     affairs.push({
-      anchorId: `affair:${id}`,
+      // Same key space as document-backed groups: the REAL affair id — so
+      // attachments/messages/repositories keyed by affair_id match here too.
+      anchorId: id,
       displayName: (rec.name && rec.name.trim()) || `Affair ${shortId(id)}`,
       clientId: rec.client_id,
       documents: [],

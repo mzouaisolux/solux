@@ -278,12 +278,16 @@ export async function saveDocument(
     }
   }
 
-  // ---- Edit-in-place (draft only — no migration, pure app logic) -------
-  // When edit_of is set we UPDATE the existing draft rather than inserting
-  // a brand-new document. Number / status / created_by are preserved; the
-  // lines + containers are replaced wholesale so the saved draft exactly
-  // mirrors the builder state. Only a DRAFT may be edited in place — a
-  // sent / won quotation is revised into a new version instead.
+  // ---- Auto-versioning (owner 2026-07-06) ------------------------------
+  // Sales clicks Edit → Save without ever thinking about versions. If the
+  // edit target is still a DRAFT we update it in place (below). If it has
+  // already been SENT (or beyond), it is immutable — the save silently
+  // becomes "create the next version": the builder payload (V{n} + the
+  // user's modifications) inserts as V{n+1} of the same affair, and the
+  // sent original stays untouched as the historical record.
+  let reviseSourceId: string | null = input.revise_of ?? null;
+  let editSrc: { id: string; status: string; number: string | null } | null =
+    null;
   if (input.edit_of) {
     const { data: src, error: srcErr } = await supabase
       .from("documents")
@@ -292,11 +296,19 @@ export async function saveDocument(
       .maybeSingle();
     if (srcErr) throw new Error(srcErr.message);
     if (!src) throw new Error("Quotation not found or not visible.");
-    if (src.status !== "draft") {
-      throw new Error(
-        "Only draft quotations can be edited in place. Use “Create new version” to revise a sent or won quotation."
-      );
+    editSrc = src as any;
+    if (src.status !== "draft" && !reviseSourceId) {
+      reviseSourceId = input.edit_of;
     }
+  }
+
+  // ---- Edit-in-place (draft only — no migration, pure app logic) -------
+  // When edit_of targets a DRAFT we UPDATE the existing document rather
+  // than inserting a brand-new one. Number / status / created_by are
+  // preserved; the lines + containers are replaced wholesale so the saved
+  // draft exactly mirrors the builder state.
+  if (input.edit_of && editSrc && editSrc.status === "draft") {
+    const src = editSrc;
 
     // Mutable fields — everything except number / status / created_by.
     const baseUpdate: Record<string, unknown> = {
@@ -416,12 +428,12 @@ export async function saveDocument(
   let numberRow: string | null = null;
   let reviseVersion = 1;
   let reviseRootId: string | null = null;
-  if (input.revise_of) {
+  if (reviseSourceId) {
     // Source must be readable (RLS scopes to owner / technical roles).
     const { data: src, error: srcErr } = await supabase
       .from("documents")
       .select("id, number")
-      .eq("id", input.revise_of)
+      .eq("id", reviseSourceId)
       .maybeSingle();
     if (srcErr) throw new Error(srcErr.message);
     if (!src) throw new Error("Source quotation not found or not visible.");
@@ -448,12 +460,12 @@ export async function saveDocument(
       const { data: rootRow } = await supabase
         .from("documents")
         .select("root_document_id")
-        .eq("id", input.revise_of)
+        .eq("id", reviseSourceId)
         .maybeSingle();
       reviseRootId =
-        (rootRow?.root_document_id as string | null) ?? input.revise_of;
+        (rootRow?.root_document_id as string | null) ?? reviseSourceId;
     } catch {
-      reviseRootId = input.revise_of;
+      reviseRootId = reviseSourceId;
     }
   } else {
     const { data, error: numErr } = await supabase.rpc(
@@ -517,8 +529,8 @@ export async function saveDocument(
     // is version 1 with no root. The -V{n} suffix already lives in the
     // number, so even if these columns are missing the version is
     // still visible.
-    version: input.revise_of ? reviseVersion : 1,
-    root_document_id: input.revise_of ? reviseRootId : null,
+    version: reviseSourceId ? reviseVersion : 1,
+    root_document_id: reviseSourceId ? reviseRootId : null,
     // m146 — logistics extras (shares the retry-without fallback below).
     insurance_cost,
     additional_charges: clean_charges,
@@ -568,7 +580,7 @@ export async function saveDocument(
   let inserted: { id: string } | null = null;
   {
     let res = await insertDocOnce(numberRow!);
-    const parsed = input.revise_of ? null : parseDocumentNumber(numberRow);
+    const parsed = reviseSourceId ? null : parseDocumentNumber(numberRow);
     if (res.error && parsed && isDocumentNumberCollision(res.error)) {
       // Jump past the highest sequence we CAN see (fast path for admins / own
       // docs), then linear-probe (covers RLS-hidden rows). The RPC value just
