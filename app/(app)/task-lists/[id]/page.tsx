@@ -12,6 +12,11 @@ import { ProductSummaryCard } from "@/components/documents/ProductSummaryCard";
 import { AttachmentsPanel } from "@/components/attachments/AttachmentsPanel";
 import { StickerRequirementsEditor } from "@/components/documents/StickerRequirementsEditor";
 import { RiskFlagsEditor } from "@/components/documents/RiskFlagsEditor";
+import {
+  IndustrialFileEditor,
+  SparePartModelDatalist,
+  type ProductOption,
+} from "@/components/documents/IndustrialFileEditor";
 import ProductLightingSetupForm from "@/components/lighting/ProductLightingSetupForm";
 import {
   normalizeFactoryExtras,
@@ -143,6 +148,52 @@ export default async function TaskListDetailPage({
         });
       }
     }
+  }
+
+  // m159 — INDUSTRIAL PRODUCTION FILE (tilt angle + checkpoint + spec blob),
+  // fetched defensively: pre-migration the select 42703s and the section
+  // renders its dormant hint instead (same resilience pattern as m135 above).
+  // A successful read IS the migration gate — no extra ledger query.
+  let industrial: {
+    tilt: number | null;
+    verified: boolean;
+    verifiedAt: string | null;
+    spec: unknown;
+  } | null = null;
+  {
+    const { data, error } = await supabase
+      .from("production_task_lists")
+      .select(
+        "solar_panel_tilt_angle, pole_drawing_tilt_verified, pole_drawing_tilt_verified_at, industrial_spec"
+      )
+      .eq("id", params.id)
+      .maybeSingle();
+    if (!error && data) {
+      industrial = {
+        tilt: (data as any).solar_panel_tilt_angle ?? null,
+        verified: (data as any).pole_drawing_tilt_verified === true,
+        verifiedAt: (data as any).pole_drawing_tilt_verified_at ?? null,
+        spec: (data as any).industrial_spec ?? null,
+      };
+    }
+  }
+  // Blocks Release to Production (evaluateRelease) — mirrored in the modal.
+  const tiltCheckpointPending =
+    industrial != null && industrial.tilt != null && !industrial.verified;
+
+  // Catalog models for the spare-parts picker (name + sku datalist). Small,
+  // ordered, only fetched when the industrial file is live.
+  let productOptions: ProductOption[] = [];
+  if (industrial) {
+    const { data: prods } = await supabase
+      .from("products")
+      .select("id, name, sku")
+      .order("name");
+    productOptions = ((prods ?? []) as any[]).map((p) => ({
+      id: p.id,
+      name: p.name,
+      sku: p.sku ?? null,
+    }));
   }
 
   // ---- Config fetch MUST be scoped to this task list's categories ----------
@@ -702,17 +753,26 @@ export default async function TaskListDetailPage({
           configuration below. */}
       {technical &&
         (status === "under_validation" || status === "validated") &&
-        (missingMappingCount > 0 || requiredEmptyCount > 0) && (
+        (missingMappingCount > 0 ||
+          requiredEmptyCount > 0 ||
+          tiltCheckpointPending) && (
           <div className="tl-readiness" role="status">
             <span className="tl-readiness-ico" aria-hidden>
               ⚠
             </span>
             <div className="tl-readiness-body">
-              <div className="tl-readiness-title">
-                Not ready to release — {requiredEmptyCount + missingMappingCount}{" "}
-                item{requiredEmptyCount + missingMappingCount === 1 ? "" : "s"} to
-                resolve before validation
-              </div>
+              {(() => {
+                const total =
+                  requiredEmptyCount +
+                  missingMappingCount +
+                  (tiltCheckpointPending ? 1 : 0);
+                return (
+                  <div className="tl-readiness-title">
+                    Not ready to release — {total} item{total === 1 ? "" : "s"} to
+                    resolve before validation
+                  </div>
+                );
+              })()}
               <ul className="tl-readiness-list">
                 {requiredEmptyCount > 0 && (
                   <li>
@@ -727,6 +787,13 @@ export default async function TaskListDetailPage({
                     {missingMappingCount === 1 ? "" : "s"} missing — resolve on the
                     lines below or in{" "}
                     <Link href="/factory-mapping">Admin → Factory mapping</Link>
+                  </li>
+                )}
+                {tiltCheckpointPending && (
+                  <li>
+                    Pole drawing not yet verified against the{" "}
+                    <b>{industrial?.tilt}°</b> tilt angle —{" "}
+                    <a href="#tl-industrial">confirm the checkpoint ↓</a>
                   </li>
                 )}
               </ul>
@@ -751,6 +818,7 @@ export default async function TaskListDetailPage({
             canReject={canRejectTaskList}
             revisionThread={revisionThread}
             missingMappingCount={missingMappingCount}
+            tiltCheckpointPending={tiltCheckpointPending}
             clientName={clientName}
             taskNumber={task.number ?? null}
           />
@@ -848,6 +916,7 @@ export default async function TaskListDetailPage({
           { href: "#tl-request", label: "Sales request" },
           { href: "#tl-product", label: "Product" },
           { href: "#tl-lighting", label: "Lighting" },
+          { href: "#tl-industrial", label: "Industrial file" },
           { href: "#tl-production", label: "Production" },
           { href: "#tl-risks", label: "Risks" },
           { href: "#tl-logistics", label: "Logistics" },
@@ -1006,6 +1075,48 @@ export default async function TaskListDetailPage({
             />
           </div>
         </>
+      )}
+
+      {/* ---------- INDUSTRIAL PRODUCTION FILE (m159) ----------
+          The task list is the complete industrial production file (owner spec
+          2026-07-08): solar-panel tilt angle + pole-drawing checkpoint, pole
+          accessories, packaging version, user manuals, spare parts. Dormant
+          with a hint until m159 is applied. */}
+      <div className="sec-head">
+        <div className="lhs">
+          <h2 id="tl-industrial" style={{ scrollMarginTop: 16 }}>
+            Industrial production file
+          </h2>
+          <p className="micro">
+            Production parameters shared by Sales, Engineering, Purchasing,
+            Factory and After-Sales — tilt angle, pole accessories, packaging,
+            manuals and free spare parts.
+          </p>
+        </div>
+      </div>
+      {industrial ? (
+        <div className="prod-shell">
+          <SparePartModelDatalist products={productOptions} />
+          <IndustrialFileEditor
+            taskListId={task.id}
+            documentId={task.quotation_id ?? null}
+            initialTilt={industrial.tilt}
+            tiltVerified={industrial.verified}
+            tiltVerifiedAt={industrial.verifiedAt}
+            initialSpec={industrial.spec}
+            editable={salesCanEdit}
+            canVerify={technical && canValidateTaskList}
+            products={productOptions}
+          />
+        </div>
+      ) : (
+        <div className="card pad" style={{ textAlign: "center" }}>
+          <span className="micro">
+            The Industrial production file (tilt angle, accessories, packaging,
+            manuals, spare parts) activates once migration m159
+            (159_task_list_industrial_file.sql) is applied in Supabase.
+          </span>
+        </div>
       )}
 
       {/* ---------- KNOWN RISKS / WARNINGS ----------

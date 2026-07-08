@@ -107,6 +107,8 @@ export type EventType =
   | "po.production_completed" // factory delivered — stamped via markProductionComplete
   | "po.bl_info_requested" // operations asked sales to complete the BL profile
   | "po.bl_info_resolved" // sales completed the BL profile — booking blocker lifted
+  | "po.docs_requirements_requested" // operations asked sales which shipping docs the client requires
+  | "po.docs_requirements_resolved" // sales reviewed the client's document checklist
   | "po.cancelled"
   // task_list events
   | "tl.submitted_for_validation"
@@ -118,6 +120,7 @@ export type EventType =
   | "tl.deleted"
   | "tl.status_overridden"
   | "tl.header_changed"
+  | "tl.customer_branding_required" // m159 — packaging = Customized Client: sales must collect the customer logo/design files
   // document (quotation) events
   | "doc.created"
   | "doc.updated"
@@ -134,6 +137,11 @@ export type EventType =
   | "doc.shipping_update_requested"
   | "doc.shipping_update_completed"
   | "doc.shipping_update_cancelled"
+  // costing versions (m140) — newer-costing loop on quotations
+  | "doc.newer_costing_available"
+  | "doc.costing_applied"
+  | "doc.costing_kept"
+  | "doc.sent_with_expired_costing"
   // client events
   | "client.created"
   | "client.updated"
@@ -167,6 +175,7 @@ export type EventType =
   | "pr.won"
   | "pr.lost"
   | "pr.cancelled"
+  | "pr.cost_revision_dismissed"
   // admin / system
   | "admin.permissions_changed"
   | "admin.user_role_changed"
@@ -202,6 +211,9 @@ export const ACTIONABLE_MEDIUM_EVENTS: ReadonlySet<EventType> = new Set<EventTyp
   // Shipping rate refresh (m149) — same handoff logic, doc-centric
   "doc.shipping_update_requested", // → operations
   "doc.shipping_update_completed", // → sales (requester)
+  // Costing versions (m140) — a newer approved costing needs the salesperson's
+  // explicit Keep/Apply decision on the quotation
+  "doc.newer_costing_available", // → sales (doc owner)
   "pr.ready_for_pricing", // → director
   "pr.priced", // → sales
   "pr.quotation_generated", // → sales
@@ -381,6 +393,7 @@ export function eventTypeLabel(t: EventType): string {
     "tl.deleted": "Task list deleted",
     "tl.status_overridden": "Status overridden",
     "tl.header_changed": "Task list header updated",
+    "tl.customer_branding_required": "Customer branding required",
     "doc.created": "Quotation created",
     "doc.updated": "Quotation edited",
     "doc.status_changed": "Quotation status changed",
@@ -394,6 +407,10 @@ export function eventTypeLabel(t: EventType): string {
     "doc.shipping_update_requested": "Shipping update requested",
     "doc.shipping_update_completed": "Shipping quotation updated",
     "doc.shipping_update_cancelled": "Shipping update cancelled",
+    "doc.newer_costing_available": "Newer costing available",
+    "doc.costing_applied": "Latest costing applied",
+    "doc.costing_kept": "Existing costing kept",
+    "doc.sent_with_expired_costing": "Sent with expired costing",
     "client.created": "Client created",
     "client.updated": "Client details updated",
     "client.deleted": "Client deleted",
@@ -405,6 +422,8 @@ export function eventTypeLabel(t: EventType): string {
     "affair.action_deleted": "Planned action removed",
     "po.bl_info_requested": "Shipping info requested",
     "po.bl_info_resolved": "Shipping info completed",
+    "po.docs_requirements_requested": "Shipping docs requirements requested",
+    "po.docs_requirements_resolved": "Shipping docs requirements confirmed",
     "affair.bl_info_requested": "Shipping info requested",
     "pr.created": "Project request created",
     "pr.submitted": "Submitted for approval",
@@ -424,6 +443,7 @@ export function eventTypeLabel(t: EventType): string {
     "pr.won": "Project won",
     "pr.lost": "Project lost",
     "pr.cancelled": "Project cancelled",
+    "pr.cost_revision_dismissed": "Cost revision dismissed",
     "admin.permissions_changed": "Permissions matrix changed",
     "admin.user_role_changed": "User role changed",
     "import.batch_completed": "Historical invoices imported",

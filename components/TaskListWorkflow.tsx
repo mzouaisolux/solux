@@ -132,6 +132,7 @@ export default function TaskListWorkflowActions({
   canReject = false,
   revisionThread,
   missingMappingCount = 0,
+  tiltCheckpointPending = false,
   clientName = null,
   taskNumber = null,
 }: {
@@ -148,6 +149,8 @@ export default function TaskListWorkflowActions({
   revisionThread?: RevisionThreadInfo;
   /** Required factory mappings still missing — blocks Release to Production. */
   missingMappingCount?: number;
+  /** m159 — tilt angle set but pole drawing not yet verified against it. */
+  tiltCheckpointPending?: boolean;
   clientName?: string | null;
   taskNumber?: string | null;
 }) {
@@ -274,6 +277,7 @@ export default function TaskListWorkflowActions({
           clientName={clientName}
           taskNumber={taskNumber}
           missingMappingCount={missingMappingCount}
+          tiltCheckpointPending={tiltCheckpointPending}
           revisionThread={revisionThread}
           onClose={() => setModal(null)}
         />
@@ -706,6 +710,7 @@ function ReleaseModal({
   clientName,
   taskNumber,
   missingMappingCount,
+  tiltCheckpointPending = false,
   revisionThread,
   onClose,
 }: {
@@ -713,6 +718,8 @@ function ReleaseModal({
   clientName: string | null;
   taskNumber: string | null;
   missingMappingCount: number;
+  /** m159 — tilt set but pole drawing not verified (mirror of the server gate). */
+  tiltCheckpointPending?: boolean;
   revisionThread?: RevisionThreadInfo;
   onClose: () => void;
 }) {
@@ -721,7 +728,8 @@ function ReleaseModal({
 
   const openRequest =
     !!revisionThread?.request && !revisionThread.request.resolved;
-  const blocked = missingMappingCount > 0 || openRequest;
+  const blocked =
+    missingMappingCount > 0 || openRequest || tiltCheckpointPending;
 
   function submit() {
     if (blocked) return;
@@ -763,6 +771,10 @@ function ReleaseModal({
           label="Revision"
           value={openRequest ? "Open — awaiting Sales" : "None open"}
         />
+        <Row
+          label="Pole drawing ↔ tilt"
+          value={tiltCheckpointPending ? "Checkpoint pending" : "OK"}
+        />
       </div>
 
       {blocked ? (
@@ -778,6 +790,13 @@ function ReleaseModal({
           {openRequest && (
             <p className={missingMappingCount > 0 ? "mt-1" : ""}>
               A revision request is still open — wait for Sales to re-submit.
+            </p>
+          )}
+          {tiltCheckpointPending && (
+            <p className={missingMappingCount > 0 || openRequest ? "mt-1" : ""}>
+              <b>Pole drawing checkpoint pending.</b> A solar panel tilt angle
+              is set — confirm the pole drawing matches it in the Industrial
+              production file section.
             </p>
           )}
         </div>

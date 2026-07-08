@@ -117,6 +117,14 @@ export function evaluateRelease(args: {
   hasOpenRevision: boolean;
   /** Number of product lines on the task list. Undefined = not checked. */
   lineCount?: number;
+  /**
+   * m159 — pole-drawing ↔ tilt-angle checkpoint. True when the task list has a
+   * solar-panel tilt angle set but the TLM has NOT confirmed the pole drawing
+   * matches it. The tilt changes the drawing — releasing an unverified pair
+   * sends the factory a wrong drawing. Undefined/false = not blocking (no tilt
+   * set, already verified, or m159 not applied yet).
+   */
+  tiltCheckpointPending?: boolean;
 }): { ok: boolean; reason: string | null } {
   if (!args.statusAllowed) {
     return {
@@ -147,6 +155,16 @@ export function evaluateRelease(args: {
       reason: `Factory Mapping is incomplete — ${args.missingCount} required factory mapping${
         args.missingCount === 1 ? "" : "s"
       } still to complete before releasing to production.`,
+    };
+  }
+  // m159 — the tilt angle drives the pole drawing: a set-but-unverified pair
+  // must not reach the factory. The TLM confirms the checkpoint in the
+  // "Industrial production file" section of the task list.
+  if (args.tiltCheckpointPending) {
+    return {
+      ok: false,
+      reason:
+        "Pole drawing checkpoint pending — a solar panel tilt angle is set but the pole drawing hasn't been verified against it. Confirm the checkpoint in the Industrial production file section before releasing to production.",
     };
   }
   return { ok: true, reason: null };

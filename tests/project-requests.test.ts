@@ -389,8 +389,10 @@ test("computeFreightStatus (m098) — valid / expiring_soon / expired / none", (
   assert.match(exp.label, /Expired 53 days ago|expired 53 days ago/i);
 });
 
-test("validityFromPeriod (m098) — today + N days", () => {
+test("validityFromPeriod (m098) — today + N days (7/15/30 pills, owner 2026-07-08)", () => {
+  assert.equal(validityFromPeriod("2026-06-08", 7), "2026-06-15");
+  assert.equal(validityFromPeriod("2026-06-08", 15), "2026-06-23");
   assert.equal(validityFromPeriod("2026-06-08", 30), "2026-07-08");
+  // Generic date math still works past the pill values (custom periods).
   assert.equal(validityFromPeriod("2026-06-08", 60), "2026-08-07");
-  assert.equal(validityFromPeriod("2026-06-08", 90), "2026-09-06");
 });

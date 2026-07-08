@@ -395,3 +395,46 @@ test("evaluateRelease: singular wording for a single missing mapping", () => {
   const r = evaluateRelease({ statusAllowed: true, missingCount: 1, hasOpenRevision: false });
   assert.match(r.reason ?? "", /1 required factory mapping /);
 });
+
+// ---- m159 — pole-drawing ↔ tilt-angle checkpoint --------------------------
+
+test("evaluateRelease (m159): REFUSES when the tilt checkpoint is pending", () => {
+  const r = evaluateRelease({
+    statusAllowed: true,
+    missingCount: 0,
+    hasOpenRevision: false,
+    lineCount: 3,
+    tiltCheckpointPending: true,
+  });
+  assert.equal(r.ok, false);
+  assert.match(r.reason ?? "", /pole drawing checkpoint pending/i);
+});
+
+test("evaluateRelease (m159): mappings outrank the tilt checkpoint (most blocking reason first)", () => {
+  const r = evaluateRelease({
+    statusAllowed: true,
+    missingCount: 2,
+    hasOpenRevision: false,
+    tiltCheckpointPending: true,
+  });
+  assert.equal(r.ok, false);
+  assert.match(r.reason ?? "", /factory mapping/i);
+});
+
+test("evaluateRelease (m159): PASSES when the checkpoint is verified or absent (undefined pre-migration)", () => {
+  const verified = evaluateRelease({
+    statusAllowed: true,
+    missingCount: 0,
+    hasOpenRevision: false,
+    lineCount: 1,
+    tiltCheckpointPending: false,
+  });
+  assert.equal(verified.ok, true);
+  const legacy = evaluateRelease({
+    statusAllowed: true,
+    missingCount: 0,
+    hasOpenRevision: false,
+    lineCount: 1,
+  });
+  assert.equal(legacy.ok, true);
+});

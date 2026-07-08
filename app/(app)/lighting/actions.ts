@@ -18,7 +18,14 @@ import { normalizeLightingProgram } from "@/lib/lighting/validate";
 import type { LightingExtraction, DialuxExtraction } from "@/lib/lighting/types";
 
 export type ExtractEnergyStudyResult =
-  | { ok: true; extraction: LightingExtraction }
+  | {
+      ok: true;
+      extraction: LightingExtraction;
+      /** m159 — true when the detected tilt angle was written onto the task
+       *  list (its field was still empty). False = field already had a value
+       *  (manual override wins) or the migration isn't applied yet. */
+      tiltApplied: boolean;
+    }
   | { ok: false; error: string };
 
 /**
@@ -52,7 +59,27 @@ export async function extractEnergyStudyAction(
 
     const bytes = new Uint8Array(await data.arrayBuffer());
     const extraction = await extractLightingFromEnergyStudy({ pdf: bytes });
-    return { ok: true, extraction };
+
+    // m159 — auto-populate the task list's Solar Panel Tilt Angle when the
+    // Energy Study states it. NEVER overwrites: only fills a still-empty
+    // field (manual values always win — the user can override afterwards).
+    // Defensive: pre-m159 the column doesn't exist → silently skipped.
+    let tiltApplied = false;
+    const documentId = String(formData.get("document_id") ?? "").trim();
+    if (documentId && extraction.tilt_angle != null) {
+      const tilt = extraction.tilt_angle;
+      if (tilt >= 0 && tilt <= 90) {
+        const { data: updated, error: tiltErr } = await supabase
+          .from("production_task_lists")
+          .update({ solar_panel_tilt_angle: tilt })
+          .eq("quotation_id", documentId)
+          .is("solar_panel_tilt_angle", null)
+          .select("id");
+        tiltApplied = !tiltErr && (updated?.length ?? 0) > 0;
+      }
+    }
+
+    return { ok: true, extraction, tiltApplied };
   } catch (e: any) {
     return {
       ok: false,

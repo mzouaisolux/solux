@@ -13,7 +13,10 @@ import {
   type ProjectRequestStatus,
 } from "@/lib/types";
 import { ATTACHMENTS_BUCKET, formatFileSize } from "@/lib/attachments";
+import { migrationApplied } from "@/lib/migrations";
 import { ProjectStatusBadge } from "@/components/projects/ProjectStatusBadge";
+import { loadRequestProfitability } from "@/lib/profitability-server";
+import { ProfitabilityBadge } from "@/components/profitability/ProfitabilityBadge";
 import { ProjectFilesUploader } from "../ProjectFilesUploader";
 import ProjectPricingCard from "./ProjectPricingCard";
 import PackingEntryForm from "./PackingEntryForm";
@@ -30,12 +33,15 @@ import {
   enterPacking,
   enterFreight,
   requestFreightUpdate,
+  requestCostingRevisionForm,
+  dismissCostRevision,
   generateQuotationFromProject,
   setProjectOutcome,
   setProjectClient,
   setProjectAffair,
   deleteProjectFile,
 } from "../actions";
+import { COST_REVISION_REASONS } from "@/lib/cost-revision";
 
 export const dynamic = "force-dynamic";
 
@@ -113,6 +119,10 @@ export default async function ProjectDetailPage({ params }: { params: { id: stri
     canCreate,
     canViewCost,
     canOverride,
+    canRequestRevision,
+    pendingRevision,
+    approvedCostingVersion,
+    m157Applied,
   ] = await Promise.all([
     supabase.from("factory_cost_requests").select("*").eq("project_request_id", params.id).order("created_at"),
     supabase.from("packing_list_requests").select("*").eq("project_request_id", params.id).order("created_at"),
@@ -130,6 +140,43 @@ export default async function ProjectDetailPage({ params }: { params: { id: stri
     hasUiCapability("project.create"),
     hasUiCapability("project.view_cost"),
     hasUiCapability("project.override_cost"),
+    // m153 — transition gate mirrors the server action (legacy OR until m153 applied).
+    (async () =>
+      (await hasUiCapability("project.request_cost_revision")) ||
+      (await hasUiCapability("project.generate_quotation")))(),
+    // m140/m153 — the open cost-revision request (banner). Fallback-guarded:
+    // pre-m140 env → null, banner dormant.
+    (async () => {
+      try {
+        const { data, error } = await supabase
+          .from("project_costing_versions")
+          .select("id, requested_by, requested_at, reason, version_no")
+          .eq("project_request_id", params.id)
+          .eq("status", "pending")
+          .maybeSingle();
+        return error ? null : (data as any);
+      } catch {
+        return null;
+      }
+    })(),
+    // m140 — current approved costing version (header chip). Same guard.
+    (async () => {
+      try {
+        const { data, error } = await supabase
+          .from("project_costing_versions")
+          .select("version_no, approved_at")
+          .eq("project_request_id", params.id)
+          .eq("status", "approved")
+          .order("version_no", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        return error ? null : (data as any);
+      } catch {
+        return null;
+      }
+    })(),
+    // m157 — technical dossier (costing Excel / pole drawing / real panel).
+    migrationApplied(supabase, "157_sr_technical_dossier.sql"),
   ]);
 
   const cost = (costReqs ?? [])[0] as any | undefined;
@@ -161,6 +208,7 @@ export default async function ProjectDetailPage({ params }: { params: { id: stri
     [
       p.owner_id,
       p.created_by,
+      (pendingRevision as any)?.requested_by,
       ...auditRows.map((a) => a.changed_by),
       ...events.map((e: any) => e.actor_id),
     ].filter(Boolean) as string[]
@@ -191,6 +239,11 @@ export default async function ProjectDetailPage({ params }: { params: { id: stri
   const status = p.status as ProjectRequestStatus;
   const stepIdx = STEP_INDEX[status] ?? 0;
   const terminal = status === "won" || status === "lost" || status === "cancelled";
+
+  // m152 — management profitability (capability-gated inside the loader; a
+  // non-manager gets null and the badge never renders, so no margin/cost is
+  // ever serialized toward a sales browser).
+  const profitability = await loadRequestProfitability(supabase, params.id);
 
   // BUG-3 — surface the Sales Director's modification message. "Request info"
   // stores the note on a pr.info_requested event; the activity row alone
@@ -239,10 +292,36 @@ export default async function ProjectDetailPage({ params }: { params: { id: stri
   const solarRows: Array<[string, string | null]> = [
     ["LED power", p.led_power],
     ["Solar panel", p.solar_panel_size],
+    // m159 — the tilt angle Sales requested (mandatory on new SRs): it drives
+    // the pole drawing + factory instructions. undefined pre-migration → null.
+    ["Panel tilt angle", p.solar_panel_tilt_angle != null ? `${p.solar_panel_tilt_angle}°` : null],
     ["Battery", p.battery_spec],
     ["Controller", p.controller],
     ["IoT", p.iot_required ? "Required" : "No"],
   ];
+  // m157 — the REAL panel used for the costing (technical dossier). A 150W
+  // panel today won't have tomorrow's dimensions — the frame size actually
+  // priced is business memory. Rows appear only once Ops recorded them.
+  const actualPanelDims = [
+    p.solar_panel_length_mm,
+    p.solar_panel_width_mm,
+    p.solar_panel_thickness_mm,
+  ].some((v: unknown) => v != null)
+    ? `${p.solar_panel_length_mm ?? "?"} × ${p.solar_panel_width_mm ?? "?"} × ${p.solar_panel_thickness_mm ?? "?"} mm`
+    : null;
+  if (p.solar_panel_power_w != null || actualPanelDims || p.solar_panel_reference) {
+    solarRows.push([
+      "Actual panel used (costing)",
+      [
+        p.solar_panel_power_w != null ? `${p.solar_panel_power_w} W` : null,
+        actualPanelDims,
+      ]
+        .filter(Boolean)
+        .join(" · ") || null,
+    ]);
+    if (p.solar_panel_reference)
+      solarRows.push(["Panel reference", p.solar_panel_reference]);
+  }
   const poleRows: Array<[string, string | null]> = [
     ["Pole quantity", p.pole_quantity != null ? String(p.pole_quantity) : null],
     ["Pole height", p.pole_height],
@@ -271,6 +350,29 @@ export default async function ProjectDetailPage({ params }: { params: { id: stri
             <div className="flex flex-wrap items-center gap-3">
               <h1 className="sx-detail-title">{p.name}</h1>
               <ProjectStatusBadge status={status} archived={!!p.archived_at} />
+              {/* m140 — which costing version is live (full history in the
+                  cost section + profitability drawer). */}
+              {approvedCostingVersion && (
+                <span
+                  className="rounded-full border px-2 py-0.5 text-[11px] font-semibold"
+                  style={{ borderColor: "var(--sx-line)", color: "var(--sx-mute)" }}
+                  title={
+                    (approvedCostingVersion as any).approved_at
+                      ? `Approved ${String((approvedCostingVersion as any).approved_at).slice(0, 10)}`
+                      : undefined
+                  }
+                >
+                  Costing V{(approvedCostingVersion as any).version_no}
+                </span>
+              )}
+              {/* m152 — the management heartbeat, right where the Director
+                  prices. Renders nothing without the capability. */}
+              <div className="ml-auto">
+                <ProfitabilityBadge
+                  data={profitability}
+                  affairId={p.affair_id ?? null}
+                />
+              </div>
             </div>
             <div className="spec-list" style={{ marginTop: 16 }}>
               <SpecRow k="Client" v={p.clients?.company_name ?? "—"} />
@@ -333,7 +435,122 @@ export default async function ProjectDetailPage({ params }: { params: { id: stri
                 <button className="sx-btn sx-btn-sm">Link affair</button>
               </form>
             )}
+
+            {/* m153 — Request Cost Revision: anyone close to the deal can flag
+                an outdated costing (mandatory reason). Only meaningful once a
+                costing exists (priced / quotation_generated); hidden while a
+                request is already pending. */}
+            {canRequestRevision &&
+              !pendingRevision &&
+              ["priced", "quotation_generated"].includes(status) && (
+                <div
+                  style={{
+                    borderTop: "1px solid var(--sx-line)",
+                    marginTop: 12,
+                    paddingTop: 12,
+                  }}
+                >
+                  <ActionForm
+                    action={requestCostingRevisionForm}
+                    success="✓ Cost revision requested — the Director has been notified"
+                  >
+                    <input type="hidden" name="project_id" value={p.id} />
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span style={{ fontSize: 12, color: "var(--sx-mute-2)" }}>
+                        Costing may be outdated?
+                      </span>
+                      <input
+                        name="reason"
+                        required
+                        list="cost-revision-reasons-sr"
+                        placeholder="Reason (required) — e.g. Supplier quotation updated"
+                        style={{ minWidth: 280, flex: 1, maxWidth: 420 }}
+                      />
+                      <datalist id="cost-revision-reasons-sr">
+                        {COST_REVISION_REASONS.map((r) => (
+                          <option key={r} value={r} />
+                        ))}
+                      </datalist>
+                      <SubmitButton
+                        className="sx-btn sx-btn-sm"
+                        pendingLabel="Requesting…"
+                      >
+                        Request Cost Revision
+                      </SubmitButton>
+                    </div>
+                  </ActionForm>
+                </div>
+              )}
           </div>
+
+          {/* m153 — COST REVISION REQUESTED banner. Visible to every role
+              (request metadata is not cost data); [Review Cost] only for
+              cost-capable users when the cost section exists; [Dismiss]
+              restores the SR to its pre-request status. */}
+          {pendingRevision && (
+            <div
+              className="card"
+              style={{
+                marginTop: 12,
+                padding: "14px 18px",
+                borderLeft: "3px solid var(--sx-amber-deep, #b45309)",
+                background: "var(--sx-amber-soft, #fffbeb)",
+              }}
+            >
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontWeight: 700, fontSize: 13 }}>
+                    ⚠ Cost Revision Requested
+                  </div>
+                  <div style={{ fontSize: 12, color: "var(--sx-mute)", marginTop: 4 }}>
+                    Requested by{" "}
+                    <b>
+                      {(pendingRevision as any).requested_by
+                        ? ownerLabels.get((pendingRevision as any).requested_by) ?? "—"
+                        : "—"}
+                    </b>{" "}
+                    on{" "}
+                    <b>
+                      {(pendingRevision as any).requested_at
+                        ? String((pendingRevision as any).requested_at).slice(0, 10)
+                        : "—"}
+                    </b>
+                    {(pendingRevision as any).reason ? (
+                      <>
+                        {" · "}Reason: <b>{(pendingRevision as any).reason}</b>
+                      </>
+                    ) : null}
+                  </div>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  {(canCost || canOverride) && p.req_product_pricing && (
+                    <a href="#cost" className="sx-btn sx-btn-sm">
+                      Review Cost
+                    </a>
+                  )}
+                  {(canCost || canOverride) && (
+                    <ActionForm
+                      action={dismissCostRevision}
+                      success="✓ Revision request dismissed"
+                    >
+                      <input type="hidden" name="project_id" value={p.id} />
+                      <input
+                        type="hidden"
+                        name="version_id"
+                        value={(pendingRevision as any).id}
+                      />
+                      <SubmitButton
+                        className="sx-btn sx-btn-sm"
+                        pendingLabel="Dismissing…"
+                      >
+                        Dismiss Request
+                      </SubmitButton>
+                    </ActionForm>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* STEPPER */}
           <div className="card stepper">
@@ -567,9 +784,10 @@ export default async function ProjectDetailPage({ params }: { params: { id: stri
                   </div>
                 )}
 
-              {/* FACTORY COST — view_cost only (hidden from Sales) */}
+              {/* FACTORY COST — view_cost only (hidden from Sales).
+                  id="cost" = the banner's [Review Cost] anchor (m153). */}
               {canViewCost && p.req_product_pricing && (
-                <section className="card sec" style={{ marginTop: 0, borderLeft: "3px solid var(--sx-ink)" }}>
+                <section id="cost" className="card sec" style={{ marginTop: 0, borderLeft: "3px solid var(--sx-ink)", scrollMarginTop: 24 }}>
                   <div className="sechead">
                     <div className="eyebrow">① Factory cost (RMB)</div>
                     <span className="right">{cost?.status ?? "not requested"}</span>
@@ -589,9 +807,119 @@ export default async function ProjectDetailPage({ params }: { params: { id: stri
                           <div className="fcol"><span className="fl">Product cost RMB</span><input name="product_cost_rmb" type="number" min={0} step="0.01" defaultValue={cost.product_cost_rmb ?? ""} /></div>
                           <div className="fcol"><span className="fl">Pole cost RMB</span><input name="pole_cost_rmb" type="number" min={0} step="0.01" defaultValue={cost.pole_cost_rmb ?? ""} /></div>
                           <div className="fcol span2"><span className="fl">Cost notes (e.g. MOQ)</span><input name="cost_notes" defaultValue={cost.cost_notes ?? ""} placeholder="e.g. MOQ 500 pcs" /></div>
+                          {/* m157 — REAL panel used for this costing (technical
+                              dossier). Kept on the SR forever: cells evolve
+                              (TOPCon, HJT…), a 150W panel today won't have
+                              tomorrow's dimensions. */}
+                          {m157Applied && (
+                            <>
+                              <div className="fcol span2" style={{ marginTop: 4 }}>
+                                <span className="fl" style={{ fontWeight: 600 }}>Actual solar panel used — saved to the technical dossier</span>
+                              </div>
+                              <div className="fcol"><span className="fl">Panel power (W)</span><input name="solar_panel_power_w" type="number" min={0} step="1" defaultValue={p.solar_panel_power_w ?? ""} placeholder="e.g. 150" /></div>
+                              <div className="fcol"><span className="fl">Supplier reference / model</span><input name="solar_panel_reference" defaultValue={p.solar_panel_reference ?? ""} placeholder="e.g. NEM285PD15" /></div>
+                              <div className="fcol"><span className="fl">Length with frame (mm)</span><input name="solar_panel_length_mm" type="number" min={0} step="0.1" defaultValue={p.solar_panel_length_mm ?? ""} placeholder="e.g. 1480" /></div>
+                              <div className="fcol"><span className="fl">Width with frame (mm)</span><input name="solar_panel_width_mm" type="number" min={0} step="0.1" defaultValue={p.solar_panel_width_mm ?? ""} placeholder="e.g. 670" /></div>
+                              <div className="fcol"><span className="fl">Thickness with frame (mm)</span><input name="solar_panel_thickness_mm" type="number" min={0} step="0.1" defaultValue={p.solar_panel_thickness_mm ?? ""} placeholder="e.g. 35" /></div>
+                            </>
+                          )}
+                          {/* m153 — revising a COMPLETED cost requires a reason
+                              (audited, never overwritten silently). First entry
+                              stays reason-free; the server also enforces it. */}
+                          {cost.status === "completed" && (
+                            <div className="fcol span2">
+                              <span className="fl">Revision reason <span className="req">*</span> (required, audited)</span>
+                              <input
+                                name="reason"
+                                required
+                                list="cost-revision-reasons-form"
+                                placeholder="e.g. Supplier quotation updated"
+                              />
+                              <datalist id="cost-revision-reasons-form">
+                                {COST_REVISION_REASONS.map((r) => (
+                                  <option key={r} value={r} />
+                                ))}
+                              </datalist>
+                            </div>
+                          )}
                         </div>
                         <div className="savebar"><SubmitButton className="sx-btn" pendingLabel="Saving…">{cost.status === "completed" ? "Update cost" : "Save cost"}</SubmitButton></div>
                       </ActionForm>
+                    </div>
+                  )}
+                  {/* m157 — COSTING EXCEL (technical dossier). Cost-sensitive:
+                      lives inside this view_cost-gated section and is filtered
+                      out of the general Documents list for everyone else. */}
+                  {cost && (
+                    <div style={{ borderTop: "1px solid var(--sx-line)", marginTop: 14, paddingTop: 14 }}>
+                      <div className="sx-micro" style={{ marginBottom: 6 }}>
+                        Costing Excel — supplier / internal / final calculation
+                      </div>
+                      {canCost &&
+                        (m157Applied ? (
+                          <ProjectFilesUploader
+                            projectId={p.id}
+                            fixedCategory="costing"
+                            label="Attach the Excel used to build this cost — it stays on the request as the technical dossier."
+                          />
+                        ) : (
+                          <p style={{ fontSize: 12, color: "var(--sx-mute-2)" }}>
+                            Costing file upload activates once migration m157 is applied.
+                          </p>
+                        ))}
+                      {fileRows.filter((f) => f.category === "costing").length > 0 && (
+                        <ul style={{ marginTop: 6, listStyle: "none" }}>
+                          {fileRows
+                            .filter((f) => f.category === "costing")
+                            .map((f) => (
+                              <li key={f.id} className="truncate" style={{ fontSize: 12 }}>
+                                <a href={signed.get(f.id) ?? "#"} target="_blank" rel="noreferrer" className="sx-link" style={{ color: "var(--sx-ink-soft)" }}>
+                                  {f.file_name}
+                                </a>
+                                {f.created_at ? <span style={{ color: "var(--sx-mute-2)" }}> · {String(f.created_at).slice(0, 10)}</span> : null}
+                              </li>
+                            ))}
+                        </ul>
+                      )}
+                    </div>
+                  )}
+                  {/* m157 — POLE DRAWING (strongly recommended, never blocking).
+                      The drawing actually priced is the reference for future
+                      orders and for what Sales sends the customer. */}
+                  {cost && p.pole_required !== false && (
+                    <div style={{ borderTop: "1px solid var(--sx-line)", marginTop: 14, paddingTop: 14 }}>
+                      <div className="sx-micro" style={{ marginBottom: 6 }}>Pole drawing</div>
+                      <p style={{ fontSize: 12, color: "var(--sx-amber-deep)", marginBottom: 6 }}>
+                        <b>Strongly recommended:</b> upload the pole drawing used for this
+                        quotation. This document will be invaluable for future orders and
+                        customer support.
+                      </p>
+                      {canCost &&
+                        (m157Applied ? (
+                          <ProjectFilesUploader
+                            projectId={p.id}
+                            fixedCategory="pole_drawing"
+                            label="Pole drawing (PDF / DWG) used for the pole costing."
+                          />
+                        ) : (
+                          <p style={{ fontSize: 12, color: "var(--sx-mute-2)" }}>
+                            Pole drawing upload activates once migration m157 is applied.
+                          </p>
+                        ))}
+                      {fileRows.filter((f) => f.category === "pole_drawing").length > 0 && (
+                        <ul style={{ marginTop: 6, listStyle: "none" }}>
+                          {fileRows
+                            .filter((f) => f.category === "pole_drawing")
+                            .map((f) => (
+                              <li key={f.id} className="truncate" style={{ fontSize: 12 }}>
+                                <a href={signed.get(f.id) ?? "#"} target="_blank" rel="noreferrer" className="sx-link" style={{ color: "var(--sx-ink-soft)" }}>
+                                  {f.file_name}
+                                </a>
+                                {f.created_at ? <span style={{ color: "var(--sx-mute-2)" }}> · {String(f.created_at).slice(0, 10)}</span> : null}
+                              </li>
+                            ))}
+                        </ul>
+                      )}
                     </div>
                   )}
                   {/* Director override (audited) */}
@@ -609,18 +937,47 @@ export default async function ProjectDetailPage({ params }: { params: { id: stri
                       </ActionForm>
                     </details>
                   )}
-                  {/* Audit trail */}
-                  {auditRows.length > 0 && (
-                    <ul className="audit-list">
-                      <div className="sx-micro" style={{ marginBottom: 6 }}>Cost audit trail</div>
-                      {auditRows.map((a) => (
-                        <li key={a.id}>
-                          <b>{a.field === "pole_cost_rmb" ? "Pole" : "Product"}</b>: {a.old_value ?? "—"} → {a.new_value ?? "—"} RMB
-                          {a.reason ? ` · ${a.reason}` : ""} · {a.changed_by ? ownerLabels.get(a.changed_by) ?? "—" : "—"} · {a.changed_at ? String(a.changed_at).slice(0, 10) : ""}
+                  {/* Audit trail — m153: grouped as numbered REVISIONS. One
+                      insert batch (same changed_at/by/reason) = one revision;
+                      numbered chronologically; nothing is ever deleted. */}
+                  {auditRows.length > 0 && (() => {
+                    type Rev = { key: string; at: string | null; by: string | null; reason: string | null; rows: any[] };
+                    const groups: Rev[] = [];
+                    // auditRows arrive newest-first; group consecutive same-batch rows.
+                    for (const a of auditRows) {
+                      const key = `${a.changed_at}|${a.changed_by}|${a.reason ?? ""}`;
+                      const last = groups[groups.length - 1];
+                      if (last && last.key === key) last.rows.push(a);
+                      else groups.push({ key, at: a.changed_at ?? null, by: a.changed_by ?? null, reason: a.reason ?? null, rows: [a] });
+                    }
+                    const total = groups.length;
+                    return (
+                      <ul className="audit-list">
+                        <div className="sx-micro" style={{ marginBottom: 6 }}>
+                          Cost revision history ({total} revision{total === 1 ? "" : "s"} — nothing is ever deleted)
+                        </div>
+                        {groups.map((g, i) => (
+                          <li key={g.key}>
+                            <b>Revision #{total - i}</b>
+                            {" · "}
+                            {g.rows
+                              .map(
+                                (a: any) =>
+                                  `${a.field === "pole_cost_rmb" ? "Pole" : "Product"} ${a.old_value ?? "—"} → ${a.new_value ?? "—"} RMB`
+                              )
+                              .join(" · ")}
+                            {g.reason ? ` · ${g.reason}` : ""} ·{" "}
+                            {g.by ? ownerLabels.get(g.by) ?? "—" : "—"} ·{" "}
+                            {g.at ? String(g.at).slice(0, 10) : ""}
+                          </li>
+                        ))}
+                        <li style={{ color: "var(--sx-mute)" }}>
+                          <b>Initial entry</b> ·{" "}
+                          {cost?.created_at ? String(cost.created_at).slice(0, 10) : "—"}
                         </li>
-                      ))}
-                    </ul>
-                  )}
+                      </ul>
+                    );
+                  })()}
                 </section>
               )}
 
@@ -838,11 +1195,17 @@ export default async function ProjectDetailPage({ params }: { params: { id: stri
               <section className="card sec" style={{ marginTop: 0 }}>
                 <div className="eyebrow" style={{ marginBottom: 12 }}>Documents</div>
                 {canCreate && <ProjectFilesUploader projectId={p.id} />}
-                {fileRows.length === 0 ? (
+                {/* Costing Excels are cost-sensitive — only view_cost holders
+                    see them (they also live in the Factory cost section). */}
+                {(() => {
+                  const visibleRows = fileRows.filter(
+                    (f) => f.category !== "costing" || canViewCost
+                  );
+                  return visibleRows.length === 0 ? (
                   <p style={{ fontSize: 13, color: "var(--sx-mute-2)", marginTop: 8 }}>No documents yet.</p>
                 ) : (
                   <div style={{ marginTop: 8 }}>
-                    {fileRows.map((f) => (
+                    {visibleRows.map((f) => (
                       <div key={f.id} className="docrow">
                         <span className="dn">
                           <a href={signed.get(f.id) ?? "#"} target="_blank" rel="noreferrer" className="sx-link" style={{ color: "var(--sx-ink)" }}>
@@ -863,7 +1226,8 @@ export default async function ProjectDetailPage({ params }: { params: { id: stri
                       </div>
                     ))}
                   </div>
-                )}
+                );
+                })()}
               </section>
             </div>
 

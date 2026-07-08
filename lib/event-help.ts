@@ -84,6 +84,16 @@ export const EVENT_HELP: Record<EventType, EventHelp> = {
     why: "The order can move on to shipping and the client can be updated.",
     recipients: ["Operations", "Sales"],
   },
+  "po.docs_requirements_requested": {
+    when: "Operations asks Sales which shipping documents this customer requires.",
+    why: "The document checklist drives what must be prepared before shipment — an unconfirmed list risks missing documents.",
+    recipients: ["sales"],
+  },
+  "po.docs_requirements_resolved": {
+    when: "Sales reviewed and confirmed the client's shipping-document checklist.",
+    why: "Operations now knows exactly which documents to prepare.",
+    recipients: ["operations"],
+  },
   "po.bl_info_requested": {
     when: "Operations asks Sales for the shipping / Bill of Lading details needed to ship.",
     why: "Missing shipping info blocks the shipment — Sales needs to respond quickly.",
@@ -145,6 +155,11 @@ export const EVENT_HELP: Record<EventType, EventHelp> = {
     when: "The task list's header details (title, references) are edited.",
     why: "Routine bookkeeping — usually just informational.",
     recipients: ["Operations"],
+  },
+  "tl.customer_branding_required": {
+    when: "The packaging version on a task list is set to “Customized Client”.",
+    why: "Sales must collect the customer's logo and design files before production can package the order.",
+    recipients: ["Sales", "Sales director"],
   },
 
   // ---------------------------------------------------------------- document (quotation)
@@ -212,6 +227,26 @@ export const EVENT_HELP: Record<EventType, EventHelp> = {
     when: "A shipping update request is withdrawn or declined.",
     why: "Keeps the document timeline honest about abandoned refreshes.",
     recipients: ["Sales"],
+  },
+  "doc.newer_costing_available": {
+    when: "The Director approves a newer costing for a Service Request that has live quotations.",
+    why: "The salesperson must explicitly Keep or Apply — quotations never change silently.",
+    recipients: ["Sales"],
+  },
+  "doc.costing_applied": {
+    when: "The salesperson applies the latest approved costing to a draft quotation.",
+    why: "Audit trail of the explicit price update (selected components only).",
+    recipients: ["Sales", "Sales director"],
+  },
+  "doc.costing_kept": {
+    when: "The salesperson explicitly keeps the quotation's existing costing.",
+    why: "Silences the newer-costing prompt for that version and records the decision.",
+    recipients: ["Sales", "Sales director"],
+  },
+  "doc.sent_with_expired_costing": {
+    when: "A quotation is sent while its linked costing is expired (warning-only policy).",
+    why: "History of margin risk accepted at send time.",
+    recipients: ["Sales director"],
   },
 
   // ---------------------------------------------------------------- client
@@ -364,6 +399,11 @@ export const EVENT_HELP: Record<EventType, EventHelp> = {
   "pr.cancelled": {
     when: "A service request is cancelled.",
     why: "Stops any further work on the request.",
+    recipients: ["Sales", "Operations", "Admin"],
+  },
+  "pr.cost_revision_dismissed": {
+    when: "A pending manufacturing cost-revision request is dismissed after review.",
+    why: "Closes the request loop: the costing was reviewed and judged still valid; the SR returns to its previous status.",
     recipients: ["Sales", "Operations", "Admin"],
   },
 

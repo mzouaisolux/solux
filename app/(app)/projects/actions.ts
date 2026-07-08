@@ -18,11 +18,12 @@
 import { createClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { requireCapability } from "@/lib/permissions";
+import { hasCapability, requireCapability } from "@/lib/permissions";
 import { emitEvent } from "@/lib/events";
 import { loadPricingSettings } from "@/lib/pricing-settings";
 import { computeSectionPrice, buildCommercialDescription, computeFreightTotal, buildShippingContainers } from "@/lib/project-pricing";
 import { validityFromPeriod } from "@/lib/freight-validity";
+import { cleanTiltAngle } from "@/lib/industrial-spec";
 import { normalizeAdditionalCharges } from "@/lib/logistics";
 import { computeWaitingStatus } from "@/lib/project-dashboard";
 import { saveDocument, type SaveDocumentInput } from "@/app/(app)/documents/new/actions";
@@ -188,13 +189,22 @@ export async function createProjectRequest(formData: FormData): Promise<void> {
     throw new Error("Transport mode and destination are required when requesting a freight estimate.");
   }
 
+  // m159 — Solar Panel Tilt Angle is MANDATORY (owner 2026-07-08): it later
+  // determines the pole drawing and factory production instructions. The
+  // column may predate the migration → written defensively below, but the
+  // BUSINESS rule holds regardless: Sales must state the angle.
+  const tiltAngle = cleanTiltAngle(str(formData, "solar_panel_tilt_angle"));
+  if (tiltAngle == null) {
+    throw new Error(
+      "Solar panel tilt angle is required (0–90°) — it determines the pole drawing and production."
+    );
+  }
+
   // The request's name IS the affaire's name — no separate "project name".
   // (Older entry points may still post a `name`; honour it if present.)
   const name = str(formData, "name") ?? affairName ?? "Service request";
 
-  const { data: created, error } = await supabase
-    .from("project_requests")
-    .insert({
+  const insertRow = {
       name,
       client_id: clientId,
       affair_id: affairId,
@@ -225,10 +235,23 @@ export async function createProjectRequest(formData: FormData): Promise<void> {
       owner_id: user?.id ?? null,
       created_by: user?.id ?? null,
       status: "draft",
-    })
+  };
+  let { data: created, error } = await supabase
+    .from("project_requests")
+    .insert({ ...insertRow, solar_panel_tilt_angle: tiltAngle })
     .select("id")
     .single();
+  if (error && /solar_panel_tilt_angle/i.test(error.message ?? "")) {
+    // m159 not applied yet — persist the request without the tilt column
+    // (graceful degradation; the business rule above still ran).
+    ({ data: created, error } = await supabase
+      .from("project_requests")
+      .insert(insertRow)
+      .select("id")
+      .single());
+  }
   if (error) throw new Error(error.message);
+  if (!created) throw new Error("Failed to create the service request.");
 
   await emitEvent({
     entity_type: "project_request",
@@ -281,9 +304,15 @@ export async function updateProjectRequest(formData: FormData): Promise<void> {
     throw new Error("Transport mode and destination are required when requesting a freight estimate.");
   }
 
-  const { error } = await supabase
-    .from("project_requests")
-    .update({
+  // m159 — mandatory tilt angle (same rule + defensive write as create).
+  const tiltAngle = cleanTiltAngle(str(formData, "solar_panel_tilt_angle"));
+  if (tiltAngle == null) {
+    throw new Error(
+      "Solar panel tilt angle is required (0–90°) — it determines the pole drawing and production."
+    );
+  }
+
+  const updateRow = {
       product_category_id: str(formData, "product_category_id"),
       country: str(formData, "country"),
       quantity,
@@ -306,9 +335,20 @@ export async function updateProjectRequest(formData: FormData): Promise<void> {
       req_packing_list: reqPacking,
       req_freight: reqFreight,
       updated_at: now(),
-    })
+  };
+  let { error } = await supabase
+    .from("project_requests")
+    .update({ ...updateRow, solar_panel_tilt_angle: tiltAngle })
     .eq("id", id)
     .eq("status", "draft");
+  if (error && /solar_panel_tilt_angle/i.test(error.message ?? "")) {
+    // m159 not applied yet — save the draft without the tilt column.
+    ({ error } = await supabase
+      .from("project_requests")
+      .update(updateRow)
+      .eq("id", id)
+      .eq("status", "draft"));
+  }
   if (error) throw new Error(error.message);
 
   revalidate();
@@ -506,25 +546,149 @@ export async function enterFactoryCost(formData: FormData): Promise<void> {
   };
   const { data: existing } = await supabase
     .from("factory_cost_requests")
-    .select("id")
+    .select("id, status, product_cost_rmb, pole_cost_rmb")
     .eq("project_request_id", projectId)
     .limit(1)
     .maybeSingle();
+
+  // m153 — REVISION MODE (owner rule: never overwrite a completed cost
+  // without a trace). Re-entering over a completed cost with changed values
+  // requires a reason and appends factory_cost_audit rows (same shape as the
+  // Director's override) BEFORE the update. First entry and notes-only edits
+  // stay reason-free.
+  const isRevision = (existing as any)?.status === "completed";
+  const reason = str(formData, "reason");
+  const audits: any[] = [];
+  if (isRevision && existing?.id) {
+    const oldProduct = (existing as any).product_cost_rmb;
+    const oldPole = (existing as any).pole_cost_rmb;
+    if (
+      patch.product_cost_rmb != null &&
+      patch.product_cost_rmb !== Number(oldProduct ?? NaN)
+    ) {
+      audits.push({
+        project_request_id: projectId,
+        factory_cost_request_id: existing.id,
+        field: "product_cost_rmb",
+        old_value: oldProduct,
+        new_value: patch.product_cost_rmb,
+        reason,
+        changed_by: user?.id ?? null,
+      });
+    }
+    if (
+      patch.pole_cost_rmb != null &&
+      patch.pole_cost_rmb !== Number(oldPole ?? NaN)
+    ) {
+      audits.push({
+        project_request_id: projectId,
+        factory_cost_request_id: existing.id,
+        field: "pole_cost_rmb",
+        old_value: oldPole,
+        new_value: patch.pole_cost_rmb,
+        reason,
+        changed_by: user?.id ?? null,
+      });
+    }
+    if (audits.length > 0 && !reason) {
+      throw new Error(
+        "A reason is required to revise a completed factory cost (e.g. Supplier quotation updated)."
+      );
+    }
+    // Audit FIRST (append-only), then update — never mutate history.
+    if (audits.length > 0) {
+      await supabase.from("factory_cost_audit").insert(audits);
+    }
+  }
+
   const { error } = existing?.id
     ? await supabase.from("factory_cost_requests").update(patch).eq("id", existing.id)
     : await supabase.from("factory_cost_requests").insert({ project_request_id: projectId, ...patch });
   if (error) throw new Error(error.message);
 
+  // m157 — REAL solar panel used for the costing (technical dossier). Ops
+  // enter it with the cost; stored on the SR itself so anyone can read the
+  // panel actually priced years later. Soft-fail pre-m157 (columns absent):
+  // the UI hides the inputs until the migration ledger row exists, so a
+  // failed update here can only be a race — never block the cost entry.
+  const panelPatch: Record<string, unknown> = {};
+  const panelFields = [
+    ["solar_panel_power_w", numOrNull(formData, "solar_panel_power_w")],
+    ["solar_panel_length_mm", numOrNull(formData, "solar_panel_length_mm")],
+    ["solar_panel_width_mm", numOrNull(formData, "solar_panel_width_mm")],
+    ["solar_panel_thickness_mm", numOrNull(formData, "solar_panel_thickness_mm")],
+    ["solar_panel_reference", str(formData, "solar_panel_reference")],
+  ] as const;
+  for (const [key, value] of panelFields) {
+    if (formData.has(key)) panelPatch[key] = value;
+  }
+  if (Object.keys(panelPatch).length > 0) {
+    await supabase.from("project_requests").update(panelPatch).eq("id", projectId);
+  }
+
   await emitEvent({
     entity_type: "project_request",
     entity_id: projectId,
     event_type: "pr.cost_entered",
-    message: `Factory cost entered (product ${patch.product_cost_rmb ?? "—"} RMB, pole ${patch.pole_cost_rmb ?? "—"} RMB)`,
-    payload: { product_cost_rmb: patch.product_cost_rmb, pole_cost_rmb: patch.pole_cost_rmb },
+    message: `Factory cost ${isRevision ? "revised" : "entered"} (product ${patch.product_cost_rmb ?? "—"} RMB, pole ${patch.pole_cost_rmb ?? "—"} RMB)${reason ? ` — ${reason}` : ""}`,
+    payload: {
+      product_cost_rmb: patch.product_cost_rmb,
+      pole_cost_rmb: patch.pole_cost_rmb,
+      ...(reason ? { reason } : {}),
+      ...(audits.length
+        ? { changes: audits.map((a) => ({ field: a.field, old: a.old_value, new: a.new_value })) }
+        : {}),
+    },
     bestEffort: true,
   });
   await recomputeWaitingStatus(supabase, projectId);
+  // Post-priced cost change ⇒ back to the Director's queue (one invariant:
+  // quotes never move until re-priced + explicitly applied).
+  if (audits.length > 0) {
+    await requeueForPricingAfterCostChange(supabase, projectId, reason, user?.id ?? null);
+  }
   revalidate(projectId);
+}
+
+/**
+ * m153 — after a value-changing cost write on an SR that was already priced
+ * (priced / quotation_generated), flip it back to ready_for_pricing and make
+ * sure a pending costing version carries the reason. `computeWaitingStatus`
+ * never touches post-priced statuses, so without this the Director is never
+ * queued (stale-status bug class). Terminal SRs are left untouched (audited
+ * bookkeeping only).
+ */
+async function requeueForPricingAfterCostChange(
+  supabase: ReturnType<typeof createClient>,
+  projectRequestId: string,
+  reason: string | null,
+  userId: string | null
+): Promise<void> {
+  const { data: pr } = await supabase
+    .from("project_requests")
+    .select("id, status")
+    .eq("id", projectRequestId)
+    .maybeSingle();
+  const status = (pr as any)?.status as string | undefined;
+  if (!status || !["priced", "quotation_generated"].includes(status)) return;
+  await upsertPendingRevision(supabase, {
+    projectRequestId,
+    reason: reason ?? "Factory cost revised",
+    requestedBy: userId,
+    previousStatus: status,
+  });
+  await supabase
+    .from("project_requests")
+    .update({ status: "ready_for_pricing", updated_at: now() })
+    .eq("id", projectRequestId);
+  await emitEvent({
+    entity_type: "project_request",
+    entity_id: projectRequestId,
+    event_type: "pr.ready_for_pricing",
+    message: `Factory cost revised — needs Director re-pricing${reason ? ` — ${reason}` : ""}`,
+    payload: reason ? { reason } : undefined,
+    bestEffort: true,
+  });
 }
 
 /** Sales Director override of factory cost — append-only audit, reason required. */
@@ -591,6 +755,9 @@ export async function overrideFactoryCost(formData: FormData): Promise<void> {
     bestEffort: true,
   });
   await recomputeWaitingStatus(supabase, projectId);
+  // Same invariant as enterFactoryCost: a post-priced cost change requeues
+  // the SR for Director re-pricing (m153).
+  await requeueForPricingAfterCostChange(supabase, projectId, reason, user?.id ?? null);
   revalidate(projectId);
 }
 
@@ -964,6 +1131,80 @@ export async function setProjectPricing(formData: FormData): Promise<void> {
     { onConflict: "project_request_id" }
   );
 
+  // m140/m153 — costing-version bookkeeping (fallback-guarded: pre-m140 envs
+  // skip silently). One request→approval cycle = ONE row: a pending revision
+  // request is approved IN PLACE (keeps requested_by/reason next to the
+  // approval); a spontaneous Director re-price inserts the next version
+  // directly as approved. Exactly one 'approved' per SR: prior approvals are
+  // superseded FIRST. previous_* snapshot the outgoing approved prices so the
+  // history reads old→new without joins.
+  try {
+    const { data: prevApproved } = await supabase
+      .from("project_costing_versions")
+      .select("id, product_unit_price, pole_unit_price, freight_total")
+      .eq("project_request_id", id)
+      .eq("status", "approved")
+      .order("version_no", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    await supabase
+      .from("project_costing_versions")
+      .update({ status: "superseded" })
+      .eq("project_request_id", id)
+      .eq("status", "approved");
+
+    const approvedPatch = {
+      status: "approved" as const,
+      approved_by: user?.id ?? null,
+      approved_at: now(),
+      currency: "USD",
+      quantity: pj?.quantity ?? null,
+      pole_quantity: poleRequired ? pj?.pole_quantity ?? null : null,
+      product_unit_price: productFinal,
+      pole_unit_price: poleFinal,
+      freight_total: (freight as any)?.estimated_total_freight ?? null,
+      previous_product_unit_price:
+        (prevApproved as any)?.product_unit_price ?? null,
+      previous_pole_unit_price: (prevApproved as any)?.pole_unit_price ?? null,
+      previous_freight_total: (prevApproved as any)?.freight_total ?? null,
+    };
+    const { data: approvedInPlace } = await supabase
+      .from("project_costing_versions")
+      .update(approvedPatch)
+      .eq("project_request_id", id)
+      .eq("status", "pending")
+      .select("id")
+      .maybeSingle();
+    if (!approvedInPlace) {
+      const { data: maxRow } = await supabase
+        .from("project_costing_versions")
+        .select("version_no")
+        .eq("project_request_id", id)
+        .order("version_no", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      const base = {
+        project_request_id: id,
+        requested_by: user?.id ?? null,
+        requested_at: now(),
+        reason: str(formData, "margin_notes") ?? "Re-priced by Director",
+        ...approvedPatch,
+      };
+      const nextNo = (Number((maxRow as any)?.version_no) || 0) + 1;
+      const { error: insErr } = await supabase
+        .from("project_costing_versions")
+        .insert({ ...base, version_no: nextNo });
+      if (insErr && (insErr as any).code === "23505") {
+        // Rare version_no race — one retry with the next number.
+        await supabase
+          .from("project_costing_versions")
+          .insert({ ...base, version_no: nextNo + 1 });
+      }
+    }
+  } catch {
+    /* pre-m140 — versions dormant */
+  }
+
   await emitEvent({
     entity_type: "project_request",
     entity_id: id,
@@ -971,27 +1212,88 @@ export async function setProjectPricing(formData: FormData): Promise<void> {
     message: `Priced — product ${productMargin}% margin`,
     bestEffort: true,
   });
+
+  // m140 — notify each LIVE quotation built from this SR that a newer costing
+  // exists (the salesperson decides Keep/Apply on the doc; nothing changes
+  // automatically). Doc-entity event so the bell lands ON the quotation and
+  // reaches the doc owner even when they differ from the SR owner.
+  try {
+    const liveDocIds = new Set<string>();
+    const { data: lineDocs } = await supabase
+      .from("document_lines")
+      .select("document_id")
+      .eq("source_project_request_id", id);
+    for (const r of (lineDocs ?? []) as any[]) liveDocIds.add(r.document_id);
+    const { data: prRow } = await supabase
+      .from("project_requests")
+      .select("generated_document_id")
+      .eq("id", id)
+      .maybeSingle();
+    if ((prRow as any)?.generated_document_id)
+      liveDocIds.add((prRow as any).generated_document_id);
+    if (liveDocIds.size) {
+      const { data: docs } = await supabase
+        .from("documents")
+        .select("id, number, status")
+        .in("id", Array.from(liveDocIds))
+        .in("status", ["draft", "sent", "negotiating"]);
+      for (const d of (docs ?? []) as any[]) {
+        await emitEvent({
+          entity_type: "document",
+          entity_id: d.id,
+          event_type: "doc.newer_costing_available",
+          message: `A newer costing was approved for ${
+            (pj as any)?.name ?? "the Service Request"
+          } — open ${d.number ?? "the quotation"} to apply or keep it.`,
+          payload: { project_request_id: id },
+          bestEffort: true,
+        });
+      }
+    }
+  } catch {
+    /* best-effort — pre-m139 envs have no line link */
+  }
   revalidate(id);
 }
 
-// ---------------------------- request costing revision (m139) ----------------------------
+// ------------------- request / dismiss cost revision (m139→m153) -------------------
 
 /**
- * m139 — from a locked quotation line, ask the Sales Director to re-cost the
- * source Service Request. The SR is the single source of truth for costing, so
- * we REOPEN it for pricing (never spawn a new SR) and notify the Director. The
- * quotation itself is left untouched — it keeps its approved price until a new
- * costing is approved and the salesperson explicitly applies it. (Phase 2 turns
- * this into a full costing-version revision with history.)
+ * Ask for a manufacturing-cost revision on a Service Request (owner workflow
+ * 2026-07-08). ANYONE holding `project.request_cost_revision` (sales, dir,
+ * TLM, ops — m153) can flag an outdated costing with a MANDATORY reason; only
+ * cost-authorized users then update the costs. The SR is the single source of
+ * truth: we reopen it for re-pricing (never a new SR), persist the request as
+ * a PENDING costing version (m140 — by/at/reason + previous_status so a
+ * dismissal can restore it), and notify the Director. Quotations are left
+ * untouched until a new costing is approved and explicitly applied.
  *
- * `projectRequestId` is passed directly (client action), not via FormData.
+ * Called from the quotation locked-line card and the SR page. Args are plain
+ * (client action), not FormData.
  */
 export async function requestCostingRevision(
-  projectRequestId: string
+  projectRequestId: string,
+  reason: string
 ): Promise<void> {
-  await requireCapability("project.generate_quotation");
+  // TRANSITION gate: `hasCapability` is fail-closed with no admin floor, so a
+  // hard switch to the new key would kill the existing quotation button until
+  // m153 is applied. Drop the legacy OR once m153 is live everywhere.
+  const allowed =
+    (await hasCapability("project.request_cost_revision")) ||
+    (await hasCapability("project.generate_quotation"));
+  if (!allowed) {
+    throw new Error(
+      "Missing required capability: project.request_cost_revision. Ask a super-admin to enable this for your role in /permissions/actions."
+    );
+  }
   if (!projectRequestId) throw new Error("Missing project request id");
+  const cleanReason = (reason ?? "").trim();
+  if (!cleanReason)
+    throw new Error("A reason is required to request a cost revision.");
   const supabase = createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
 
   const { data: pr } = await supabase
     .from("project_requests")
@@ -999,6 +1301,26 @@ export async function requestCostingRevision(
     .eq("id", projectRequestId)
     .maybeSingle();
   if (!pr) throw new Error("Service Request not found or not visible.");
+  if (["won", "lost", "cancelled"].includes((pr as any).status)) {
+    throw new Error(
+      `This Service Request is closed (${(pr as any).status}) — a closed costing can't be revised. Create a new Service Request for a new deal.`
+    );
+  }
+
+  // Persist the request as a pending costing version (m140). Fallback-guarded:
+  // pre-m140 env (42P01) keeps the Phase-1 behavior; an existing pending row
+  // (23505 on the partial unique index) is a friendly no-op error.
+  const inserted = await upsertPendingRevision(supabase, {
+    projectRequestId,
+    reason: cleanReason,
+    requestedBy: user?.id ?? null,
+    previousStatus: (pr as any).status ?? null,
+  });
+  if (inserted === "already_pending") {
+    throw new Error(
+      "A cost revision is already pending on this Service Request — the Director has been notified."
+    );
+  }
 
   // Reopen for re-pricing. Best-effort: if RLS blocks this requester from
   // updating, the notification below still reaches the Director, who can act.
@@ -1011,9 +1333,123 @@ export async function requestCostingRevision(
     entity_type: "project_request",
     entity_id: projectRequestId,
     event_type: "pr.ready_for_pricing",
-    message: `Costing revision requested from the quotation — please re-cost ${
+    message: `Cost revision requested — ${cleanReason} — please re-cost ${
       (pr as any)?.name ?? "this Service Request"
     }.`,
+    payload: { reason: cleanReason },
+    bestEffort: true,
+  });
+  revalidate(projectRequestId);
+}
+
+/** ActionForm-friendly wrapper (SR page): reads project_id + reason. */
+export async function requestCostingRevisionForm(
+  formData: FormData
+): Promise<void> {
+  const projectRequestId = reqStr(formData, "project_id");
+  const reason = reqStr(formData, "reason");
+  await requestCostingRevision(projectRequestId, reason);
+}
+
+/**
+ * Insert (or reuse) the pending m140 costing-version row for a revision
+ * request. Returns 'inserted' | 'already_pending' | 'unavailable' (pre-m140).
+ */
+async function upsertPendingRevision(
+  supabase: ReturnType<typeof createClient>,
+  input: {
+    projectRequestId: string;
+    reason: string;
+    requestedBy: string | null;
+    previousStatus: string | null;
+  }
+): Promise<"inserted" | "already_pending" | "unavailable"> {
+  try {
+    const { data: maxRow } = await supabase
+      .from("project_costing_versions")
+      .select("version_no")
+      .eq("project_request_id", input.projectRequestId)
+      .order("version_no", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    const nextNo = (Number((maxRow as any)?.version_no) || 0) + 1;
+    const { error } = await supabase.from("project_costing_versions").insert({
+      project_request_id: input.projectRequestId,
+      version_no: nextNo,
+      status: "pending",
+      requested_by: input.requestedBy,
+      requested_at: now(),
+      reason: input.reason,
+      previous_status: input.previousStatus,
+    });
+    if (!error) return "inserted";
+    if ((error as any).code === "23505") return "already_pending";
+    return "unavailable"; // 42P01 pre-m140, or transient — Phase-1 behavior
+  } catch {
+    return "unavailable";
+  }
+}
+
+/**
+ * Dismiss a pending cost-revision request (human review — distinct from the
+ * automatic 'cancelled' on terminal SRs). Restores the SR status captured at
+ * request time so the SR doesn't stay stuck in the Director's pricing queue.
+ * Gate: cost-authorized users (enter_cost ∪ override_cost — ops/TLM/director;
+ * finance rides along via enter_cost, flagged to the owner).
+ */
+export async function dismissCostRevision(formData: FormData): Promise<void> {
+  const canDismiss =
+    (await hasCapability("project.enter_cost")) ||
+    (await hasCapability("project.override_cost"));
+  if (!canDismiss) {
+    throw new Error(
+      "Missing required capability: project.enter_cost. Ask a super-admin to enable this for your role in /permissions/actions."
+    );
+  }
+  const projectRequestId = reqStr(formData, "project_id");
+  const versionId = reqStr(formData, "version_id");
+  const note = str(formData, "note");
+  const supabase = createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  // Only a still-pending row can be dismissed (double-dismiss no-ops).
+  const { data: dismissed } = await supabase
+    .from("project_costing_versions")
+    .update({
+      status: "dismissed",
+      dismissed_by: user?.id ?? null,
+      dismissed_at: now(),
+      ...(note ? { notes: note } : {}),
+    })
+    .eq("id", versionId)
+    .eq("status", "pending")
+    .select("id, previous_status")
+    .maybeSingle();
+  if (!dismissed) {
+    // Already handled (approved/dismissed/cancelled) — nothing to do.
+    revalidate(projectRequestId);
+    return;
+  }
+
+  // Restore the SR to where it was when the request was made (best-effort;
+  // null previous_status = leave as-is).
+  const prev = (dismissed as any).previous_status as string | null;
+  if (prev && prev !== "ready_for_pricing") {
+    await supabase
+      .from("project_requests")
+      .update({ status: prev, updated_at: now() })
+      .eq("id", projectRequestId)
+      .eq("status", "ready_for_pricing");
+  }
+
+  await emitEvent({
+    entity_type: "project_request",
+    entity_id: projectRequestId,
+    event_type: "pr.cost_revision_dismissed",
+    message: `Cost revision request dismissed${note ? ` — ${note}` : ""}`,
+    payload: { version_id: versionId, note },
     bestEffort: true,
   });
   revalidate(projectRequestId);
@@ -1151,10 +1587,11 @@ export async function generateQuotationFromProject(formData: FormData): Promise<
     name: string,
     unit: number,
     q: number,
+    component: "product" | "pole",
     categoryId: string | null = null
   ): DocumentLine => ({
     product_id: null as unknown as string, // free-text line (product_id nullable, m089)
-    category_id: categoryId, // m133 — product family for the factory-mapping resolver
+    category_id: categoryId, // m133 — line-level product family for the factory-mapping resolver
     quantity: q,
     selected_options: {},
     unit_price: round2(unit),
@@ -1173,6 +1610,9 @@ export async function generateQuotationFromProject(formData: FormData): Promise<
     source_project_request_id: id,
     approved_by: pr?.priced_by ?? null,
     approved_at: pr?.priced_at ?? null,
+    // m140 — which approved SR price this line takes; the selective
+    // Keep/Apply flow relies on it (never guesses).
+    source_component: component,
   });
 
   const poleQty = Math.max(1, Number(pr?.pole_quantity ?? p.pole_quantity ?? qty));
@@ -1180,8 +1620,8 @@ export async function generateQuotationFromProject(formData: FormData): Promise<
 
   // PRODUCTS — Project Product + Pole only (Logistics handled below).
   const lines: DocumentLine[] = [];
-  if (includeProduct && productUnit > 0) lines.push(mkLine(productName, productUnit, qty, productCategoryId));
-  if (includePole && poleAllowed && poleUnit > 0) lines.push(mkLine(poleName, poleUnit, poleQty));
+  if (includeProduct && productUnit > 0) lines.push(mkLine(productName, productUnit, qty, "product", productCategoryId));
+  if (includePole && poleAllowed && poleUnit > 0) lines.push(mkLine(poleName, poleUnit, poleQty, "pole"));
 
   // LOGISTICS — freight goes into the document Shipping section as containers
   // (type-mapped from the freight breakdown, unit_price = freight per
@@ -1341,6 +1781,17 @@ export async function setProjectOutcome(formData: FormData): Promise<void> {
     .update({ status: outcome, updated_at: now() })
     .eq("id", id);
   if (error) throw new Error(error.message);
+  // m140/m153 — a terminal outcome auto-closes any zombie pending revision
+  // ('cancelled', distinct from a human 'dismissed'). Best-effort, pre-m140 safe.
+  try {
+    await supabase
+      .from("project_costing_versions")
+      .update({ status: "cancelled" })
+      .eq("project_request_id", id)
+      .eq("status", "pending");
+  } catch {
+    /* pre-m140 — dormant */
+  }
   await emitEvent({
     entity_type: "project_request",
     entity_id: id,
@@ -1446,16 +1897,28 @@ export async function recordProjectFile(formData: FormData): Promise<void> {
   const {
     data: { user },
   } = await supabase.auth.getUser();
+  const category = str(formData, "category") ?? "other";
   const { error } = await supabase.from("project_request_files").insert({
     project_request_id: projectId,
     storage_path: reqStr(formData, "storage_path"),
     file_name: reqStr(formData, "file_name"),
     file_size: intOrNull(formData, "file_size"),
     mime_type: str(formData, "mime_type"),
-    category: str(formData, "category") ?? "other",
+    category,
     uploaded_by: user?.id ?? null,
   });
-  if (error) throw new Error(error.message);
+  if (error) {
+    // m157 categories before the migration → the check constraint fires.
+    if (
+      /category_check/.test(error.message ?? "") &&
+      (category === "costing" || category === "pole_drawing")
+    ) {
+      throw new Error(
+        `The "${category}" file category needs migration m157 (157_sr_technical_dossier.sql) — apply it in Supabase, then retry.`
+      );
+    }
+    throw new Error(error.message);
+  }
   revalidate(projectId);
 }
 

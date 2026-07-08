@@ -90,6 +90,8 @@ const DEFAULT_SEVERITY: Record<EventType, EventSeverity> = {
   "doc.validation_approved": "medium",
   "doc.validation_rejected": "high",
   "tl.header_changed": "low",
+  // m159 — sales must collect the customer's branding assets (packaging).
+  "tl.customer_branding_required": "high",
   "client.created": "low",
   "client.updated": "low",
   "client.deleted": "critical",
@@ -105,6 +107,8 @@ const DEFAULT_SEVERITY: Record<EventType, EventSeverity> = {
   // the sales owner's bell (booking is blocked until they act). The affair
   // mirror is the history entry only.
   "po.bl_info_requested": "high",
+  "po.docs_requirements_requested": "high",
+  "po.docs_requirements_resolved": "medium",
   // Resolution is MEDIUM: it lands in the timeline + feed ("blocker
   // lifted") without ringing anyone's bell — good news needs no alarm.
   "po.bl_info_resolved": "medium",
@@ -124,12 +128,17 @@ const DEFAULT_SEVERITY: Record<EventType, EventSeverity> = {
   "doc.shipping_update_requested": "medium",
   "doc.shipping_update_completed": "medium",
   "doc.shipping_update_cancelled": "low",
+  "doc.newer_costing_available": "medium",
+  "doc.costing_applied": "low",
+  "doc.costing_kept": "low",
+  "doc.sent_with_expired_costing": "low",
   "pr.ready_for_pricing": "medium",
   "pr.priced": "medium",
   "pr.quotation_generated": "medium",
   "pr.won": "medium",
   "pr.lost": "low",
   "pr.cancelled": "critical",
+  "pr.cost_revision_dismissed": "medium",
   "admin.permissions_changed": "high",
   "admin.user_role_changed": "high",
   "import.batch_completed": "low",

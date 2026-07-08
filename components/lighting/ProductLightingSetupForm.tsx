@@ -275,6 +275,8 @@ export default function ProductLightingSetupForm({
     setAi({ kind: "extracting" });
     const fd = new FormData();
     fd.set("storage_path", energyStudy.path);
+    // m159 — lets the action auto-fill the task list's tilt angle (empty-only).
+    fd.set("document_id", documentId);
     const res = await extractEnergyStudyAction(fd);
     if (!res.ok) {
       setAi({
@@ -283,10 +285,10 @@ export default function ProductLightingSetupForm({
       });
       return;
     }
-    applyExtraction(res.extraction);
+    applyExtraction(res.extraction, res.tiltApplied);
   }
 
-  function applyExtraction(ex: LightingExtraction) {
+  function applyExtraction(ex: LightingExtraction, tiltApplied = false) {
     // Manual values always win — only fill fields the user left empty.
     if (power.trim() === "" && ex.lighting_power != null) {
       setPower(String(ex.lighting_power));
@@ -309,6 +311,7 @@ export default function ProductLightingSetupForm({
         lighting_power: ex.lighting_power,
         operating_hours: ex.operating_hours,
         lighting_program: cleanProgram,
+        tilt_angle: ex.tilt_angle ?? null, // m159 — audit of the auto-fill
       },
       confidence: ex.confidence,
       model: ex.model,
@@ -318,15 +321,24 @@ export default function ProductLightingSetupForm({
     const confs = Object.values(ex.confidence ?? {}).filter((n) =>
       Number.isFinite(n)
     );
+    // m159 — surface the detected tilt angle. When it was applied to the task
+    // list, refresh the page so the Industrial file section shows it live.
+    const tiltNote =
+      ex.tilt_angle != null
+        ? tiltApplied
+          ? ` Tilt angle ${ex.tilt_angle}° detected — applied to the task list (override it there if needed).`
+          : ` Tilt angle ${ex.tilt_angle}° detected — the task list already has a value, so it was kept.`
+        : "";
     const minConf = confs.length ? Math.min(...confs) : 0;
     if (minConf >= AI_CONFIDENCE_MIN) {
-      setAi({ kind: "ok", note: "Successfully extracted — review the values." });
+      setAi({ kind: "ok", note: `Successfully extracted — review the values.${tiltNote}` });
     } else {
       setAi({
         kind: "verify",
-        note: "Please verify the extracted values before continuing.",
+        note: `Please verify the extracted values before continuing.${tiltNote}`,
       });
     }
+    if (tiltApplied) router.refresh();
     setAiDetailsOpen(true); // fresh analysis → open the details for review
   }
 

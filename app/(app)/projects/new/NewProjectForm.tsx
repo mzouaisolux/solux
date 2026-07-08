@@ -7,6 +7,7 @@ import { toast } from "@/components/feedback/toast-store";
 import { SubmitButton } from "@/components/feedback/ActionForm";
 import { TRANSPORT_MODES, TRANSPORT_MODE_LABEL } from "@/lib/types";
 import { ACTIVE_SERVICE_TYPES } from "@/lib/service-types";
+import { TILT_ANGLE_PRESETS, cleanTiltAngle } from "@/lib/industrial-spec";
 
 function isNavError(e: any): boolean {
   const d = e?.digest;
@@ -36,6 +37,9 @@ export type ProjectFormInitial = {
   reqFreight?: boolean;
   ledPower?: string;
   solarPanelSize?: string;
+  /** m159 — Solar Panel Tilt Angle (degrees) — MANDATORY: it drives the pole
+   *  drawing and factory production instructions downstream. */
+  tiltAngle?: string;
   batterySpec?: string;
   controller?: string;
   iotRequired?: boolean;
@@ -96,6 +100,16 @@ export default function NewProjectForm({
   const [reqProduct, setReqProduct] = useState(initial?.reqProduct ?? true);
   const [reqPacking, setReqPacking] = useState(initial?.reqPacking ?? false);
   const [reqFreight, setReqFreight] = useState(initial?.reqFreight ?? false);
+  // m159 — Solar Panel Tilt Angle (degrees). MANDATORY (owner 2026-07-08): it
+  // determines the pole drawing and factory production instructions. Presets
+  // 0/10/15/20/30/45° + a custom value.
+  const initialTilt = (initial?.tiltAngle ?? "").trim();
+  const tiltIsPreset = TILT_ANGLE_PRESETS.some((p) => String(p) === initialTilt);
+  const [tiltChoice, setTiltChoice] = useState<string>(
+    initialTilt === "" ? "" : tiltIsPreset ? initialTilt : "custom"
+  );
+  const [tiltCustom, setTiltCustom] = useState<string>(tiltIsPreset ? "" : initialTilt);
+  const tiltValue = tiltChoice === "custom" ? tiltCustom.trim() : tiltChoice;
   // pole — default OFF (#9): poles are the exception, not the rule; an opt-in
   // checkbox stops every request silently including poles. Edit mode keeps the
   // stored value (initial?.poleRequired wins when defined).
@@ -153,9 +167,19 @@ export default function NewProjectForm({
     }
     return true;
   }
+  function canLeaveStep2(): boolean {
+    // m159 — the tilt angle is mandatory: it drives the pole drawing +
+    // production. Validate before Review so the error lands next to the field.
+    if (tiltValue === "" || cleanTiltAngle(tiltValue) == null) {
+      toast.error("Solar panel tilt angle is required (0–90°) — pick a preset or enter a custom value.");
+      return false;
+    }
+    return true;
+  }
   function next() {
     if (step === 0 && !canLeaveStep0()) return;
     if (step === 1 && !canLeaveStep1()) return;
+    if (step === 2 && !canLeaveStep2()) return;
     setStep((s) => Math.min(STEPS.length - 1, s + 1));
   }
   function back() { setStep((s) => Math.max(0, s - 1)); }
@@ -177,6 +201,12 @@ export default function NewProjectForm({
             const m = "An affair is required to create a service request.";
             setFormError(m); toast.error(m); return;
           }
+        }
+        // m159 — final backstop for the mandatory tilt angle (the wizard
+        // already blocks leaving the Configuration step without it).
+        if (tiltValue === "" || cleanTiltAngle(tiltValue) == null) {
+          const m = "Solar panel tilt angle is required (0–90°).";
+          setFormError(m); toast.error(m); return;
         }
         try {
           // both redirect on success → ?flash confirms on the detail page
@@ -356,6 +386,38 @@ export default function NewProjectForm({
         <div className="fgrid">
           <div className="fcol"><span className="fl">LED power</span><input name="led_power" placeholder="e.g. 60W" defaultValue={initial?.ledPower || undefined} /></div>
           <div className="fcol"><span className="fl">Solar panel size</span><input name="solar_panel_size" placeholder="e.g. 120W" defaultValue={initial?.solarPanelSize || undefined} /></div>
+          <div className="fcol">
+            <span className="fl">Solar panel tilt angle <span className="req">*</span></span>
+            <select
+              value={tiltChoice}
+              onChange={(e) => setTiltChoice(e.target.value)}
+              aria-label="Solar panel tilt angle"
+            >
+              <option value="">— Select the tilt angle —</option>
+              {TILT_ANGLE_PRESETS.map((a) => (
+                <option key={a} value={String(a)}>{a}°</option>
+              ))}
+              <option value="custom">Custom…</option>
+            </select>
+            {tiltChoice === "custom" && (
+              <input
+                type="number"
+                min={0}
+                max={90}
+                step="0.5"
+                value={tiltCustom}
+                onChange={(e) => setTiltCustom(e.target.value)}
+                placeholder="e.g. 25"
+                style={{ marginTop: 6 }}
+                aria-label="Custom tilt angle (degrees)"
+              />
+            )}
+            {/* The resolved value travels as one field; the server re-validates. */}
+            <input type="hidden" name="solar_panel_tilt_angle" value={tiltValue} />
+            <span style={{ fontSize: 11, color: "var(--sx-mute-2)", marginTop: 4 }}>
+              Drives the pole drawing &amp; production — mandatory.
+            </span>
+          </div>
           <div className="fcol"><span className="fl">Battery specification</span><input name="battery_spec" placeholder="e.g. 12.8V 60Ah LiFePO4" defaultValue={initial?.batterySpec || undefined} /></div>
           <div className="fcol"><span className="fl">Controller</span><input name="controller" placeholder="e.g. MPPT 20A" defaultValue={initial?.controller || undefined} /></div>
           <div className="fcol" style={{ display: "flex", alignItems: "center", gap: 9, paddingTop: 24 }}>
@@ -428,6 +490,7 @@ export default function NewProjectForm({
           <Summary label="Affair" value={affairName ?? "—"} />
           <Summary label="Product category" value={categoryName ?? "—"} />
           <Summary label="Quantity" value={hasQty ? quantity : "—"} />
+          <Summary label="Panel tilt angle" value={tiltValue !== "" ? `${tiltValue}°` : "—"} />
           <Summary label="Pole" value={yn(poleRequired)} />
           {poleRequired && <Summary label="Pole qty" value={orDash(poleQuantity)} />}
           {poleRequired && <Summary label="Pole height" value={orDash(poleHeight)} />}

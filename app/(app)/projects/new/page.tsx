@@ -165,6 +165,8 @@ export default async function NewProjectPage({
         reqFreight: pr.req_freight ?? false,
         ledPower: pr.led_power ?? "",
         solarPanelSize: pr.solar_panel_size ?? "",
+        // m159 — undefined pre-migration (select("*") simply lacks the column).
+        tiltAngle: pr.solar_panel_tilt_angle != null ? String(pr.solar_panel_tilt_angle) : "",
         batterySpec: pr.battery_spec ?? "",
         controller: pr.controller ?? "",
         iotRequired: pr.iot_required ?? false,

@@ -59,6 +59,8 @@ export const NOTIFICATION_CATALOG: Record<EventType, NotificationCatalogEntry> =
   "po.production_completed": { entity: "production_order", category: "production", severity: "high", label: "Production completed" },
   "po.bl_info_requested": { entity: "production_order", category: "shipping", severity: "high", label: "BL info requested from sales" },
   "po.bl_info_resolved": { entity: "production_order", category: "shipping", severity: "medium", label: "BL info completed" },
+  "po.docs_requirements_requested": { entity: "production_order", category: "shipping", severity: "high", label: "Shipping docs requirements requested from sales" },
+  "po.docs_requirements_resolved": { entity: "production_order", category: "shipping", severity: "medium", label: "Shipping docs requirements confirmed" },
   "po.cancelled": { entity: "production_order", category: "production", severity: "critical", label: "Production order cancelled" },
   // ---- task_list ----
   "tl.submitted_for_validation": { entity: "task_list", category: "workflow", severity: "low", label: "Task list submitted for validation" },
@@ -70,6 +72,7 @@ export const NOTIFICATION_CATALOG: Record<EventType, NotificationCatalogEntry> =
   "tl.deleted": { entity: "task_list", category: "workflow", severity: "critical", label: "Task list deleted" },
   "tl.status_overridden": { entity: "task_list", category: "workflow", severity: "high", label: "Task list status overridden" },
   "tl.header_changed": { entity: "task_list", category: "bookkeeping", severity: "low", label: "Task list header changed" },
+  "tl.customer_branding_required": { entity: "task_list", category: "workflow", severity: "high", label: "Customer branding required (packaging)" },
   // ---- document (quotation) ----
   "doc.created": { entity: "document", category: "crm", severity: "low", label: "Quotation created" },
   "doc.updated": { entity: "document", category: "crm", severity: "low", label: "Quotation updated" },
@@ -85,6 +88,10 @@ export const NOTIFICATION_CATALOG: Record<EventType, NotificationCatalogEntry> =
   "doc.shipping_update_requested": { entity: "document", category: "shipping", severity: "medium", label: "Shipping update requested" },
   "doc.shipping_update_completed": { entity: "document", category: "shipping", severity: "medium", label: "Shipping quotation updated" },
   "doc.shipping_update_cancelled": { entity: "document", category: "shipping", severity: "low", label: "Shipping update cancelled" },
+  "doc.newer_costing_available": { entity: "document", category: "money", severity: "medium", label: "Newer costing available" },
+  "doc.costing_applied": { entity: "document", category: "money", severity: "low", label: "Latest costing applied" },
+  "doc.costing_kept": { entity: "document", category: "money", severity: "low", label: "Existing costing kept" },
+  "doc.sent_with_expired_costing": { entity: "document", category: "money", severity: "low", label: "Sent with expired costing" },
   // ---- client ----
   "client.created": { entity: "client", category: "crm", severity: "low", label: "Client created" },
   "client.updated": { entity: "client", category: "crm", severity: "low", label: "Client updated" },
@@ -118,6 +125,7 @@ export const NOTIFICATION_CATALOG: Record<EventType, NotificationCatalogEntry> =
   "pr.won": { entity: "project_request", category: "crm", severity: "medium", label: "Service request won" },
   "pr.lost": { entity: "project_request", category: "crm", severity: "low", label: "Service request lost" },
   "pr.cancelled": { entity: "project_request", category: "crm", severity: "critical", label: "Service request cancelled" },
+  "pr.cost_revision_dismissed": { entity: "project_request", category: "money", severity: "medium", label: "Cost revision dismissed" },
   // ---- admin / system ----
   "admin.permissions_changed": { entity: "system", category: "governance", severity: "high", label: "Permissions matrix changed" },
   "admin.user_role_changed": { entity: "system", category: "governance", severity: "high", label: "User role changed" },

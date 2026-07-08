@@ -156,6 +156,8 @@ export type ProjectRequestFileCategory =
   | "image"
   | "requirement"
   | "packing"
+  | "costing" // m157 — costing Excel (cost-sensitive: view_cost only)
+  | "pole_drawing" // m157 — pole drawing used for the quotation
   | "other";
 
 export const PROJECT_FILE_CATEGORY_LABEL: Record<ProjectRequestFileCategory, string> = {
@@ -165,8 +167,19 @@ export const PROJECT_FILE_CATEGORY_LABEL: Record<ProjectRequestFileCategory, str
   image: "Image",
   requirement: "Customer requirement",
   packing: "Packing list",
+  costing: "Costing Excel",
+  pole_drawing: "Pole drawing",
   other: "Other",
 };
+
+/**
+ * Categories kept OUT of the free-category dropdown: they belong to a
+ * dedicated, capability-scoped uploader ('costing' is cost-sensitive and
+ * hidden from Sales — offering it in the general picker would let someone
+ * upload a file they then cannot see).
+ */
+export const PROJECT_FILE_SPECIALIZED_CATEGORIES: ReadonlySet<ProjectRequestFileCategory> =
+  new Set(["costing"]);
 
 /** A single container line on a packing list (m094). */
 export const PROJECT_CONTAINER_TYPES = ["20GP", "40GP", "40HQ", "LCL"] as const;
@@ -282,7 +295,10 @@ export type FreightCostRequest = {
 
 /** Freight validity state (m098). `none` = no validity set yet. */
 export type FreightStatus = "valid" | "expiring_soon" | "expired" | "none";
-export const FREIGHT_VALIDITY_PERIODS = [30, 60, 90] as const;
+// Owner spec 2026-07-08 (Task List industrial round): freight prices now move
+// much faster than before — 60/90-day validities no longer reflect reality.
+// Pills are 7/15/30 days; anything longer goes through the custom date picker.
+export const FREIGHT_VALIDITY_PERIODS = [7, 15, 30] as const;
 
 /** Append-only freight update audit row (m098). */
 export type FreightCostAudit = {
@@ -1494,6 +1510,12 @@ export type DocumentLine = {
   approved_by?: string | null;
   /** When the SR pricing was approved (from project_products.priced_at). */
   approved_at?: string | null;
+  /**
+   * m140 — which approved SR price this line takes ('product' | 'pole').
+   * Stamped at generation so the selective Keep/Apply flow never has to guess
+   * (lib/costing-apply refuses ambiguity instead).
+   */
+  source_component?: "product" | "pole" | null;
   // UI-only (not persisted): set when a line was pre-filled from a previous quotation
   previous_unit_price?: number;
 };

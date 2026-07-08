@@ -27,6 +27,11 @@ import {
   parseFactoryExtras,
   normalizeFactoryExtras,
 } from "@/lib/factory-extras";
+import {
+  cleanTiltAngle,
+  normalizeIndustrialSpec,
+  packagingRequiresBranding,
+} from "@/lib/industrial-spec";
 // NOTE: `requireTaskListManagerOrAdmin()` is kept ONLY for the two
 // content-editing actions (line-level technical/factory overrides)
 // that aren't yet covered by the 19 capabilities catalog. Every
@@ -60,6 +65,29 @@ function eventTypeForTransition(
     default:
       return null;
   }
+}
+
+/**
+ * m159 — is the pole-drawing ↔ tilt-angle checkpoint still PENDING for this
+ * task list? Pending = a solar-panel tilt angle is set but the TLM hasn't
+ * confirmed the pole drawing matches it. Defensive: any error (columns absent
+ * pre-m159, row unreadable) → false, the checkpoint never blocks a deployment
+ * that predates the migration.
+ */
+async function tiltCheckpointPendingFor(
+  supabase: ReturnType<typeof createClient>,
+  id: string
+): Promise<boolean> {
+  const { data, error } = await supabase
+    .from("production_task_lists")
+    .select("solar_panel_tilt_angle, pole_drawing_tilt_verified")
+    .eq("id", id)
+    .maybeSingle();
+  if (error || !data) return false;
+  return (
+    (data as any).solar_panel_tilt_angle != null &&
+    (data as any).pole_drawing_tilt_verified !== true
+  );
 }
 
 /**
@@ -173,6 +201,208 @@ export async function updateStickerRequirements(formData: FormData) {
     event_type: "tl.header_changed",
     message: `Sticker requirements updated on ${current.number ?? "task list"}`,
     payload: { section: "sticker_requirements", number: current.number },
+    bestEffort: true,
+  });
+
+  revalidatePath(`/task-lists/${id}`);
+}
+
+/**
+ * m159 — save the INDUSTRIAL PRODUCTION FILE: the solar-panel tilt angle +
+ * the industrial_spec blob (pole accessories, packaging version, user
+ * manuals, spare parts). Same edit gate as the header (sales while
+ * draft/needs_revision; technical any pre-terminal).
+ *
+ * Two side-effects:
+ *   • changing the TILT ANGLE resets the pole-drawing checkpoint — the
+ *     drawing must be re-verified against the new angle (release gate).
+ *   • setting the packaging version to "Customized Client" notifies Sales
+ *     (event tl.customer_branding_required + a to-do on the affair): the
+ *     customer logo/design files must be collected before production.
+ */
+export async function updateIndustrialFile(formData: FormData) {
+  const id = String(formData.get("id"));
+  if (!id) throw new Error("Missing task list id");
+
+  const { role, userId } = await getCurrentUserRole();
+  const supabase = createClient();
+
+  const { data: current } = await supabase
+    .from("production_task_lists")
+    .select("status, number, affair_id, client_id")
+    .eq("id", id)
+    .maybeSingle();
+  if (!current) throw new Error("Task list not found");
+
+  if (
+    !isTechnicalRole(role) &&
+    TASK_LIST_LOCKED_FOR_SALES.includes(
+      current.status as ProductionTaskListStatus
+    )
+  ) {
+    throw new Error(
+      "This task list is in production validation and can no longer be edited by sales."
+    );
+  }
+
+  // Pre-state of the m159 columns — fetched separately + defensively so the
+  // basic read above still works pre-migration (42703 only hits this select).
+  const { data: pre, error: preErr } = await supabase
+    .from("production_task_lists")
+    .select("solar_panel_tilt_angle, industrial_spec")
+    .eq("id", id)
+    .maybeSingle();
+  if (preErr) {
+    throw new Error(
+      "Industrial file columns missing — apply migration m159 (159_task_list_industrial_file.sql) in Supabase."
+    );
+  }
+  const oldTilt = (pre as any)?.solar_panel_tilt_angle ?? null;
+  const oldSpec = normalizeIndustrialSpec((pre as any)?.industrial_spec);
+
+  // Tilt angle: empty clears it (legacy lists), anything else must be 0–90°.
+  const tiltRaw = String(formData.get("solar_panel_tilt_angle") ?? "").trim();
+  const newTilt = tiltRaw === "" ? null : cleanTiltAngle(tiltRaw);
+  if (tiltRaw !== "" && newTilt == null) {
+    throw new Error("Invalid solar panel tilt angle — enter a value between 0 and 90 degrees.");
+  }
+
+  const rawSpec = String(formData.get("industrial_spec") ?? "");
+  let parsedSpec: unknown;
+  try {
+    parsedSpec = JSON.parse(rawSpec || "{}");
+  } catch {
+    throw new Error("Invalid industrial file payload (must be JSON).");
+  }
+  const spec = normalizeIndustrialSpec(parsedSpec);
+
+  const tiltChanged = (oldTilt ?? null) !== (newTilt ?? null);
+  const patch: Record<string, any> = {
+    solar_panel_tilt_angle: newTilt,
+    industrial_spec: spec,
+  };
+  if (tiltChanged) {
+    // The drawing was verified against the OLD angle — force a re-check.
+    patch.pole_drawing_tilt_verified = false;
+    patch.pole_drawing_tilt_verified_by = null;
+    patch.pole_drawing_tilt_verified_at = null;
+  }
+
+  const { error } = await supabase
+    .from("production_task_lists")
+    .update(patch)
+    .eq("id", id);
+  if (error) {
+    if (/industrial_spec|solar_panel_tilt_angle|pole_drawing_tilt/.test(error.message ?? "")) {
+      throw new Error(
+        "Industrial file columns missing — apply migration m159 (159_task_list_industrial_file.sql) in Supabase."
+      );
+    }
+    throw new Error(error.message);
+  }
+
+  await emitEvent({
+    entity_type: "task_list",
+    entity_id: id,
+    event_type: "tl.header_changed",
+    message: `Industrial production file updated on ${current.number ?? "task list"}${
+      tiltChanged ? ` — tilt angle ${newTilt == null ? "cleared" : `${newTilt}°`}` : ""
+    }`,
+    payload: {
+      section: "industrial_file",
+      number: current.number,
+      tilt_angle: newTilt,
+      tilt_changed: tiltChanged,
+      packaging_version: spec.packaging.version,
+    },
+    bestEffort: true,
+  });
+
+  // Packaging switched TO "Customized Client" → Sales must collect the
+  // customer's branding assets. Notify once per transition (not on re-saves
+  // that keep the same version).
+  const becameCustomClient =
+    packagingRequiresBranding(spec) && oldSpec.packaging.version !== "custom_client";
+  if (becameCustomClient) {
+    await emitEvent({
+      entity_type: "task_list",
+      entity_id: id,
+      event_type: "tl.customer_branding_required",
+      message:
+        `Packaging on ${current.number ?? "task list"} is set to Customized Client — ` +
+        `Sales must collect the customer's logo and design files (upload them in the Attachments / Packaging section).`,
+      payload: {
+        number: current.number,
+        client_id: (current as any).client_id ?? null,
+        affair_id: (current as any).affair_id ?? null,
+        requested_by: userId ?? null,
+      },
+      bestEffort: true,
+    });
+    if ((current as any).affair_id) {
+      await supabase.from("planned_actions").insert({
+        affair_id: (current as any).affair_id,
+        action_type: "other",
+        title: "Collect customer branding for packaging",
+        due_date: new Date().toISOString().slice(0, 10),
+        notes:
+          `The packaging version on ${current.number ?? "the task list"} is "Customized Client" — ` +
+          `upload the customer logo and design files on the task list (Attachments / Industrial production file).`,
+        created_by: userId ?? null,
+      });
+    }
+  }
+
+  revalidatePath(`/task-lists/${id}`);
+}
+
+/**
+ * m159 — the TLM confirms (or clears) the pole-drawing ↔ tilt-angle
+ * checkpoint: "the pole drawing matches the required panel angle". Gated on
+ * task_list.validate (it is a production-release checkpoint, not a sales
+ * edit). Blocks Release-to-Production while pending (evaluateRelease).
+ */
+export async function setPoleDrawingTiltVerified(formData: FormData) {
+  await requireCapability("task_list.validate");
+  const id = String(formData.get("id"));
+  if (!id) throw new Error("Missing task list id");
+  const verified = String(formData.get("verified") ?? "") === "1";
+
+  const { userId } = await getCurrentUserRole();
+  const supabase = createClient();
+
+  const { data: current } = await supabase
+    .from("production_task_lists")
+    .select("number")
+    .eq("id", id)
+    .maybeSingle();
+  if (!current) throw new Error("Task list not found");
+
+  const { error } = await supabase
+    .from("production_task_lists")
+    .update({
+      pole_drawing_tilt_verified: verified,
+      pole_drawing_tilt_verified_by: verified ? userId ?? null : null,
+      pole_drawing_tilt_verified_at: verified ? new Date().toISOString() : null,
+    })
+    .eq("id", id);
+  if (error) {
+    if (/pole_drawing_tilt/.test(error.message ?? "")) {
+      throw new Error(
+        "Checkpoint columns missing — apply migration m159 (159_task_list_industrial_file.sql) in Supabase."
+      );
+    }
+    throw new Error(error.message);
+  }
+
+  await emitEvent({
+    entity_type: "task_list",
+    entity_id: id,
+    event_type: "tl.header_changed",
+    message: verified
+      ? `Pole drawing verified against the required tilt angle on ${current.number ?? "task list"}`
+      : `Pole drawing ↔ tilt checkpoint reopened on ${current.number ?? "task list"}`,
+    payload: { section: "pole_drawing_checkpoint", verified, number: current.number },
     bestEffort: true,
   });
 
@@ -746,20 +976,23 @@ export async function validateTaskList(formData: FormData) {
     .eq("id", id)
     .maybeSingle();
   if (!row) throw new Error("Task list not found");
-  const [missingCount, hasOpenRevision, lineCount] = await Promise.all([
-    countMissingTaskListMappings(id),
-    taskListHasOpenRevision(id),
-    supabase
-      .from("production_task_list_lines")
-      .select("id", { count: "exact", head: true })
-      .eq("task_list_id", id)
-      .then((r) => r.count ?? 0),
-  ]);
+  const [missingCount, hasOpenRevision, lineCount, tiltCheckpointPending] =
+    await Promise.all([
+      countMissingTaskListMappings(id),
+      taskListHasOpenRevision(id),
+      supabase
+        .from("production_task_list_lines")
+        .select("id", { count: "exact", head: true })
+        .eq("task_list_id", id)
+        .then((r) => r.count ?? 0),
+      tiltCheckpointPendingFor(supabase, id), // m159
+    ]);
   const verdict = evaluateRelease({
     statusAllowed: row.status === "under_validation",
     missingCount,
     hasOpenRevision,
     lineCount,
+    tiltCheckpointPending,
   });
   if (!verdict.ok) {
     throw new Error(verdict.reason ?? "Cannot release to production.");
@@ -803,21 +1036,24 @@ export async function markProductionReady(formData: FormData) {
     .eq("id", id)
     .maybeSingle();
   if (!row) throw new Error("Task list not found");
-  const [missingCount, hasOpenRevision, lineCount] = await Promise.all([
-    countMissingTaskListMappings(id),
-    taskListHasOpenRevision(id),
-    supabase
-      .from("production_task_list_lines")
-      .select("id", { count: "exact", head: true })
-      .eq("task_list_id", id)
-      .then((r) => r.count ?? 0),
-  ]);
+  const [missingCount, hasOpenRevision, lineCount, tiltCheckpointPending] =
+    await Promise.all([
+      countMissingTaskListMappings(id),
+      taskListHasOpenRevision(id),
+      supabase
+        .from("production_task_list_lines")
+        .select("id", { count: "exact", head: true })
+        .eq("task_list_id", id)
+        .then((r) => r.count ?? 0),
+      tiltCheckpointPendingFor(supabase, id), // m159
+    ]);
   const verdict = evaluateRelease({
     statusAllowed:
       row.status === "under_validation" || row.status === "validated",
     missingCount,
     hasOpenRevision,
     lineCount,
+    tiltCheckpointPending,
   });
   if (!verdict.ok) {
     throw new Error(verdict.reason ?? "Cannot release to production.");

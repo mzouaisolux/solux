@@ -88,6 +88,8 @@ export type LightingAiProvenance = {
     lighting_power: number | null;
     operating_hours: number | null;
     lighting_program: LightingProgram;
+    /** m159 — tilt angle the Energy Study stated (audit of the auto-fill). */
+    tilt_angle?: number | null;
   };
   confidence?: Record<string, number>;
   model?: string;
@@ -107,6 +109,13 @@ export type LightingExtraction = {
   lighting_power: number | null;
   operating_hours: number | null;
   lighting_program: LightingProgram;
+  /**
+   * m159 — Solar panel tilt angle in degrees when the Energy Study states it
+   * ("Tilt Angle" / "Panel Tilt" / "PV Tilt" / "inclinaison"). Consumed by the
+   * task list's industrial file (auto-fills solar_panel_tilt_angle when the
+   * field is still empty — manual override always wins).
+   */
+  tilt_angle: number | null;
   confidence: Record<string, number>;
   model: string;
 };

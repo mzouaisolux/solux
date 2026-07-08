@@ -9,15 +9,17 @@ import { getCurrentUserRole } from "@/lib/auth";
 import { emitEvent } from "@/lib/events";
 import { requireCapability } from "@/lib/permissions";
 import { buildTaskListLineFromQuotationLine } from "@/lib/manual-items";
+import { loadCostingSettings } from "@/lib/pricing-settings";
+import { computeCostingStatus } from "@/lib/costing-validity";
 import {
-  PROBABILITY_STAGES,
-  FORECAST_CATEGORIES,
-  type ForecastProbability,
-  type ForecastCategory,
-} from "@/lib/forecast";
-
-const VALID_PROBABILITIES = PROBABILITY_STAGES.map((s) => s.value);
-const VALID_CATEGORIES = FORECAST_CATEGORIES.map((c) => c.value);
+  applySelectionsToLines,
+  recomputeDocTotals,
+  versionContainers,
+  type ApplyLine,
+  type ApplySelections,
+  type ApplyVersion,
+} from "@/lib/costing-apply";
+import { isAllowedProbability } from "@/lib/forecast";
 
 /**
  * Reassign a quotation's SALES OWNER (deal owner) — m066.
@@ -76,34 +78,23 @@ export async function updateQuotationForecast(formData: FormData) {
   if (!id) throw new Error("Missing document id");
 
   const probRaw = formData.get("probability");
-  const catRaw = formData.get("category");
   const dateRaw = formData.get("expected_close_date");
 
   const update: Record<string, unknown> = {};
 
-  // Probability — must be one of the fixed stages (or empty to clear).
+  // Probability — CONTROLLED values only: 10–90 by 10, 95, 100 (or
+  // empty to clear). Free values (33, 45, 67…) are rejected — the
+  // forecast stays simple and standardized.
   if (probRaw !== null) {
     const s = String(probRaw).trim();
     if (s === "") {
       update.forecast_probability = null;
     } else {
-      const n = Number(s) as ForecastProbability;
-      if (!VALID_PROBABILITIES.includes(n)) {
-        throw new Error(`Invalid probability stage: ${s}`);
+      const n = Number(s);
+      if (!Number.isFinite(n) || !isAllowedProbability(n)) {
+        throw new Error(`Invalid probability value: ${s}`);
       }
       update.forecast_probability = n;
-    }
-  }
-
-  // Category — fixed bucket (or empty to clear).
-  if (catRaw !== null) {
-    const s = String(catRaw).trim();
-    if (s === "") {
-      update.forecast_category = null;
-    } else if (!VALID_CATEGORIES.includes(s as ForecastCategory)) {
-      throw new Error(`Invalid forecast category: ${s}`);
-    } else {
-      update.forecast_category = s;
     }
   }
 
@@ -127,20 +118,31 @@ export async function updateQuotationForecast(formData: FormData) {
   const { userId } = await getCurrentUserRole();
   update.forecast_updated_at = new Date().toISOString();
   update.forecast_updated_by = userId;
+  // Consumed by the forecast audit trigger (m158) — every event this
+  // write produces is tagged with its origin.
+  update.forecast_change_source = "manual_edit";
 
   const supabase = createClient();
-  const { error } = await supabase
-    .from("documents")
-    .update(update)
-    .eq("id", id);
+  let { error } = await supabase.from("documents").update(update).eq("id", id);
+  if (error && /forecast_change_source/.test(error.message ?? "")) {
+    // m158 not applied yet — retry without the audit-source column so
+    // the forecast keeps working (dormant audit until migration).
+    delete update.forecast_change_source;
+    ({ error } = await supabase.from("documents").update(update).eq("id", id));
+  }
   if (error) {
-    // Soft-guide if m050 isn't applied yet.
-    if (/forecast_/.test(error.message ?? "")) {
+    const msg = error.message ?? "";
+    if (/forecast_probability_check/.test(msg)) {
+      throw new Error(
+        "Probability value rejected by the database — apply migration m158 (158_forecast_standard_probabilities_and_audit.sql) in Supabase."
+      );
+    }
+    if (/forecast_/.test(msg)) {
       throw new Error(
         "Forecast columns missing — apply migration m050 (050_quotation_forecast.sql) in Supabase."
       );
     }
-    throw new Error(error.message);
+    throw new Error(msg);
   }
 
   revalidatePath(`/documents/${id}`);
@@ -149,25 +151,28 @@ export async function updateQuotationForecast(formData: FormData) {
 }
 
 /**
- * Clear the entire forecast on a quotation (probability + category +
- * date). Resets the timestamp to null too, so the deal drops out of
- * weighted projections cleanly.
+ * Clear the entire forecast on a quotation (probability + date).
+ * Resets the timestamp to null too, so the deal drops out of weighted
+ * projections cleanly.
  */
 export async function clearQuotationForecast(formData: FormData) {
   const id = String(formData.get("id"));
   if (!id) throw new Error("Missing document id");
 
   const supabase = createClient();
-  const { error } = await supabase
-    .from("documents")
-    .update({
-      forecast_probability: null,
-      forecast_category: null,
-      forecast_expected_close_date: null,
-      forecast_updated_at: null,
-      forecast_updated_by: null,
-    })
-    .eq("id", id);
+  const clear: Record<string, unknown> = {
+    forecast_probability: null,
+    forecast_expected_close_date: null,
+    forecast_updated_at: null,
+    forecast_updated_by: null,
+    forecast_change_source: "manual_edit",
+  };
+  let { error } = await supabase.from("documents").update(clear).eq("id", id);
+  if (error && /forecast_change_source/.test(error.message ?? "")) {
+    // m158 not applied yet — dormant audit, clear still works.
+    delete clear.forecast_change_source;
+    ({ error } = await supabase.from("documents").update(clear).eq("id", id));
+  }
   if (error && !/forecast_/.test(error.message ?? "")) {
     throw new Error(error.message);
   }
@@ -278,25 +283,54 @@ export async function generateProductionTaskList(formData: FormData) {
     ptlNumber = numberRow as unknown as string;
   }
 
-  const { data: inserted, error: insErr } = await supabase
+  // m159 — seed the production tilt angle from the Service Request of the
+  // same affaire (Sales states it there; it drives the pole drawing). Latest
+  // SR with a value wins. Defensive: pre-migration (or no SR) → null.
+  let tiltFromSR: number | null = null;
+  try {
+    const { data: sr } = await supabase
+      .from("project_requests")
+      .select("solar_panel_tilt_angle")
+      .eq("affair_id", (doc as any).affair_id)
+      .not("solar_panel_tilt_angle", "is", null)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    const v = (sr as any)?.solar_panel_tilt_angle;
+    tiltFromSR = typeof v === "number" && Number.isFinite(v) ? v : v != null ? Number(v) : null;
+    if (tiltFromSR != null && !Number.isFinite(tiltFromSR)) tiltFromSR = null;
+  } catch {
+    tiltFromSR = null;
+  }
+
+  const tlRow: Record<string, any> = {
+    number: ptlNumber,
+    quotation_id,
+    client_id: doc.client_id,
+    // F4: inherit the affair link from the source doc so the task list stays
+    // grouped under its affaire (docs-by-affaire views + affair-scoped RLS).
+    affair_id: (doc as any).affair_id ?? null,
+    original_sales_request: (doc as any).original_sales_request ?? null, // m134
+    shipping_method: doc.freight_type,
+    created_by: user.id,
+    // New workflow starts in draft — sales still has work to do before
+    // submitting for production validation. Explicit so we don't depend
+    // on whatever the column default happens to be at any given time.
+    status: "draft",
+  };
+  let { data: inserted, error: insErr } = await supabase
     .from("production_task_lists")
-    .insert({
-      number: ptlNumber,
-      quotation_id,
-      client_id: doc.client_id,
-      // F4: inherit the affair link from the source doc so the task list stays
-      // grouped under its affaire (docs-by-affaire views + affair-scoped RLS).
-      affair_id: (doc as any).affair_id ?? null,
-      original_sales_request: (doc as any).original_sales_request ?? null, // m134
-      shipping_method: doc.freight_type,
-      created_by: user.id,
-      // New workflow starts in draft — sales still has work to do before
-      // submitting for production validation. Explicit so we don't depend
-      // on whatever the column default happens to be at any given time.
-      status: "draft",
-    })
+    .insert({ ...tlRow, solar_panel_tilt_angle: tiltFromSR })
     .select("id")
     .single();
+  if (insErr && /solar_panel_tilt_angle/i.test(insErr.message ?? "")) {
+    // m159 not applied yet — create the task list without the tilt column.
+    ({ data: inserted, error: insErr } = await supabase
+      .from("production_task_lists")
+      .insert(tlRow)
+      .select("id")
+      .single());
+  }
   if (insErr) throw new Error(insErr.message);
 
   // Copy each quotation line into a task list line. The shared pure builder
@@ -650,6 +684,80 @@ export async function updateDocumentStatus(formData: FormData) {
       throw new Error(
         "This quotation was cancelled and its task list / production order were cancelled with it. Re-open by creating a new version (revise) — the cancelled production can't be auto-restored."
       );
+    }
+  }
+
+  // ---- m140/m153 SEND-GATE (two-policy expiry enforcement) ---------------
+  // Owner rule: Policy 1 (default) = a quotation on an EXPIRED costing can
+  // still be sent — red banner + history event. Policy 2 (setting ON) = the
+  // send to the client is BLOCKED until a new costing is approved; the draft
+  // stays editable/saveable/printable. Gate covers sent AND negotiating
+  // (draft→negotiating is one click away from send). Won is never blocked.
+  // Every read soft-fails ⇒ unmigrated envs skip the gate entirely.
+  if (target === "sent" || target === "negotiating") {
+    try {
+      const settings = await loadCostingSettings(supabase);
+      const { data: lockedLines } = await supabase
+        .from("document_lines")
+        .select("source_project_request_id, approved_at")
+        .eq("document_id", id)
+        .eq("pricing_source", "approved_service_request")
+        .not("source_project_request_id", "is", null);
+      const srIds = Array.from(
+        new Set(
+          ((lockedLines ?? []) as any[])
+            .map((l) => l.source_project_request_id)
+            .filter(Boolean)
+        )
+      ) as string[];
+      if (srIds.length) {
+        const { data: snaps } = await supabase
+          .from("project_products")
+          .select("project_request_id, priced_at")
+          .in("project_request_id", srIds);
+        const oldest = ((snaps ?? []) as any[])
+          .map((s) => s.priced_at as string | null)
+          .filter(Boolean)
+          .sort()[0] as string | undefined;
+        const status = computeCostingStatus(
+          oldest ?? null,
+          new Date().toISOString().slice(0, 10),
+          settings
+        );
+        if (status.status === "expired") {
+          if (settings.requireRevisionWhenExpired) {
+            let pendingExists = false;
+            try {
+              const { count } = await supabase
+                .from("project_costing_versions")
+                .select("id", { count: "exact", head: true })
+                .in("project_request_id", srIds)
+                .eq("status", "pending");
+              pendingExists = (count ?? 0) > 0;
+            } catch {
+              /* pre-m140 */
+            }
+            throw new Error(
+              pendingExists
+                ? "This quotation cannot be sent yet: a costing revision is already requested — waiting for the Director's approval."
+                : "This quotation cannot be sent because the linked costing has expired. Please request and approve a new costing revision before sending it to the customer."
+            );
+          }
+          // Policy 1 — allowed, but the risk acceptance goes into history.
+          await emitEvent({
+            entity_type: "document",
+            entity_id: id,
+            event_type: "doc.sent_with_expired_costing",
+            message: `Marked ${target} while the linked costing was expired (${status.label}).`,
+            payload: { age_days: status.ageDays },
+            bestEffort: true,
+          });
+        }
+      }
+    } catch (e) {
+      // Re-throw ONLY our explicit policy block; any data/column error means
+      // an unmigrated env → the gate stays dormant.
+      if (e instanceof Error && /cannot be sent/.test(e.message)) throw e;
     }
   }
 
@@ -1055,4 +1163,210 @@ export async function cancelValidationRequest(formData: FormData) {
   revalidatePath(`/documents/${id}`);
   revalidatePath("/operations");
   revalidatePath("/dashboard");
+}
+
+// ===================== m140/m153 — newer-costing Keep / Apply =====================
+
+/**
+ * Apply the latest APPROVED costing version to a DRAFT quotation — explicit,
+ * selective (owner decision: checklist Product / Pole / Freight / Transport),
+ * never automatic. A sent document is the record of what the client received
+ * (H1 principle): non-drafts must go through "revise" instead.
+ *
+ * The line/totals math lives in lib/costing-apply (pure, tested; refuses
+ * ambiguity rather than guessing a price).
+ */
+export async function applyLatestCosting(formData: FormData): Promise<void> {
+  await requireCapability("project.generate_quotation");
+  const id = String(formData.get("id") ?? "");
+  if (!id) throw new Error("Missing document id");
+  const selections: ApplySelections = {
+    product: formData.get("sel_product") === "on",
+    pole: formData.get("sel_pole") === "on",
+    freight: formData.get("sel_freight") === "on",
+    transport: formData.get("sel_transport") === "on",
+  };
+  if (!selections.product && !selections.pole && !selections.freight && !selections.transport) {
+    throw new Error("Select at least one item to update.");
+  }
+  const supabase = createClient();
+
+  const { data: doc } = await supabase
+    .from("documents")
+    .select(
+      "id, status, freight_cost, commission_enabled, commission_percentage, insurance_cost, additional_charges"
+    )
+    .eq("id", id)
+    .maybeSingle();
+  if (!doc) throw new Error("Document not found or not visible.");
+  if ((doc as any).status !== "draft") {
+    throw new Error(
+      "Only a draft can take the new costing directly — create a new version (revise) to apply it to a sent quotation."
+    );
+  }
+
+  // Lines (m140→m139 fallback).
+  const LINE_BASE =
+    "id, quantity, total_price, original_unit_price, discount_type, discount_value, pricing_source, source_project_request_id, category_id, client_product_name, config_values";
+  let linesRes: { data: any[] | null; error: any } = await supabase
+    .from("document_lines")
+    .select(`${LINE_BASE}, source_component`)
+    .eq("document_id", id);
+  if (linesRes.error) {
+    linesRes = await supabase.from("document_lines").select(LINE_BASE).eq("document_id", id);
+  }
+  const lines = (linesRes.data ?? []) as any[];
+  const srIds = Array.from(
+    new Set(lines.map((l) => l.source_project_request_id).filter(Boolean))
+  ) as string[];
+  if (!srIds.length) throw new Error("This document has no Service-Request lines to update.");
+
+  // Latest approved version across the involved SRs (newest approval wins).
+  const { data: versions, error: vErr } = await supabase
+    .from("project_costing_versions")
+    .select(
+      "id, project_request_id, version_no, status, product_unit_price, pole_unit_price, previous_product_unit_price, previous_pole_unit_price, approved_by, approved_at, freight_total, containers, incoterm, port_of_destination"
+    )
+    .in("project_request_id", srIds)
+    .eq("status", "approved");
+  if (vErr) throw new Error("Costing versions are not available yet (m140 not applied).");
+  const version = ((versions ?? []) as any[]).sort((a, b) =>
+    String(b.approved_at ?? "").localeCompare(String(a.approved_at ?? ""))
+  )[0] as ApplyVersion & { project_request_id?: string } | undefined;
+  if (!version) throw new Error("No approved costing version found for this document's Service Request.");
+
+  const result = applySelectionsToLines(lines as ApplyLine[], version, selections);
+  if (!result.ok) throw new Error(result.error);
+
+  for (const u of result.updates) {
+    const { error } = await supabase
+      .from("document_lines")
+      .update({
+        original_unit_price: u.original_unit_price,
+        unit_price: u.unit_price,
+        total_price: u.total_price,
+        approved_by: u.approved_by,
+        approved_at: u.approved_at,
+      })
+      .eq("id", u.id);
+    if (error) throw new Error(error.message);
+  }
+
+  // Freight — replace the shipping rows with the version's snapshot.
+  let containers = [] as any[];
+  if (selections.freight) {
+    const snapshot = versionContainers(version);
+    if (!snapshot.length) throw new Error("The new costing has no freight breakdown to apply.");
+    await supabase.from("document_containers").delete().eq("document_id", id);
+    const rows = snapshot.map((c, i) => ({
+      document_id: id,
+      container_type: c.container_type,
+      quantity: c.quantity,
+      unit_price: c.unit_price,
+      wooden_box_cost: c.wooden_box_cost ?? 0,
+      position: i,
+    }));
+    const ins = await supabase.from("document_containers").insert(rows);
+    if (ins.error && /wooden_box_cost/.test(ins.error.message ?? "")) {
+      await supabase
+        .from("document_containers")
+        .insert(rows.map(({ wooden_box_cost, ...rest }) => rest));
+    } else if (ins.error) {
+      throw new Error(ins.error.message);
+    }
+    containers = snapshot;
+  } else {
+    const { data: existing } = await supabase
+      .from("document_containers")
+      .select("container_type, quantity, unit_price, wooden_box_cost")
+      .eq("document_id", id);
+    containers = (existing ?? []) as any[];
+  }
+
+  // Transport assumptions.
+  if (selections.transport) {
+    const patch: Record<string, unknown> = {};
+    if ((version as any).incoterm) patch.incoterm = (version as any).incoterm;
+    if ((version as any).port_of_destination)
+      patch.port_of_destination = (version as any).port_of_destination;
+    if (Object.keys(patch).length) {
+      await supabase.from("documents").update(patch).eq("id", id);
+    }
+  }
+
+  // Recompute the derived money columns (exact saveDocument formula,
+  // m146 insurance + additional charges included).
+  const { data: freshLines } = await supabase
+    .from("document_lines")
+    .select("total_price")
+    .eq("document_id", id);
+  const totals = recomputeDocTotals({
+    lineTotals: ((freshLines ?? []) as any[]).map((l) => Number(l.total_price) || 0),
+    containers: containers as any,
+    legacyFreightCost: (doc as any).freight_cost,
+    commission_enabled: (doc as any).commission_enabled,
+    commission_percentage: (doc as any).commission_percentage,
+    insurance_cost: (doc as any).insurance_cost,
+    additional_charges: (doc as any).additional_charges,
+  });
+  const docPatch: Record<string, unknown> = {
+    total_price: totals.total_price,
+    commission_amount: totals.commission_amount,
+    freight_cost: totals.freight_total,
+  };
+  {
+    const attempt = await supabase
+      .from("documents")
+      .update({ ...docPatch, costing_version_ack: (version as any).id })
+      .eq("id", id);
+    if (attempt.error && /costing_version_ack/.test(attempt.error.message ?? "")) {
+      const fb = await supabase.from("documents").update(docPatch).eq("id", id);
+      if (fb.error) throw new Error(fb.error.message);
+    } else if (attempt.error) {
+      throw new Error(attempt.error.message);
+    }
+  }
+
+  await emitEvent({
+    entity_type: "document",
+    entity_id: id,
+    event_type: "doc.costing_applied",
+    message: `Latest approved costing applied (${[
+      selections.product && "product",
+      selections.pole && "pole",
+      selections.freight && "freight",
+      selections.transport && "transport",
+    ]
+      .filter(Boolean)
+      .join(", ")}).`,
+    payload: { version_id: (version as any).id, selections },
+    bestEffort: true,
+  });
+  revalidatePath(`/documents/${id}`);
+  revalidatePath("/documents/new");
+}
+
+/** Explicitly keep the current costing — silences the prompt for this version. */
+export async function keepCurrentCosting(formData: FormData): Promise<void> {
+  await requireCapability("project.generate_quotation");
+  const id = String(formData.get("id") ?? "");
+  const versionId = String(formData.get("version_id") ?? "");
+  if (!id || !versionId) throw new Error("Missing document/version id");
+  const supabase = createClient();
+  const attempt = await supabase
+    .from("documents")
+    .update({ costing_version_ack: versionId })
+    .eq("id", id);
+  if (attempt.error && !/costing_version_ack/.test(attempt.error.message ?? "")) {
+    throw new Error(attempt.error.message);
+  }
+  await emitEvent({
+    entity_type: "document",
+    entity_id: id,
+    event_type: "doc.costing_kept",
+    message: "Existing costing kept — the newer approved costing was reviewed and declined.",
+    payload: { version_id: versionId },
+    bestEffort: true,
+  });
+  revalidatePath(`/documents/${id}`);
 }

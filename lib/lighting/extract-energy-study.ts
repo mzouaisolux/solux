@@ -74,6 +74,11 @@ const LIGHTING_TOOL = {
           required: ["output", "duration_hours"],
         },
       },
+      tilt_angle: {
+        type: ["number", "null"],
+        description:
+          "Solar panel TILT ANGLE in degrees, if the study states it (usually labelled 'Tilt Angle', 'Panel Tilt', 'PV Tilt', 'Tilt', 'inclinaison' or equivalent — e.g. 0, 10, 15, 20, 30, 45). Plain number of degrees, no unit. null when not stated.",
+      },
       confidence: {
         type: "object",
         description:
@@ -82,6 +87,7 @@ const LIGHTING_TOOL = {
           lighting_power: { type: "number" },
           operating_hours: { type: "number" },
           lighting_program: { type: "number" },
+          tilt_angle: { type: "number" },
         },
       },
     },
@@ -104,6 +110,7 @@ const SYSTEM_PROMPT = [
   "- NEVER flatten a presence-detection phase to a single fixed level and NEVER drop the detection — it is essential for manufacturing and controller programming.",
   "- A typical profile: full power for the first hours after dusk → a long presence-detection phase (dimmed baseline + boost on detection) → full power for the last hours before dawn.",
   "",
+  "- tilt_angle is the SOLAR PANEL tilt/inclination angle in degrees when the study states it (labels: 'Tilt Angle', 'Panel Tilt', 'PV Tilt', 'Tilt', 'inclinaison', 'angle d'inclinaison'). It drives the pole drawing in production — transcribe it exactly; never confuse it with latitude, azimuth or the luminaire tilt.",
   "- If a field is not clearly present, return null (or an empty program) and lower its confidence.",
   "- Numbers must be plain numbers (no units, no thousands separators, dot as decimal).",
   "Call the emit_lighting tool with your result. Do not write prose.",
@@ -200,6 +207,7 @@ export async function extractLightingFromEnergyStudy(
     lighting_power: nullableNum(out.lighting_power),
     operating_hours: nullableNum(out.operating_hours),
     lighting_program: normalizeLightingProgram(out.lighting_program),
+    tilt_angle: nullableNum(out.tilt_angle),
     confidence,
     model,
   };
