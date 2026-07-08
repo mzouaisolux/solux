@@ -259,6 +259,27 @@ export default async function NewDocumentPage({
     tierPrices = buildTierPriceMap((legacyPrices ?? []) as any);
   }
 
+  // Stale-link guard — a ?client= / ?affair= id can outlive its row (deleting
+  // a client SET NULLs its affairs, m076 FK). Locking the builder onto a
+  // phantom id renders a working-looking form whose first write dies on the
+  // FK (quickCreateAffair → 23503 → 500), so degrade to the normal unlocked
+  // flow with a notice. Validated against the clients list fetched above —
+  // the same list the form renders from — no extra query.
+  let staleLinkNotice: string | null = null;
+  let liveClientParamId = clientParamId;
+  if (clientParamId && !(clients ?? []).some((c: any) => c.id === clientParamId)) {
+    liveClientParamId = null;
+    staleLinkNotice =
+      "The client this link pointed to no longer exists — it may have been deleted. Select a client below.";
+  }
+  if (affairParamId && projectCtx && !projectCtx.client_id) {
+    staleLinkNotice = `Project “${projectCtx.name ?? "(unnamed)"}” is no longer attached to a client (its client was deleted). Select a client and project below.`;
+    projectCtx = null;
+  } else if (affairParamId && !projectCtx) {
+    staleLinkNotice =
+      "The project this link pointed to no longer exists. Select a client and project below.";
+  }
+
   // Admin-only: cost prices. Sales users literally can't read this (RLS).
   let costs: CostMap | null = null;
   if (isAdmin) {
@@ -340,9 +361,10 @@ export default async function NewDocumentPage({
         })()}
         affairId={projectCtx?.id ?? null}
         projectName={projectCtx?.name ?? null}
-        presetClientId={projectCtx?.client_id ?? clientParamId}
-        lockClient={!!clientParamId}
+        presetClientId={projectCtx?.client_id ?? liveClientParamId}
+        lockClient={!!liveClientParamId}
         clientAffairs={clientAffairs}
+        staleLinkNotice={staleLinkNotice}
       />
     </div>
   );

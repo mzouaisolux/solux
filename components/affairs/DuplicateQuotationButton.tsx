@@ -1,7 +1,8 @@
 "use client";
 
-// Duplicate a quotation (new draft in the same project), then refresh.
-// Wraps the gated `duplicateDocument` server action; surfaces errors.
+// "New version" — duplicates a quotation as the NEXT VERSION of its family
+// (V{max+1}, same base number, same root; owner 2026-07-06 — never a second
+// V1). Wraps the gated `duplicateDocument` server action; surfaces errors.
 
 import { useTransition } from "react";
 import { useRouter } from "next/navigation";
@@ -33,8 +34,14 @@ export function DuplicateQuotationButton({
   }
 
   return (
-    <button type="button" onClick={onClick} disabled={pending} className={className}>
-      {pending ? "Duplicating…" : "Duplicate"}
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={pending}
+      className={className}
+      title="Create the next version of this quotation (the original stays untouched)"
+    >
+      {pending ? "Creating version…" : "New version"}
     </button>
   );
 }

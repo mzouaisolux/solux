@@ -75,10 +75,26 @@ export async function duplicateDocument(formData: FormData) {
     data: { user },
   } = await supabase.auth.getUser();
 
-  // Per-client numbering (SLX-CODE-YY-NNN). Falls back to the generic
-  // generator if the source doc has no linked client.
+  // Duplicate = the NEXT VERSION of the same quotation (owner 2026-07-06).
+  // The old behaviour pulled a fresh client number → a second, unrelated
+  // "V1" that broke the affair's history. Now duplicating ANY version
+  // creates V{max+1} of its family — duplicating an old V2 while V3 exists
+  // gives V4 — numbered {base}-V{n} and grouped under the same root, so no
+  // two documents are ever both "V1". Non-quotations (or numberless docs)
+  // keep the legacy fresh-number path.
   let numberRow: string | null = null;
-  if (src.client_id) {
+  let dupVersion: number | null = null;
+  let dupRootId: string | null = null;
+  const baseNumber = String(src.number ?? "").replace(/-V\d+$/i, "");
+  if (src.type === "quotation" && baseNumber) {
+    const { data: siblings } = await supabase
+      .from("documents")
+      .select("id")
+      .or(`number.eq.${baseNumber},number.ilike.${baseNumber}-V%`);
+    dupVersion = (siblings?.length ?? 1) + 1;
+    numberRow = `${baseNumber}-V${dupVersion}`;
+    dupRootId = (src.root_document_id as string | null) ?? src.id;
+  } else if (src.client_id) {
     const { data, error: nErr } = await supabase.rpc(
       "next_client_document_number",
       { client_id_in: src.client_id }
@@ -96,6 +112,11 @@ export async function duplicateDocument(formData: FormData) {
     .from("documents")
     .insert({
       number: numberRow,
+      // m059 — version chain: a duplicate joins its family instead of
+      // starting a parallel one.
+      ...(dupVersion
+        ? { version: dupVersion, root_document_id: dupRootId }
+        : {}),
       client_id: src.client_id,
       // P2a: a duplicate is a new round of the SAME opportunity → same affair.
       affair_id: src.affair_id,
@@ -174,9 +195,13 @@ export async function duplicateDocument(formData: FormData) {
     entity_type: "document",
     entity_id: inserted!.id,
     event_type: "doc.created",
-    message: `${src.type === "proforma" ? "Proforma" : "Quotation"} ${
-      numberRow ?? ""
-    } created (duplicated from ${src.number ?? id.slice(0, 8) + "…"})`,
+    message: dupVersion
+      ? `Quotation ${numberRow ?? ""} created — V${dupVersion} of ${
+          baseNumber || (src.number ?? "")
+        } (duplicated from ${src.number ?? id.slice(0, 8) + "…"})`
+      : `${src.type === "proforma" ? "Proforma" : "Quotation"} ${
+          numberRow ?? ""
+        } created (duplicated from ${src.number ?? id.slice(0, 8) + "…"})`,
     payload: {
       number: numberRow,
       type: src.type,

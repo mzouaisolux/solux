@@ -772,8 +772,9 @@ function ClientRowItem({
                                   <button
                                     type="submit"
                                     className="block w-full text-left px-3 py-2 text-xs text-neutral-700 hover:bg-neutral-50"
+                                    title="Creates the next version of this quotation (never a second V1)"
                                   >
-                                    Duplicate as new draft
+                                    Duplicate → new version
                                   </button>
                                 </form>
                                 {/* Decision F: only NON-committed quotations with no

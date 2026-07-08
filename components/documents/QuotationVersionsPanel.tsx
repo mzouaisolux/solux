@@ -95,8 +95,12 @@ export async function QuotationVersionsPanel({
       </div>
 
       <ol className="space-y-1.5">
-        {versions.map((v) => {
+        {versions.map((v, idx) => {
+          // Highlight = the version you're LOOKING at; "Current" = the
+          // family's LATEST version (sorted DESC → index 0). Older versions
+          // below are the immutable record of what was sent to the customer.
           const isCurrent = v.id === docId;
+          const isLatest = idx === 0;
           return (
             <li key={v.id}>
               <Link
@@ -128,9 +132,13 @@ export async function QuotationVersionsPanel({
                     {(v.currency ?? "USD")}{" "}
                     {Number(v.total_price || 0).toLocaleString()}
                   </span>
-                  {isCurrent ? (
-                    <span className="text-[10px] font-semibold uppercase tracking-wider text-violet-700">
+                  {isLatest ? (
+                    <span className="text-[10px] font-semibold uppercase tracking-wider text-emerald-700">
                       Current
+                    </span>
+                  ) : isCurrent ? (
+                    <span className="text-[10px] font-semibold uppercase tracking-wider text-neutral-400">
+                      Viewing — archived version
                     </span>
                   ) : (
                     <span className="text-[11px] text-neutral-400">Open →</span>
