@@ -11,6 +11,7 @@ import {
   groupIntoAffairs,
   buildAffairFiles,
   affairAnchorId,
+  affairAttachmentAnchors,
   type AffairGroup,
   type AttachmentLite,
   type ClientAffairs,
@@ -57,6 +58,14 @@ function enrichAffairs(
     arr.push(at.attachment_type ?? "other");
     attachTypesByAnchor.set(at.affair_id, arr);
   }
+  // An affair's rows may carry any historical anchor convention (real affair
+  // id, chain root, member doc id) — count across the full candidate set.
+  const typesForAffair = (a: AffairGroup): string[] => {
+    const out: string[] = [];
+    for (const anchor of affairAttachmentAnchors(a))
+      out.push(...(attachTypesByAnchor.get(anchor) ?? []));
+    return out;
+  };
   // Same anchor rule as the grouping (affair_id first) — otherwise messages
   // land on a per-chain key and split across an affair's document chains.
   const anchorByDoc = new Map<string, string>();
@@ -81,7 +90,7 @@ function enrichAffairs(
     const latestPdf = pdfDocs.length
       ? pdfDocs.reduce((acc, d) => ((d.version ?? 1) >= (acc.version ?? 1) ? d : acc))
       : null;
-    const types = attachTypesByAnchor.get(a.anchorId) ?? [];
+    const types = typesForAffair(a);
     const counts = new Map<string, number>();
     for (const t of types) {
       const b = FILE_BUCKET[t] ?? "Other";
@@ -174,11 +183,17 @@ export async function getClientAffairs(clientId: string): Promise<AffairGroup[]>
   ]);
 
   // Attachments belong to the AFFAIR (attachments.affair_id) — fetch for every
-  // affair of this client (incl. document-less ones), plus the doc-derived
-  // anchors so legacy unlinked groups keep matching. Second wave on purpose:
-  // the affair ids are only known once affRes resolves.
+  // affair of this client (incl. document-less ones), plus EVERY anchor a row
+  // may historically carry: doc-derived anchors, raw document ids and chain
+  // roots (the column's convention changed over time — see
+  // affairAttachmentAnchors). Second wave on purpose: the affair ids are only
+  // known once affRes resolves.
   const attachKeys = new Set<string>(anchorIds);
   for (const a of affRes.data ?? []) attachKeys.add(a.id);
+  for (const d of docs) {
+    attachKeys.add(d.id);
+    if (d.root_document_id) attachKeys.add(d.root_document_id);
+  }
   const attachRes = attachKeys.size
     ? await supabase
         .from("attachments")
@@ -313,9 +328,15 @@ export async function getAllClientAffairs(): Promise<ClientAffairs[]> {
 
   // Attachments keyed by REAL affair_id — union of doc anchors + every affair
   // row so document-less projects surface their uploads too (second wave; the
-  // affair ids are only known once affRes resolves).
+  // affair ids are only known once affRes resolves) + raw document ids and
+  // chain roots so rows written under the legacy anchor convention keep
+  // matching (see affairAttachmentAnchors).
   const attachKeys = new Set<string>(anchorIds);
   for (const a of affRes.data ?? []) attachKeys.add(a.id);
+  for (const d of docs) {
+    attachKeys.add(d.id);
+    if (d.root_document_id) attachKeys.add(d.root_document_id);
+  }
   const attachRes = attachKeys.size
     ? await supabase
         .from("attachments")

@@ -21,28 +21,28 @@ import { updateProductionOrderDeadline } from "@/app/(app)/production/orders/act
  * Operationally this is simpler than the old date-picker workflow: the
  * TLM enters the delay they actually know ("+5 days, battery shortage"),
  * not a target date they had to compute mentally. The component shows a
- * live preview of the resulting ETA before they submit.
+ * live preview of the resulting production due date before they submit.
  *
  * Mixed causes are logged as multiple events ("+5d production" then
  * "+7d payment"), keeping per-cause attribution honest for the KPI.
  */
 export function DelayEventForm({
   orderId,
-  currentEta,
+  productionDue,
 }: {
   orderId: string;
-  /** Current ETA (`current_production_deadline`) as ISO YYYY-MM-DD, or null. */
-  currentEta: string | null;
+  /** Production Due (`current_production_deadline`) as ISO YYYY-MM-DD, or null. */
+  productionDue: string | null;
 }) {
   const [days, setDays] = useState("");
   const [type, setType] = useState<DelayType | "">("");
 
   const daysNum = parseInt(days, 10);
   const daysValid = Number.isFinite(daysNum) && daysNum !== 0;
-  const previewEta =
-    currentEta && daysValid
+  const previewDue =
+    productionDue && daysValid
       ? (() => {
-          const d = new Date(currentEta + "T00:00:00Z");
+          const d = new Date(productionDue + "T00:00:00Z");
           d.setUTCDate(d.getUTCDate() + daysNum);
           return d.toISOString().slice(0, 10);
         })()
@@ -63,7 +63,7 @@ export function DelayEventForm({
           attribution stays honest. Use <b>negative days</b> to record a
           recovery (e.g. <code>-3</code> if the factory caught up). Only{" "}
           <b>Production</b> events count toward the factory KPI; all others
-          extend the project ETA without affecting factory metrics.
+          push the production due date without affecting factory metrics.
         </p>
       </div>
 
@@ -118,8 +118,8 @@ export function DelayEventForm({
       </div>
 
       <PreviewAndSubmit
-        currentEta={currentEta}
-        previewEta={previewEta}
+        productionDue={productionDue}
+        previewDue={previewDue}
         daysNum={daysNum}
         daysValid={daysValid}
       />
@@ -130,13 +130,13 @@ export function DelayEventForm({
 /** Live preview row + submit. Split into its own component so the submit
  *  button can subscribe to `useFormStatus()` for the pending state. */
 function PreviewAndSubmit({
-  currentEta,
-  previewEta,
+  productionDue,
+  previewDue,
   daysNum,
   daysValid,
 }: {
-  currentEta: string | null;
-  previewEta: string | null;
+  productionDue: string | null;
+  previewDue: string | null;
   daysNum: number;
   daysValid: boolean;
 }) {
@@ -151,26 +151,26 @@ function PreviewAndSubmit({
   return (
     <div className="flex items-center justify-between gap-3 flex-wrap text-[11px] text-neutral-500">
       <span>
-        {currentEta && previewEta && daysValid ? (
+        {productionDue && previewDue && daysValid ? (
           <>
-            Current ETA{" "}
-            <b className="text-neutral-700 tabular-nums">{fmt(currentEta)}</b>{" "}
+            Production Due{" "}
+            <b className="text-neutral-700 tabular-nums">{fmt(productionDue)}</b>{" "}
             → after this event{" "}
             <b
               className={`tabular-nums ${
                 daysNum > 0 ? "text-rose-700" : "text-emerald-700"
               }`}
             >
-              {fmt(previewEta)}
+              {fmt(previewDue)}
             </b>{" "}
             <span className="text-neutral-400">
               ({daysNum > 0 ? `+${daysNum}d` : `${daysNum}d`})
             </span>
           </>
-        ) : currentEta ? (
+        ) : productionDue ? (
           <>
-            Current ETA:{" "}
-            <b className="text-neutral-700 tabular-nums">{fmt(currentEta)}</b>
+            Production Due:{" "}
+            <b className="text-neutral-700 tabular-nums">{fmt(productionDue)}</b>
           </>
         ) : (
           <span className="italic text-neutral-400">

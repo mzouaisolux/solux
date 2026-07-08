@@ -122,10 +122,27 @@ export async function updateSettings(formData: FormData) {
     updated_at: new Date().toISOString(),
     updated_by: userId ?? null,
   };
-  const { error } = row?.id
-    ? await supabase.from("pricing_settings").update(payload).eq("id", row.id)
-    : await supabase.from("pricing_settings").insert(payload);
-  if (error) throw new Error(error.message);
+  // m140 — costing validity thresholds (company policy, never hardcoded).
+  // Saved with the retry-without-columns idiom so the form works pre-m140.
+  const aging = Math.max(0, Math.round(num(formData, "costingAgingAfterDays", 30)));
+  const expired = Math.max(aging, Math.round(num(formData, "costingExpiredAfterDays", 90)));
+  const costingCols = {
+    costing_aging_after_days: aging,
+    costing_expired_after_days: expired,
+    costing_require_revision_when_expired:
+      formData.get("costingRequireRevisionWhenExpired") === "on",
+  };
+  const attempt = row?.id
+    ? await supabase.from("pricing_settings").update({ ...payload, ...costingCols }).eq("id", row.id)
+    : await supabase.from("pricing_settings").insert({ ...payload, ...costingCols });
+  if (attempt.error && /costing_/.test(attempt.error.message ?? "")) {
+    const fb = row?.id
+      ? await supabase.from("pricing_settings").update(payload).eq("id", row.id)
+      : await supabase.from("pricing_settings").insert(payload);
+    if (fb.error) throw new Error(fb.error.message);
+  } else if (attempt.error) {
+    throw new Error(attempt.error.message);
+  }
   revalidatePath("/admin/pricing", "layout");
 }
 

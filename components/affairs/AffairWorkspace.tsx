@@ -29,6 +29,8 @@ export type ShippingWorkspaceProps = {
 import { AffairDocumentsCard } from "@/components/affairs/AffairDocumentsCard";
 import { AffairActionsCard, type PlannedActionRow } from "@/components/affairs/AffairActionsCard";
 import type { AssignableDoc } from "@/components/affairs/AssignDocumentPanel";
+import { ProfitabilityBadge } from "@/components/profitability/ProfitabilityBadge";
+import type { ProfitabilityResult } from "@/lib/profitability";
 
 function SectionLabel({ children }: { children: React.ReactNode }) {
   return (
@@ -48,6 +50,7 @@ export function AffairWorkspace({
   canRequestShipping,
   freshnessThresholds,
   canSetDocStatus,
+  profitability,
 }: {
   affair: AffairGroup;
   affairId: string;
@@ -57,6 +60,9 @@ export function AffairWorkspace({
   plannedActions?: PlannedActionRow[] | null;
   /** hasUiCapability("document.set_status") — Documents status setter. */
   canSetDocStatus?: boolean;
+  /** m152 management widget — only ever passed to capability holders; the
+   *  badge renders nothing when absent (sales never receives margins). */
+  profitability?: ProfitabilityResult | null;
 } & Partial<ShippingWorkspaceProps>) {
   const fileDocId = affair.latest?.id ?? affair.documents[0]?.id ?? null;
 
@@ -69,6 +75,10 @@ export function AffairWorkspace({
 
       {/* 1. Operational progress — thin pipeline line. */}
       <AffairProgressStrip affair={affair} />
+
+      {/* 1b. Profitability (management only — m152). One glance: is this
+          project healthy? Full breakdown one click away. */}
+      <ProfitabilityBadge data={profitability} affairId={affairId} />
 
       {/* 2. Quotations — the primary deal surface. */}
       <AffairQuotations

@@ -15,6 +15,7 @@ import { hasUiCapability } from "@/lib/permissions";
 import { isTechnicalRole } from "@/lib/types";
 import { loadShippingStatuses } from "@/lib/shipping-status-server";
 import { loadProjectRepositories } from "@/lib/project-documents-server";
+import { loadAffairProfitability } from "@/lib/profitability-server";
 import { getNumberSetting } from "@/lib/app-settings";
 import {
   FRESHNESS_WARN_DAYS_KEY,
@@ -24,6 +25,7 @@ import {
 import {
   groupIntoAffairs,
   buildAffairFiles,
+  affairAttachmentAnchors,
   type PrototypeDoc,
   type ClientInfo,
   type EventLite,
@@ -190,10 +192,14 @@ export default async function AffairDetailPage({ params }: { params: { id: strin
     .find((a) => a.affairId === id);
   if (!group) notFound();
 
-  // Enrich files + conversation summary for this affair.
+  // Enrich files + conversation summary for this affair. Attachments may
+  // carry any historical anchor convention (real affair id, chain root,
+  // member doc id) — match the full candidate set so nothing disappears.
+  const attachAnchors = affairAttachmentAnchors(group);
   const attachTypes: string[] = [];
   for (const at of attachmentsRes.data ?? []) {
-    if (at.affair_id === group.anchorId) attachTypes.push(at.attachment_type ?? "other");
+    if (at.affair_id && attachAnchors.has(at.affair_id))
+      attachTypes.push(at.attachment_type ?? "other");
   }
   const pdfDocs = group.documents.filter((d) => d.pdf_url);
   const latestPdfDoc = pdfDocs.length
@@ -366,9 +372,15 @@ export default async function AffairDetailPage({ params }: { params: { id: strin
   group.repository =
     (await loadProjectRepositories(supabase, [group])).get(group.anchorId) ?? [];
 
+  // m152 — management profitability (capability-gated inside the loader; a
+  // non-manager gets nothing and the badge never renders).
+  const profitability =
+    (await loadAffairProfitability(supabase, [id])).get(id) ?? null;
+
   return (
     <AffairDetail
       affair={group}
+      profitability={profitability}
       affairId={id}
       clientName={clientName}
       shippingStatuses={shippingStatuses}

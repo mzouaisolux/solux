@@ -50,6 +50,8 @@ import { AffairRow } from "@/components/affairs/AffairRow";
 import { getClientAffairs } from "@/lib/client-affairs";
 import { loadShippingStatuses, type ShippingStatusLite } from "@/lib/shipping-status-server";
 import { loadProjectRepositories } from "@/lib/project-documents-server";
+import { loadAffairProfitability } from "@/lib/profitability-server";
+import type { ProfitabilityResult } from "@/lib/profitability";
 import { getNumberSetting } from "@/lib/app-settings";
 import {
   FRESHNESS_WARN_DAYS_KEY,
@@ -329,6 +331,7 @@ export default async function ClientWorkspacePage({
   let canRequestShipping = false;
   let canSetDocStatus = false;
   let freshnessThresholds: FreshnessThresholds = FRESHNESS_DEFAULTS;
+  const profitabilityByAnchor: Record<string, ProfitabilityResult | null> = {};
   if (tab === "affairs") {
     const [affs, ownersRaw] = await Promise.all([
       getClientAffairs(params.id),
@@ -356,6 +359,19 @@ export default async function ClientWorkspacePage({
     // per affair so the expanded workspace renders the full folder view.
     const repos = await loadProjectRepositories(supabase, clientAffairs);
     for (const a of clientAffairs) a.repository = repos.get(a.anchorId) ?? [];
+
+    // m152 — profitability, ONE batch for the whole client. The loader is
+    // capability-gated inside (empty map for non-managers), so a sales
+    // browser never receives a margin; the chip/badge simply don't render.
+    const realAffairIds = clientAffairs
+      .map((a) => a.affairId)
+      .filter((id): id is string => !!id);
+    const profitMap = await loadAffairProfitability(supabase, realAffairIds);
+    for (const a of clientAffairs) {
+      profitabilityByAnchor[a.anchorId] = a.affairId
+        ? profitMap.get(a.affairId) ?? null
+        : null;
+    }
   }
   // "Assign existing quotation" candidates for an affair = the client's OTHER
   // families (latest version each), derived from the already-loaded affairs —
@@ -697,6 +713,7 @@ export default async function ClientWorkspacePage({
                   canRequestShipping={canRequestShipping}
                   freshnessThresholds={freshnessThresholds}
                   canSetDocStatus={canSetDocStatus}
+                  profitability={profitabilityByAnchor[a.anchorId]}
                 />
               ))}
             </div>

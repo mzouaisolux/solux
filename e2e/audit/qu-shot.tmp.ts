@@ -1,0 +1,11 @@
+import { chromium } from "@playwright/test";
+const browser = await chromium.launch();
+const ctx = await browser.newContext({ storageState: "e2e/.auth/operation.json", viewport: { width: 1600, height: 900 } });
+const page = await ctx.newPage();
+await page.goto("http://localhost:3000/production/quick-update", { waitUntil: "networkidle" });
+await page.screenshot({ path: "e2e/.runs/quick-update-v2.png" });
+const afr = page.locator("table tbody tr", { hasText: "PO-SLX-AFR" }).first();
+await afr.locator('[data-qcol="documents"]').first().click();
+await page.locator('[role="dialog"]').waitFor({ state: "visible" });
+await page.screenshot({ path: "e2e/.runs/quick-update-v2-docs.png" });
+await browser.close();

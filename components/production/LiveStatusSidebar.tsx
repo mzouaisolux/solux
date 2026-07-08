@@ -20,8 +20,8 @@ import type { OperationsShippingState } from "./OrderOperationsStrip";
 export type StageTone = "neutral" | "amber" | "rose" | "emerald" | "sky";
 
 export type LiveStatusSidebarProps = {
-  initialEta: string | null;
-  currentEta: string | null;
+  initialDeadline: string | null;
+  productionDue: string | null;
   actualCompletion: string | null;
   factoryDelayDays: number;
   externalDelayDays: number;
@@ -98,8 +98,8 @@ const DOT_PREMIUM: Record<StageTone, string> = {
 
 export function LiveStatusSidebar(props: LiveStatusSidebarProps) {
   const {
-    initialEta,
-    currentEta,
+    initialDeadline,
+    productionDue,
     actualCompletion,
     factoryDelayDays,
     externalDelayDays,
@@ -117,12 +117,12 @@ export function LiveStatusSidebar(props: LiveStatusSidebarProps) {
     <aside className="sticky top-6 self-start space-y-3">
       <div className="eyebrow px-1">Live status</div>
       <div className="panel overflow-hidden">
-        {/* ETA cluster */}
+        {/* Deadline cluster */}
         <div className="p-4 space-y-3">
-          <DateRow label="Initial ETA" value={fmt(initialEta)} />
+          <DateRow label="Initial Deadline" value={fmt(initialDeadline)} />
           <DateRow
-            label="Current ETA"
-            value={fmt(currentEta)}
+            label="Production Due"
+            value={fmt(productionDue)}
             sub={
               daysToEta == null
                 ? null

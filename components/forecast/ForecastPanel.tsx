@@ -7,16 +7,13 @@ import {
   clearQuotationForecast,
 } from "@/app/(app)/documents/[id]/actions";
 import {
-  PROBABILITY_STAGES,
-  FORECAST_CATEGORIES,
-  FORECAST_TONE_IDLE,
-  FORECAST_TONE_ACTIVE,
+  PROBABILITY_OPTIONS,
+  isAllowedProbability,
   isForecastStale,
   forecastAgeDays,
   weightedValue,
   fmtMoney,
   type ForecastProbability,
-  type ForecastCategory,
 } from "@/lib/forecast";
 
 /**
@@ -28,7 +25,9 @@ import {
  * - One-click chips. No Save button — each click auto-saves via the
  *   server action, then router.refresh() reconciles. Optimistic local
  *   state keeps it feeling instant.
- * - Probability + category are independent dials (see lib/forecast).
+ * - ONE dial: the probability, a CONTROLLED value (10–90 by 10, 95,
+ *   100). No free text, no categories, no ranges. Weighted forecast =
+ *   value × probability.
  * - A stale forecast (>30d) flips the header to an orange warning so
  *   the rep knows their read is drifting.
  *
@@ -40,7 +39,6 @@ export function ForecastPanel({
   total,
   currency,
   initialProbability,
-  initialCategory,
   initialExpectedCloseDate,
   initialUpdatedAt,
   prominent = false,
@@ -49,7 +47,6 @@ export function ForecastPanel({
   total: number;
   currency: string;
   initialProbability: ForecastProbability | null;
-  initialCategory: ForecastCategory | null;
   initialExpectedCloseDate: string | null;
   initialUpdatedAt: string | null;
   /** When true and no forecast is set yet, shows a loud call-to-action
@@ -58,8 +55,9 @@ export function ForecastPanel({
   prominent?: boolean;
 }) {
   const router = useRouter();
-  const [probability, setProbability] = useState(initialProbability);
-  const [category, setCategory] = useState(initialCategory);
+  const [probability, setProbability] = useState<number | null>(
+    initialProbability
+  );
   const [closeDate, setCloseDate] = useState(initialExpectedCloseDate ?? "");
   const [updatedAt, setUpdatedAt] = useState(initialUpdatedAt);
   const [pending, startTransition] = useTransition();
@@ -69,22 +67,23 @@ export function ForecastPanel({
   const stale = isForecastStale(updatedAt, hasForecast);
   const ageDays = forecastAgeDays(updatedAt);
   const weighted = weightedValue(total, probability);
+  // Pre-m158 rows can still carry a legacy value (25 / 75) — flag it so
+  // the rep re-picks from the standard ladder.
+  const legacyValue =
+    probability != null && !isAllowedProbability(probability)
+      ? probability
+      : null;
 
   /** Fire one field update + refresh. Optimistic — caller already set
    *  local state. Rolls back on failure. */
   const save = (
-    patch: Partial<{
-      probability: string;
-      category: string;
-      expected_close_date: string;
-    }>,
+    patch: Partial<{ probability: string; expected_close_date: string }>,
     rollback: () => void
   ) => {
     setError(null);
     const fd = new FormData();
     fd.set("id", documentId);
     if (patch.probability !== undefined) fd.set("probability", patch.probability);
-    if (patch.category !== undefined) fd.set("category", patch.category);
     if (patch.expected_close_date !== undefined)
       fd.set("expected_close_date", patch.expected_close_date);
 
@@ -109,13 +108,6 @@ export function ForecastPanel({
     );
   };
 
-  const onCategory = (value: ForecastCategory) => {
-    const prev = category;
-    const next = category === value ? null : value;
-    setCategory(next);
-    save({ category: next ?? "" }, () => setCategory(prev));
-  };
-
   const onDate = (value: string) => {
     const prev = closeDate;
     setCloseDate(value);
@@ -123,9 +115,8 @@ export function ForecastPanel({
   };
 
   const onClearAll = () => {
-    const snapshot = { probability, category, closeDate };
+    const snapshot = { probability, closeDate };
     setProbability(null);
-    setCategory(null);
     setCloseDate("");
     setError(null);
     const fd = new FormData();
@@ -137,7 +128,6 @@ export function ForecastPanel({
         router.refresh();
       } catch (e: any) {
         setProbability(snapshot.probability);
-        setCategory(snapshot.category);
         setCloseDate(snapshot.closeDate);
         setError(e?.message ?? "Failed to clear forecast");
       }
@@ -208,69 +198,56 @@ export function ForecastPanel({
         </div>
       )}
 
+      {/* Legacy (pre-standardization) value — nudge to re-pick. */}
+      {legacyValue != null && (
+        <div className="mb-3 rounded-md border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-[11px] text-amber-800">
+          This deal still carries a legacy probability ({legacyValue}%).
+          Pick one of the standard values below to update it.
+        </div>
+      )}
+
       {error && (
         <div className="mb-3 rounded-md border border-rose-200 bg-rose-50 px-2.5 py-1.5 text-[11px] text-rose-700">
           {error}
         </div>
       )}
 
-      {/* Probability ladder */}
+      {/* Probability — controlled values only */}
       <div className="mb-3">
         <div className="text-[11px] font-medium text-neutral-600 mb-1.5">
           Closing probability
         </div>
         <div className="flex flex-wrap gap-1.5">
-          {PROBABILITY_STAGES.map((s) => {
-            const active = probability === s.value;
+          {PROBABILITY_OPTIONS.map((o) => {
+            const active = probability === o.value;
+            const isWon = o.value === 100;
             return (
               <button
-                key={s.value}
+                key={o.value}
                 type="button"
                 disabled={pending}
-                onClick={() => onProbability(s.value)}
+                onClick={() => onProbability(o.value)}
                 aria-pressed={active}
-                title={`${s.label} · ${s.value}% — ${s.confidence} confidence\n${s.meaning}\n${s.situation}`}
-                className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors disabled:opacity-60 disabled:cursor-not-allowed ${
-                  active ? FORECAST_TONE_ACTIVE[s.tone] : FORECAST_TONE_IDLE[s.tone]
+                title={o.meaning}
+                className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-medium tabular-nums transition-colors disabled:opacity-60 disabled:cursor-not-allowed ${
+                  active
+                    ? isWon
+                      ? "border-emerald-600 bg-emerald-600 text-white"
+                      : "border-neutral-900 bg-neutral-900 text-white"
+                    : isWon
+                    ? "border-emerald-200 bg-white text-emerald-700 hover:bg-emerald-50"
+                    : "border-neutral-200 bg-white text-neutral-600 hover:bg-neutral-50"
                 }`}
               >
-                <span>{s.label}</span>
-                <span
-                  className={`tabular-nums ${active ? "opacity-80" : "opacity-50"}`}
-                >
-                  {s.value}%
-                </span>
+                {o.label}
               </button>
             );
           })}
         </div>
-      </div>
-
-      {/* Category buckets */}
-      <div className="mb-3">
-        <div className="text-[11px] font-medium text-neutral-600 mb-1.5">
-          Forecast category
-        </div>
-        <div className="flex flex-wrap gap-1.5">
-          {FORECAST_CATEGORIES.map((c) => {
-            const active = category === c.value;
-            return (
-              <button
-                key={c.value}
-                type="button"
-                disabled={pending}
-                onClick={() => onCategory(c.value)}
-                aria-pressed={active}
-                title={c.description}
-                className={`rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors disabled:opacity-60 disabled:cursor-not-allowed ${
-                  active ? FORECAST_TONE_ACTIVE[c.tone] : FORECAST_TONE_IDLE[c.tone]
-                }`}
-              >
-                {c.label}
-              </button>
-            );
-          })}
-        </div>
+        <p className="text-[10px] text-neutral-400 mt-1.5">
+          100% = won / confirmed order · 95% = almost certain, not confirmed
+          yet.
+        </p>
       </div>
 
       {/* Expected close + clear */}

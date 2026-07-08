@@ -164,6 +164,7 @@ export default function NewDocumentForm({
   projectName = null,
   presetClientId = null,
   lockClient = false,
+  staleLinkNotice = null,
 }: {
   products: Product[];
   options: Option[];
@@ -198,6 +199,9 @@ export default function NewDocumentForm({
   presetClientId?: string | null;
   /** CRM refactor: launched from a Client Workspace — client fixed & hidden. */
   lockClient?: boolean;
+  /** The ?client= / ?affair= id in the URL no longer resolves (row deleted) —
+   *  the server degraded to the unlocked flow; explain why to the user. */
+  staleLinkNotice?: string | null;
 }) {
   // Revision mode: are we creating a new version of an existing quote?
   const isRevision = !!reviseOfId && !!initialDoc;
@@ -1253,6 +1257,12 @@ export default function NewDocumentForm({
             </button>
           )}
         </div>
+
+        {staleLinkNotice && (
+          <div className="rounded-md border border-amber-200 bg-amber-50/70 px-3 py-2 text-[13px] text-amber-900">
+            {staleLinkNotice}
+          </div>
+        )}
 
         {affairId && (
           <div className="rounded-md bg-solux/10 px-3 py-2 text-[13px] text-solux-dark ring-1 ring-inset ring-solux/30">

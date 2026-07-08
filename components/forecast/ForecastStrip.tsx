@@ -29,20 +29,26 @@ export async function ForecastStrip({
   const totals = computeForecastTotals(deals);
 
   // Headline weighted figure per currency (compact — show the dominant
-  // currency line; the full page breaks it out properly).
+  // currency line; the full page breaks it out properly). "Near close"
+  // = full value of deals at 90%+ (the old Commit bucket is gone —
+  // probability is the only dial now).
   const weightedByCur = new Map<string, number>();
-  const commitByCur = new Map<string, number>();
+  const nearCloseByCur = new Map<string, number>();
   for (const d of deals) {
     weightedByCur.set(
       d.currency,
       (weightedByCur.get(d.currency) ?? 0) + weightedValue(d.total, d.probability)
     );
-    if (d.category === "commit") {
-      commitByCur.set(d.currency, (commitByCur.get(d.currency) ?? 0) + d.total);
+    if (d.probability != null && d.probability >= 90) {
+      nearCloseByCur.set(
+        d.currency,
+        (nearCloseByCur.get(d.currency) ?? 0) + d.total
+      );
     }
   }
   const weightedStr = formatTopCurrency(weightedByCur);
-  const commitStr = commitByCur.size > 0 ? formatTopCurrency(commitByCur) : "—";
+  const nearCloseStr =
+    nearCloseByCur.size > 0 ? formatTopCurrency(nearCloseByCur) : "—";
 
   return (
     <section className="panel p-4">
@@ -62,7 +68,7 @@ export async function ForecastStrip({
       </div>
       <div className="grid grid-cols-3 gap-3">
         <Metric label="Weighted" value={weightedStr} accent="emerald" />
-        <Metric label="Commit" value={commitStr} />
+        <Metric label="At 90%+" value={nearCloseStr} />
         <Metric
           label="Outdated"
           value={String(totals.staleCount)}

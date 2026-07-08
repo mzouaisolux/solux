@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { getEffectiveRole } from "@/lib/auth";
-import { hasUiCapability } from "@/lib/permissions";
+import { canAccessOrAdmin, hasUiCapability } from "@/lib/permissions";
 import {
   loadActiveQuotationsForForecast,
   resolveOwnerLabels,
@@ -13,6 +13,7 @@ import { ForecastMethodology } from "@/components/forecast/ForecastMethodology";
 import {
   computeForecastTotals,
   forecastByQuarter,
+  forecastByProbability,
   forecastByOwner,
   forecastByCountry,
   forecastByFamily,
@@ -38,6 +39,11 @@ export default async function ForecastPage() {
   // Global (company-wide) view is matrix-managed via forecast.view_global
   // — management roles see everyone's pipeline, sales sees only their own.
   const global = await hasUiCapability("forecast.view_global");
+  // Management-only: the forecast audit trail + behavior analytics.
+  // Sales users never see these — their surface stays simple. Admin /
+  // super_admin pass via the anti-lockout floor; other roles (e.g.
+  // sales_director) via the matrix grant (m158).
+  const canViewAudit = await canAccessOrAdmin(["forecast.view_audit"]);
   const scopedUserId = global ? null : userId ?? null;
 
   // ALL active quotations (forecasted or not) — the workspace edits the
@@ -56,20 +62,24 @@ export default async function ForecastPage() {
 
   // ---- Headline KPIs (forecasted only) ---------------------------------
   const weightedByCur = new Map<string, number>();
-  const commitByCur = new Map<string, number>();
+  const nearCloseByCur = new Map<string, number>();
   for (const d of forecasted) {
     weightedByCur.set(
       d.currency,
       (weightedByCur.get(d.currency) ?? 0) + weightedValue(d.total, d.probability)
     );
-    if (d.category === "commit") {
-      commitByCur.set(d.currency, (commitByCur.get(d.currency) ?? 0) + d.total);
+    if (d.probability != null && d.probability >= 90) {
+      nearCloseByCur.set(
+        d.currency,
+        (nearCloseByCur.get(d.currency) ?? 0) + d.total
+      );
     }
   }
   const totals = computeForecastTotals(forecasted);
   const unsetCount = allDeals.length - forecasted.length;
 
   // ---- Breakdowns (forecasted only) ------------------------------------
+  const byProbability = forecastByProbability(forecasted);
   const byQuarter = forecastByQuarter(forecasted);
   const byOwner = global ? forecastByOwner(forecasted, ownerLabels) : [];
   const byCountry = forecastByCountry(forecasted);
@@ -86,7 +96,6 @@ export default async function ForecastPage() {
     currency: d.currency,
     status: d.status,
     probability: d.probability,
-    category: d.category,
     expectedCloseDate: d.expectedCloseDate,
     updatedAt: d.updatedAt,
   }));
@@ -101,13 +110,23 @@ export default async function ForecastPage() {
             {global ? "Commercial forecast" : "My forecast"}
           </h1>
           <p className="text-xs text-neutral-500 mt-2 max-w-xl">
-            Your live pipeline of active quotations. Set probability,
-            category and expected close inline — no need to open each
-            quotation. The quotation stays the source of truth.
+            Your live pipeline of active quotations. Set the probability
+            and expected close inline — no need to open each quotation.
+            The quotation stays the source of truth.
           </p>
         </div>
         <div className="text-right">
           <div className="eyebrow">View</div>
+          {canViewAudit && (
+            <div className="mb-1.5">
+              <Link
+                href="/forecast/insights"
+                className="text-[11px] text-neutral-600 hover:text-neutral-900 underline underline-offset-2"
+              >
+                Behavior analytics →
+              </Link>
+            </div>
+          )}
           <div
             className={`mt-1 inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium ${
               global
@@ -142,9 +161,11 @@ export default async function ForecastPage() {
               accent="emerald"
             />
             <KpiCard
-              label="Commit"
-              primary={commitByCur.size > 0 ? formatMoneyMap(commitByCur) : "—"}
-              hint="Full value of deals marked Commit"
+              label="At 90%+"
+              primary={
+                nearCloseByCur.size > 0 ? formatMoneyMap(nearCloseByCur) : "—"
+              }
+              hint="Full value of deals at 90 / 95 / 100%"
             />
             <KpiCard
               label="Forecasted / active"
@@ -165,7 +186,11 @@ export default async function ForecastPage() {
           </div>
 
           {/* Workspace — the editable centerpiece */}
-          <ForecastWorkspace initialRows={rows} showOwner={global} />
+          <ForecastWorkspace
+            initialRows={rows}
+            showOwner={global}
+            canViewAudit={canViewAudit}
+          />
 
           {/* Distribution analytics (forecasted only) */}
           {forecasted.length > 0 && (
@@ -178,6 +203,13 @@ export default async function ForecastPage() {
                 </p>
               )}
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <BreakdownCard
+                  title="By probability"
+                  subtitle="Weighted value at each exact probability (10% … 100%)"
+                  buckets={byProbability}
+                  currency={dominantCurrency}
+                  emptyHint="No probabilities set yet."
+                />
                 <BreakdownCard
                   title="By quarter"
                   subtitle="Weighted revenue by expected closing quarter"
@@ -317,11 +349,9 @@ function BreakdownCard({
                 <span className="text-[10px] text-neutral-400 tabular-nums">
                   {b.count} deal{b.count === 1 ? "" : "s"}
                 </span>
-                {b.commit > 0 && (
-                  <span className="text-[10px] text-emerald-700 tabular-nums">
-                    {fmtMoney(b.commit, currency)} commit
-                  </span>
-                )}
+                <span className="text-[10px] text-neutral-400 tabular-nums">
+                  {fmtMoney(b.raw, currency)} raw
+                </span>
               </div>
             </li>
           ))}

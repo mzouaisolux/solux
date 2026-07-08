@@ -7,6 +7,8 @@ export type CommissionInput = {
   percentage: number; // 0–100
 };
 
+// For the full document grand total (items + freight + commission + m146
+// shipping extras) use lib/document-total.ts documentGrandTotal.
 export function commissionAmount(
   itemsAndFreight: number,
   input: CommissionInput
@@ -15,22 +17,4 @@ export function commissionAmount(
   const pct = Number(input.percentage || 0);
   if (pct <= 0) return 0;
   return Math.max(0, Number(itemsAndFreight || 0) * (pct / 100));
-}
-
-export function computeTotals({
-  itemsTotal,
-  freightTotal,
-  commission,
-}: {
-  itemsTotal: number;
-  freightTotal: number;
-  commission: CommissionInput;
-}) {
-  const subtotal = Number(itemsTotal || 0) + Number(freightTotal || 0);
-  const commission_amount = commissionAmount(subtotal, commission);
-  return {
-    subtotal,
-    commission_amount,
-    grand_total: subtotal + commission_amount,
-  };
 }

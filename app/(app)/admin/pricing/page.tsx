@@ -5,6 +5,8 @@ import { isAdminLike, type PriceListStatus } from "@/lib/types";
 import { getEffectiveRole } from "@/lib/auth";
 import AccessDenied from "@/components/AccessDenied";
 import { canAccessOrAdmin } from "@/lib/permissions";
+import { createClient } from "@/lib/supabase/server";
+import { loadCostingSettings } from "@/lib/pricing-settings";
 
 export const dynamic = "force-dynamic";
 
@@ -37,6 +39,9 @@ export default async function CreatePriceListPage() {
 
   const data = await getPricingPageData();
   const { settings, thinThreshold, categories, costVersions, products, lists } = data;
+  // m140 — costing-validity thresholds (separate soft-fail loader: pre-m140
+  // envs show the defaults and the save path retries without the columns).
+  const costing = await loadCostingSettings(createClient());
   const recent = lists.slice(0, 6);
 
   return (
@@ -126,6 +131,26 @@ export default async function CreatePriceListPage() {
             <div className="fcol"><span className="px-flabel">Exchange rate (RMB→USD)</span><input name="exchangeRate" type="number" step="0.0001" min="0" defaultValue={settings.exchangeRate} style={{ textAlign: "right" }} /></div>
             <div className="fcol"><span className="px-flabel">Tax rebate</span><input name="taxRebate" type="number" step="0.01" min="0" max="1" defaultValue={settings.taxRebate} style={{ textAlign: "right" }} /></div>
             <div className="fcol"><span className="px-flabel">Thin-margin threshold</span><input name="thinMarginThreshold" type="number" step="0.01" min="0" max="1" defaultValue={thinThreshold} style={{ textAlign: "right" }} /></div>
+          </div>
+          {/* m140 — costing validity (per-company policy, never hardcoded).
+              Valid < aging ≤ Aging < expired ≤ Expired; the checkbox switches
+              the expired policy from warning-only to send-blocking. */}
+          <div style={{ fontSize: 13, color: "var(--sx-mute)", margin: "14px 0 0", lineHeight: 1.6 }}>
+            Costing validity — how long an approved Service-Request costing stays trustworthy.
+          </div>
+          <div className="px-settings-grid">
+            <div className="fcol"><span className="px-flabel">Costing validity (days)</span><input name="costingAgingAfterDays" type="number" step="1" min="0" defaultValue={costing.agingAfterDays} style={{ textAlign: "right" }} /></div>
+            <div className="fcol"><span className="px-flabel">Expired after (days)</span><input name="costingExpiredAfterDays" type="number" step="1" min="0" defaultValue={costing.expiredAfterDays} style={{ textAlign: "right" }} /></div>
+            <div className="fcol" style={{ justifyContent: "flex-end" }}>
+              <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
+                <input
+                  type="checkbox"
+                  name="costingRequireRevisionWhenExpired"
+                  defaultChecked={costing.requireRevisionWhenExpired}
+                />
+                Require revision when expired (blocks sending)
+              </label>
+            </div>
           </div>
           <div className="savebar"><button className="sx-btn">Save settings</button></div>
         </form>

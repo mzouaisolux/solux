@@ -579,8 +579,8 @@ export default async function ProductionOrderDetailPage({
   // Single derivation of the live operational state — feeds the top
   // OrderOperationsStrip KPI cards.
   const liveStatus = {
-    initialEta: (order.initial_production_deadline ?? null) as string | null,
-    currentEta: (order.current_production_deadline ?? null) as string | null,
+    initialDeadline: (order.initial_production_deadline ?? null) as string | null,
+    productionDue: (order.current_production_deadline ?? null) as string | null,
     actualCompletion: (order.actual_completion_date ?? null) as string | null,
     factoryDelayDays: delayBreakdown.factoryDays,
     externalDelayDays: delayBreakdown.externalDays,
@@ -992,7 +992,7 @@ export default async function ProductionOrderDetailPage({
 
       {/* ---------- TOP OPERATIONAL STRIP (m072) — sticky ----------
           The single most important read on the page: who owes what
-          right now? Five cards — initial ETA, current ETA, delay
+          right now? Five cards — committed date, production due, delay
           (factory vs external split), payment, shipping.
           lg+: sticks 62px below the sticky nav so the live status stays
           visible while the operator scrolls down to edit — this replaced
@@ -1358,8 +1358,8 @@ export default async function ProductionOrderDetailPage({
         summary={
           <SummaryRow>
             <SummaryStat
-              label="Estimated finish"
-              value={fmtDate(liveStatus.currentEta)}
+              label="Production Due"
+              value={fmtDate(liveStatus.productionDue)}
             />
             <SummaryStat
               emph
@@ -1413,8 +1413,8 @@ export default async function ProductionOrderDetailPage({
       )}
       <DelayTimelineCard
         orderId={order.id}
-        initialEta={order.initial_production_deadline ?? null}
-        currentEta={order.current_production_deadline ?? null}
+        initialDeadline={order.initial_production_deadline ?? null}
+        productionDue={order.current_production_deadline ?? null}
         actualCompletion={order.actual_completion_date ?? null}
         breakdown={delayBreakdown}
         events={((history ?? []) as any[]).map((h) => ({

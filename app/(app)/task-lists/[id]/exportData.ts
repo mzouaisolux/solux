@@ -21,7 +21,13 @@ import {
 } from "@/lib/stickers";
 import { normalizeRiskFlags, type RiskFlags } from "@/lib/risks";
 import { attachmentTypeLabel } from "@/lib/attachments";
+import { resolveAttachmentAnchors } from "@/lib/attachments-server";
 import { BATTERY_CELL_KEY } from "@/lib/production-dossier";
+import {
+  cleanTiltAngle,
+  normalizeIndustrialSpec,
+  type IndustrialSpec,
+} from "@/lib/industrial-spec";
 import type { LightingProgram, DialuxConfiguration } from "@/lib/lighting/types";
 
 /**
@@ -103,6 +109,21 @@ export type ExportLighting = {
   dialux_configurations: DialuxConfiguration[];
 };
 
+/** m159 — industrial production file (tilt angle + checkpoint + spec blob). */
+export type ExportIndustrial = {
+  /** Production tilt angle in degrees (null = not set). */
+  solar_panel_tilt_angle: number | null;
+  /** TLM checkpoint "the pole drawing matches the required tilt angle". */
+  pole_drawing_tilt_verified: boolean;
+  pole_drawing_tilt_verified_at: string | null;
+  /**
+   * Normalized industrial spec — null when the TLM never saved the section
+   * (raw blob still '{}'), so untouched task lists don't print a section of
+   * defaults nobody validated.
+   */
+  spec: IndustrialSpec | null;
+};
+
 /** Commercial/logistics context inherited from the linked quotation. */
 export type ExportLogistics = {
   incoterm: string | null;
@@ -147,6 +168,8 @@ export type ExportData = {
   risks: RiskFlags | null;
   /** m144 — lighting program / energy configuration, when set up. */
   lighting: ExportLighting | null;
+  /** m159 — industrial production file; null pre-migration (columns absent). */
+  industrial: ExportIndustrial | null;
   /** Affair attachments + lighting study documents, for the appendix. */
   attachments: ExportAttachment[];
 };
@@ -241,6 +264,37 @@ export async function fetchExportData(taskListId: string): Promise<ExportData> {
     if (!error && data) {
       stickers = normalizeStickerRequirements((data as any).sticker_requirements);
       risks = normalizeRiskFlags((data as any).risk_flags);
+    }
+  }
+
+  // m159 — industrial production file (tilt + drawing checkpoint + spec
+  // blob). Pre-migration the select 42703s → industrial stays null and the
+  // dossier simply omits the sections.
+  let industrial: ExportIndustrial | null = null;
+  {
+    const { data, error } = await supabase
+      .from("production_task_lists")
+      .select(
+        "solar_panel_tilt_angle, pole_drawing_tilt_verified, pole_drawing_tilt_verified_at, industrial_spec"
+      )
+      .eq("id", taskListId)
+      .maybeSingle();
+    if (!error && data) {
+      const rawSpec = (data as any).industrial_spec;
+      const specSaved =
+        rawSpec &&
+        typeof rawSpec === "object" &&
+        Object.keys(rawSpec).length > 0;
+      industrial = {
+        solar_panel_tilt_angle: cleanTiltAngle(
+          (data as any).solar_panel_tilt_angle
+        ),
+        pole_drawing_tilt_verified:
+          (data as any).pole_drawing_tilt_verified === true,
+        pole_drawing_tilt_verified_at:
+          (data as any).pole_drawing_tilt_verified_at ?? null,
+        spec: specSaved ? normalizeIndustrialSpec(rawSpec) : null,
+      };
     }
   }
 
@@ -354,25 +408,21 @@ export async function fetchExportData(taskListId: string): Promise<ExportData> {
     }
   }
 
-  // m060 — affair attachments (drawings, tender docs, artwork…). Keyed on the
-  // affair root of the linked quotation (root_document_id ?? quotation_id).
+  // m060 — affair attachments (drawings, tender docs, artwork…). Match EVERY
+  // anchor convention the affair's rows may carry (real affair id, chain
+  // root, sibling doc ids — see lib/attachments-server).
   let attachments: ExportAttachment[] = [];
   if ((task as any).quotation_id) {
-    let affairRoot: string = (task as any).quotation_id;
-    {
-      const { data } = await supabase
-        .from("documents")
-        .select("id, root_document_id")
-        .eq("id", (task as any).quotation_id)
-        .maybeSingle();
-      affairRoot = ((data as any)?.root_document_id as string | null) ?? affairRoot;
-    }
+    const { anchors } = await resolveAttachmentAnchors(
+      supabase as any,
+      (task as any).quotation_id
+    );
     const { data, error } = await supabase
       .from("attachments")
       .select(
         "file_name, mime_type, storage_path, attachment_type, note, visible_factory"
       )
-      .eq("affair_id", affairRoot)
+      .in("affair_id", anchors)
       .order("created_at", { ascending: true });
     if (!error) {
       attachments = ((data ?? []) as any[]).map((r) => ({
@@ -661,6 +711,7 @@ export async function fetchExportData(taskListId: string): Promise<ExportData> {
     stickers,
     risks,
     lighting,
+    industrial,
     attachments,
   };
 }

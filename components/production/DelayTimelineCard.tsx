@@ -4,7 +4,7 @@
  * One card that ties together everything the operator needs to understand
  * how this project's deadline evolved:
  *
- *   1. ETA cluster (initial / current / actual completion)
+ *   1. Deadline cluster (initial / production due / actual completion)
  *   2. Delay summary (factory vs external split)
  *   3. Add-event form (in-production only)
  *   4. Visual timeline of events (DelayEventRow)
@@ -47,8 +47,8 @@ export type DelayTimelineLifecyclePhase =
 
 export type DelayTimelineCardProps = {
   orderId: string;
-  initialEta: string | null;
-  currentEta: string | null;
+  initialDeadline: string | null;
+  productionDue: string | null;
   actualCompletion: string | null;
   breakdown: DelayBreakdown;
   events: DelayTimelineEvent[];
@@ -72,8 +72,8 @@ function fmtLongDate(iso: string | null): string {
 
 export function DelayTimelineCard({
   orderId,
-  initialEta,
-  currentEta,
+  initialDeadline,
+  productionDue,
   actualCompletion,
   breakdown,
   events,
@@ -87,7 +87,7 @@ export function DelayTimelineCard({
     awaiting_start:
       "Production hasn't started yet — the live deadline activates once the deposit lands or production is started manually.",
     in_production:
-      "Live tracking. Every event below adds or recovers days from the current ETA; only Production-tagged events count toward the factory KPI.",
+      "Live tracking. Every event below adds or recovers days from the production due date; only Production-tagged events count toward the factory KPI.",
     completed:
       "Production completed. The final delay below is locked against the baseline and will not change.",
     closed:
@@ -113,16 +113,16 @@ export function DelayTimelineCard({
           />
         </div>
 
-        {/* ETA cluster */}
+        {/* Deadline cluster */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-4">
           <EtaCell
             label="Initial baseline"
-            value={fmtLongDate(initialEta)}
+            value={fmtLongDate(initialDeadline)}
             tone="muted"
           />
           <EtaCell
-            label={lifecyclePhase === "completed" ? "Final deadline" : "Current ETA"}
-            value={fmtLongDate(currentEta)}
+            label={lifecyclePhase === "completed" ? "Final deadline" : "Production Due"}
+            value={fmtLongDate(productionDue)}
             tone={
               lifecyclePhase === "completed"
                 ? "muted"
@@ -144,7 +144,7 @@ export function DelayTimelineCard({
       {/* ─────────── BODY: add form (when editable) + timeline ─────────── */}
       <div className="px-5 pb-5 space-y-5">
         {canEditDeadline && lifecyclePhase === "in_production" && (
-          <DelayEventForm orderId={orderId} currentEta={currentEta} />
+          <DelayEventForm orderId={orderId} productionDue={productionDue} />
         )}
 
         <div className="border-t border-neutral-100 pt-4">

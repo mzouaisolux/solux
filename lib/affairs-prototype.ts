@@ -234,10 +234,13 @@ export function buildAffairFiles(
     });
   }
 
-  // Uploaded attachments — newest first.
+  // Uploaded attachments — newest first. Match on EVERY anchor convention
+  // the affair's rows may carry (real affair id, group anchor, member doc
+  // ids, chain roots) so no upload disappears when the grouping rule moves.
   const docCtx = affair.latest?.id ?? affair.documents[0]?.id ?? affair.anchorId;
+  const anchors = affairAttachmentAnchors(affair);
   const rows = attachRows
-    .filter((r) => r.affair_id === affair.anchorId)
+    .filter((r) => r.affair_id != null && anchors.has(r.affair_id))
     .sort((a, b) => (b.created_at ?? "").localeCompare(a.created_at ?? ""));
   for (const r of rows) {
     files.push({
@@ -286,6 +289,30 @@ export type ClientAffairs = {
  */
 export function affairAnchorId(doc: PrototypeDoc): string {
   return doc.affair_id ?? doc.root_document_id ?? doc.id;
+}
+
+/**
+ * EVERY anchor value an attachment of this affair may carry in
+ * `attachments.affair_id`. The column's semantics changed over time:
+ *   m060 era  — the version-chain root document id (root_document_id ?? id)
+ *   post-5307c — the REAL affairs.id (affair_id = single source of truth)
+ * Rows written under EITHER convention must keep surfacing on the affair —
+ * a file must never disappear because the grouping rule evolved. So readers
+ * match against the full candidate set: the real affair id, the group anchor,
+ * and every member document id + version-chain root.
+ */
+export function affairAttachmentAnchors(affair: {
+  affairId: string | null;
+  anchorId: string;
+  documents: { id: string; root_document_id: string | null }[];
+}): Set<string> {
+  const anchors = new Set<string>([affair.anchorId]);
+  if (affair.affairId) anchors.add(affair.affairId);
+  for (const d of affair.documents) {
+    anchors.add(d.id);
+    if (d.root_document_id) anchors.add(d.root_document_id);
+  }
+  return anchors;
 }
 
 function shortId(id: string): string {

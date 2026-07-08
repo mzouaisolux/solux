@@ -44,7 +44,13 @@ export default function QuotationActionBar({ doc, taskList, command = null }: Pr
     fd.set("id", doc.id);
     fd.set("status", next);
     startTransition(async () => {
-      await updateDocumentStatus(fd);
+      try {
+        await updateDocumentStatus(fd);
+      } catch (err: any) {
+        // m140 send-gate (expired costing, policy ON) and lifecycle guards
+        // throw here — surface them as a message, not an error page.
+        window.alert(err?.message || "Could not update the status.");
+      }
     });
   }
 
@@ -55,16 +61,20 @@ export default function QuotationActionBar({ doc, taskList, command = null }: Pr
    */
   function markWon(fromDraft: boolean) {
     startTransition(async () => {
-      if (fromDraft) {
-        const fdSent = new FormData();
-        fdSent.set("id", doc.id);
-        fdSent.set("status", "sent");
-        await updateDocumentStatus(fdSent);
+      try {
+        if (fromDraft) {
+          const fdSent = new FormData();
+          fdSent.set("id", doc.id);
+          fdSent.set("status", "sent");
+          await updateDocumentStatus(fdSent);
+        }
+        const fdWon = new FormData();
+        fdWon.set("id", doc.id);
+        fdWon.set("status", "won");
+        await updateDocumentStatus(fdWon);
+      } catch (err: any) {
+        window.alert(err?.message || "Could not update the status.");
       }
-      const fdWon = new FormData();
-      fdWon.set("id", doc.id);
-      fdWon.set("status", "won");
-      await updateDocumentStatus(fdWon);
     });
   }
 

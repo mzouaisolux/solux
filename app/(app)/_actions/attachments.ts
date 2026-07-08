@@ -22,26 +22,9 @@ import {
   ATTACHMENTS_BUCKET,
   type AttachmentType,
 } from "@/lib/attachments";
+import { resolveAttachmentWriteAnchor } from "@/lib/attachments-server";
 
 const VALID_TYPES = ATTACHMENT_TYPES.map((t) => t.value);
-
-/**
- * Resolve the affair root for a document id (root_document_id ?? id),
- * tolerating the column being absent (pre-m059).
- */
-async function resolveAffairId(documentId: string): Promise<string> {
-  const supabase = createClient();
-  try {
-    const { data } = await supabase
-      .from("documents")
-      .select("id, root_document_id")
-      .eq("id", documentId)
-      .maybeSingle();
-    return (data?.root_document_id as string | null) ?? documentId;
-  } catch {
-    return documentId;
-  }
-}
 
 /**
  * Persist an attachment row after the file has been uploaded to Storage.
@@ -77,10 +60,12 @@ export async function recordAttachment(formData: FormData): Promise<void> {
     return v === "1" || v === "true" || v === "on";
   };
 
-  const { userId } = await getCurrentUserRole();
-  const affairId = await resolveAffairId(documentId);
-
   const supabase = createClient();
+  const { userId } = await getCurrentUserRole();
+  // Real affair id post-m156, legacy chain root before (a fresh sales upload
+  // must stay visible to its uploader under the m060 RLS read policy).
+  const affairId = await resolveAttachmentWriteAnchor(supabase, documentId);
+
   const { error } = await supabase.from("attachments").insert({
     affair_id: affairId,
     storage_path: storagePath,
@@ -106,6 +91,90 @@ export async function recordAttachment(formData: FormData): Promise<void> {
 
   // Refresh both surfaces that show the affair's attachments.
   revalidatePath(`/documents/${documentId}`);
+  revalidatePath("/task-lists", "layout");
+}
+
+/**
+ * Replace an attachment with a NEW VERSION (SSoT Lot 4, m151). The browser
+ * uploads the new file to Storage first, then calls this with the OLD row
+ * id: we insert a new row chained to the same group (version = max+1,
+ * doc_status restarts at 'draft' via the column default) and KEEP the old
+ * row + file as history. Pre-m151 (no group_id column) we fall back to the
+ * legacy behaviour: plain insert + delete of the old row.
+ */
+export async function replaceAttachment(formData: FormData): Promise<void> {
+  const oldId = String(formData.get("replaces_id") ?? "");
+  const documentId = String(formData.get("document_id") ?? "");
+  const storagePath = String(formData.get("storage_path") ?? "");
+  const fileName = String(formData.get("file_name") ?? "").trim();
+  const fileSizeRaw = formData.get("file_size");
+  const mimeType = String(formData.get("mime_type") ?? "") || null;
+  if (!oldId) throw new Error("Missing replaces_id");
+  if (!storagePath || !fileName) throw new Error("Missing file info");
+
+  const supabase = createClient();
+  const { userId } = await getCurrentUserRole();
+
+  // Old row = the version chain anchor + metadata to carry over.
+  let old: any = null;
+  {
+    const res = await supabase
+      .from("attachments")
+      .select("id, affair_id, attachment_type, note, group_id, version")
+      .eq("id", oldId)
+      .maybeSingle();
+    if (res.error && /group_id|version/.test(res.error.message ?? "")) {
+      // pre-m151 — legacy columns only
+      const legacy = await supabase
+        .from("attachments")
+        .select("id, affair_id, attachment_type, note")
+        .eq("id", oldId)
+        .maybeSingle();
+      old = legacy.data;
+    } else {
+      old = res.data;
+    }
+  }
+  if (!old) throw new Error("Attachment not found.");
+
+  const groupKey = old.group_id ?? old.id;
+  const base = {
+    affair_id: old.affair_id,
+    storage_path: storagePath,
+    file_name: fileName,
+    file_size:
+      fileSizeRaw != null && String(fileSizeRaw).trim() !== ""
+        ? Number(fileSizeRaw)
+        : null,
+    mime_type: mimeType,
+    attachment_type: old.attachment_type ?? "other",
+    note: old.note ?? null,
+    uploaded_by: userId,
+  };
+
+  // Versioned insert; on missing m151 columns → legacy insert + delete old.
+  const { data: maxRows } = await supabase
+    .from("attachments")
+    .select("version")
+    .eq("group_id", groupKey)
+    .order("version", { ascending: false })
+    .limit(1);
+  const nextVersion =
+    ((maxRows?.[0]?.version as number | undefined) ?? old.version ?? 1) + 1;
+  const ins = await supabase
+    .from("attachments")
+    .insert({ ...base, group_id: groupKey, version: nextVersion });
+  if (ins.error) {
+    if (/group_id|version/.test(ins.error.message ?? "")) {
+      const legacyIns = await supabase.from("attachments").insert(base);
+      if (legacyIns.error) throw new Error(legacyIns.error.message);
+      await supabase.from("attachments").delete().eq("id", oldId);
+    } else {
+      throw new Error(ins.error.message);
+    }
+  }
+
+  if (documentId) revalidatePath(`/documents/${documentId}`);
   revalidatePath("/task-lists", "layout");
 }
 

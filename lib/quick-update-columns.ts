@@ -25,6 +25,14 @@ import type { Capability } from "./permissions.ts";
 /** BL profile completeness on the client (drives the BL cell colour). */
 export type BlStatus = "complete" | "partial" | "missing";
 
+/** One required shipping document, resolved per order (server-derived). */
+export type ShippingDocItem = {
+  key: string;
+  label: string;
+  level: "mandatory" | "required" | "optional";
+  present: boolean;
+};
+
 /**
  * One row of the Quick Update table. Every value is a primitive or null —
  * the server has already flattened the joins and run the derivations, so the
@@ -48,6 +56,14 @@ export type QuickUpdateRow = {
   archived: boolean;
   currency: string;
 
+  // provenance — 'workflow' rows come from Launch Production (linked
+  // quotation); 'manual' rows are typed in during the Excel transition and
+  // may be linked to nothing. Manual money fields feed the same expected
+  // deposit/balance derivation the quotation normally provides.
+  source: "workflow" | "manual";
+  manualTotal: number | null;
+  manualDepositPct: number | null;
+
   // payment (all derived on the server)
   paymentState: ProductionPaymentState;
   expectedDeposit: number;
@@ -61,16 +77,22 @@ export type QuickUpdateRow = {
   lcExpiryDate: string | null;
   paymentNotes: string | null;
 
-  // production timeline
-  initialDeadline: string | null;
-  currentEta: string | null; // current_production_deadline (materialised)
+  // production timeline — planned vs actual (owner 2026-07-08: "the dates
+  // are much more valuable than only +5 days")
+  initialDeadline: string | null; // planned finish (immutable baseline)
+  productionDue: string | null; // current expected finish (materialised)
+  actualCompletion: string | null; // actual finish once production completed
   factoryDelayDays: number;
   externalDelayDays: number;
 
-  // shipping
+  // shipping (transport terminology: ETD = departure, ETA = arrival —
+  // production dates are NEVER called ETA, they are "Production Due")
   shipmentBooked: boolean;
+  /** Workflow orders: the quotation's incoterm (read-only source of truth).
+   *  Manual orders: shipping_details.incoterm (editable). */
+  incoterm: string | null;
   etd: string | null;
-  eta: string | null; // operational ETA (own column, distinct from currentEta)
+  eta: string | null; // transport arrival (distinct from productionDue)
   carrier: string | null; // shipping_details.forwarder
   bookingNumber: string | null;
   containerNumber: string | null;
@@ -78,10 +100,13 @@ export type QuickUpdateRow = {
   blNumber: string | null;
   blStatus: BlStatus;
 
-  // documents
+  // documents — counts + the actual requirement checklist (derived from
+  // payment mode + the client's BL profile; shown in the Documents popover
+  // so Operations knows WHICH documents the shipment needs, not just "0/7")
   ciNumber: string | null;
   docsReady: number;
   docsTotal: number;
+  docsItems: ShippingDocItem[];
 
   // meta
   notes: string | null; // shipping_notes
@@ -102,7 +127,7 @@ export type QuickUpdateRow = {
      - shipment_booked            → updateProductionOrderShipment (BL gate)
      - deadlines / delays         → updateProductionOrderDeadline etc. (Timeline popover)
 */
-export type EditableFieldKind = "scalar" | "blob-str" | "blob-num";
+export type EditableFieldKind = "scalar" | "scalar-num" | "blob-str" | "blob-num";
 
 export const EDITABLE_FIELDS: Record<
   string,
@@ -112,7 +137,15 @@ export const EDITABLE_FIELDS: Record<
   etd: { kind: "scalar", capability: "production_order.edit_shipment" },
   eta: { kind: "scalar", capability: "production_order.edit_shipment" },
   shipping_notes: { kind: "scalar", capability: "production_order.edit_shipment" },
+  // manual-order money facts (m155) — side-effect-free: they only change the
+  // DERIVED expected deposit/balance, recomputed at read time. Receipts
+  // (deposit/balance received) stay in the payments bundle action.
+  manual_total_price: { kind: "scalar-num", capability: "production_order.edit_payments" },
+  manual_deposit_percent: { kind: "scalar-num", capability: "production_order.edit_payments" },
   // keys inside the shipping_details jsonb blob
+  // incoterm is MANUAL-orders-only in the UI (workflow orders read the
+  // quotation's incoterm); the blob key is harmless for workflow rows.
+  incoterm: { kind: "blob-str", capability: "production_order.edit_shipment" },
   bl_number: { kind: "blob-str", capability: "production_order.edit_shipment" },
   forwarder: { kind: "blob-str", capability: "production_order.edit_shipment" },
   vessel: { kind: "blob-str", capability: "production_order.edit_shipment" },
@@ -179,39 +212,52 @@ export type ColumnDef = {
   numeric?: boolean;
 };
 
+/**
+ * Column order follows the operations workflow the eye scans left→right:
+ * WHO (PO/Client/Sales, sticky) → Production → Payment → Transport → Docs.
+ * The first four columns are sticky so you always know which order you are
+ * editing during horizontal scroll.
+ */
 export const QUICK_UPDATE_COLUMNS: ColumnDef[] = [
-  // identity
-  { key: "number", label: "PO Number", kind: "readonly", group: "identity", width: 150, sticky: true, defaultVisible: true },
-  { key: "client", label: "Client", kind: "readonly", group: "identity", width: 200, defaultVisible: true },
-  { key: "sales", label: "Sales", kind: "readonly", group: "identity", width: 130, defaultVisible: true },
+  // identity (sticky)
+  { key: "number", label: "PO", kind: "readonly", group: "identity", width: 135, sticky: true, defaultVisible: true },
+  { key: "client", label: "Client", kind: "readonly", group: "identity", width: 185, sticky: true, defaultVisible: true },
+  { key: "sales", label: "Sales", kind: "readonly", group: "identity", width: 110, sticky: true, defaultVisible: true },
 
-  // status + payment
-  { key: "status", label: "Production Status", kind: "status", group: "production", width: 170, capability: "production_order.edit_status", defaultVisible: true },
-  { key: "deposit", label: "Deposit", kind: "payment", group: "payment", width: 130, capability: "production_order.edit_payments", numeric: true, defaultVisible: true },
-  { key: "balance", label: "Balance", kind: "payment", group: "payment", width: 130, capability: "production_order.edit_payments", numeric: true, defaultVisible: true },
-  { key: "payment_status", label: "Payment Status", kind: "readonly", group: "payment", width: 150, defaultVisible: true },
+  // production
+  { key: "status", label: "Production Status", kind: "status", group: "production", width: 175, capability: "production_order.edit_status", sticky: true, defaultVisible: true },
 
-  // production timeline
-  { key: "current_eta", label: "Current ETA", kind: "readonly", group: "production", width: 130, defaultVisible: true },
-  { key: "production_deadline", label: "Production Deadline", kind: "readonly", group: "production", width: 150, defaultVisible: false },
-  { key: "factory_delay", label: "Factory Delay", kind: "timeline", group: "production", width: 120, capability: "production_order.edit_deadline", numeric: true, defaultVisible: true },
-  { key: "external_delay", label: "External Delay", kind: "timeline", group: "production", width: 120, capability: "production_order.edit_deadline", numeric: true, defaultVisible: false },
+  // payment (the dot on each amount already encodes complete/partial/none,
+  // so the redundant Payment Status pill column is opt-in)
+  { key: "deposit", label: "Deposit", kind: "payment", group: "payment", width: 140, capability: "production_order.edit_payments", numeric: true, defaultVisible: true },
+  { key: "balance", label: "Balance", kind: "payment", group: "payment", width: 140, capability: "production_order.edit_payments", numeric: true, defaultVisible: true },
+  { key: "payment_status", label: "Payment Status", kind: "readonly", group: "payment", width: 150, defaultVisible: false },
 
-  // shipping
-  { key: "carrier", label: "Carrier", kind: "text", group: "shipping", width: 140, field: "forwarder", capability: "production_order.edit_shipment", defaultVisible: true },
+  // production timeline (Production Due = end-of-production date; ETA is
+  // reserved for transport arrival). The cell stacks planned vs actual
+  // dates — real dates beat a bare "+5d".
+  { key: "production_due", label: "Production Due", kind: "readonly", group: "production", width: 165, defaultVisible: true },
+  { key: "production_deadline", label: "Initial Deadline", kind: "readonly", group: "production", width: 130, defaultVisible: false },
+  { key: "factory_delay", label: "Factory Delay", kind: "timeline", group: "production", width: 105, capability: "production_order.edit_deadline", numeric: true, defaultVisible: true },
+  { key: "external_delay", label: "External Delay", kind: "timeline", group: "production", width: 110, capability: "production_order.edit_deadline", numeric: true, defaultVisible: false },
+
+  // transport — Incoterm first: it tells Operations at a glance whether
+  // shipping is Solux's responsibility (CIF/DDP) or the client's (FOB/EXW)
+  { key: "incoterm", label: "Incoterm", kind: "readonly", group: "shipping", width: 92, field: "incoterm", capability: "production_order.edit_shipment", defaultVisible: true },
+  { key: "carrier", label: "Carrier", kind: "text", group: "shipping", width: 130, field: "forwarder", capability: "production_order.edit_shipment", defaultVisible: true },
+  { key: "etd", label: "ETD", kind: "date", group: "shipping", width: 128, field: "etd", capability: "production_order.edit_shipment", defaultVisible: true },
+  { key: "eta", label: "ETA", kind: "date", group: "shipping", width: 128, field: "eta", capability: "production_order.edit_shipment", defaultVisible: true },
+  { key: "bl", label: "BL", kind: "bl", group: "shipping", width: 130, capability: "production_order.edit_shipment", defaultVisible: true },
   { key: "booking", label: "Booking", kind: "text", group: "shipping", width: 140, field: "booking_number", capability: "production_order.edit_shipment", defaultVisible: false },
   { key: "container", label: "Container", kind: "text", group: "shipping", width: 150, field: "container_number", capability: "production_order.edit_shipment", defaultVisible: false },
-  { key: "etd", label: "ETD", kind: "date", group: "shipping", width: 130, field: "etd", capability: "production_order.edit_shipment", defaultVisible: true },
-  { key: "eta", label: "ETA", kind: "date", group: "shipping", width: 130, field: "eta", capability: "production_order.edit_shipment", defaultVisible: true },
-  { key: "bl", label: "BL", kind: "bl", group: "shipping", width: 130, capability: "production_order.edit_shipment", defaultVisible: true },
   { key: "tracking", label: "Tracking", kind: "text", group: "shipping", width: 150, field: "tracking_url", capability: "production_order.edit_shipment", defaultVisible: false },
 
   // documents
-  { key: "documents", label: "Shipping Documents", kind: "docs", group: "docs", width: 160, defaultVisible: true },
+  { key: "documents", label: "Shipping Documents", kind: "docs", group: "docs", width: 145, defaultVisible: true },
 
   // meta
-  { key: "notes", label: "Notes", kind: "text", group: "meta", width: 200, field: "shipping_notes", capability: "production_order.edit_shipment", defaultVisible: true },
-  { key: "alert", label: "Alert", kind: "readonly", group: "meta", width: 150, defaultVisible: true },
+  { key: "notes", label: "Notes", kind: "text", group: "meta", width: 220, field: "shipping_notes", capability: "production_order.edit_shipment", defaultVisible: true },
+  { key: "alert", label: "Alert", kind: "readonly", group: "meta", width: 150, defaultVisible: false },
   { key: "updated", label: "Last Updated", kind: "readonly", group: "meta", width: 130, defaultVisible: false },
 ];
 
@@ -222,6 +268,21 @@ export const DEFAULT_VISIBLE_KEYS: string[] = QUICK_UPDATE_COLUMNS.filter(
 /* ============================================================
    Pure date helpers (no external deps)
    ============================================================ */
+
+const MONTHS_SHORT = [
+  "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+] as const;
+
+/** "2026-08-12" → "12 Aug 26" (compact, human, fixed-locale). null/invalid → "". */
+export function fmtShortDate(iso: string | null | undefined): string {
+  if (!iso) return "";
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso);
+  if (!m) return "";
+  const month = MONTHS_SHORT[Number(m[2]) - 1];
+  if (!month) return "";
+  return `${Number(m[3])} ${month} ${m[1].slice(2)}`;
+}
 
 /** Whole calendar days from `fromISO` to `toISO` (YYYY-MM-DD). null if invalid. */
 export function daysBetweenISO(
@@ -249,7 +310,7 @@ export type SmartFilterId =
   | "production_complete"
   | "waiting_shipment"
   | "bl_missing"
-  | "eta_this_week"
+  | "due_this_week"
   | "late"
   | "waiting_documents"
   | "waiting_carrier"
@@ -290,10 +351,10 @@ export const SMART_FILTERS: SmartFilter[] = [
       (r.shipmentBooked || r.status === "production_completed"),
   },
   {
-    id: "eta_this_week",
-    label: "ETA This Week",
+    id: "due_this_week",
+    label: "Due This Week",
     test: (r, ctx) => {
-      const d = daysBetweenISO(ctx.today, r.currentEta);
+      const d = daysBetweenISO(ctx.today, r.productionDue);
       return d !== null && d >= 0 && d <= 7;
     },
   },

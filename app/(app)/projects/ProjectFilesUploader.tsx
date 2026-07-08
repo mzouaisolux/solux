@@ -12,6 +12,7 @@ import {
 } from "@/lib/attachments";
 import {
   PROJECT_FILE_CATEGORY_LABEL,
+  PROJECT_FILE_SPECIALIZED_CATEGORIES,
   type ProjectRequestFileCategory,
 } from "@/lib/types";
 
@@ -101,11 +102,13 @@ export function ProjectFilesUploader({
               onChange={(e) => setCategory(e.target.value as ProjectRequestFileCategory)}
               className="mt-0.5 block rounded border border-neutral-200 px-2 py-1.5 text-sm"
             >
-              {(Object.keys(PROJECT_FILE_CATEGORY_LABEL) as ProjectRequestFileCategory[]).map((k) => (
-                <option key={k} value={k}>
-                  {PROJECT_FILE_CATEGORY_LABEL[k]}
-                </option>
-              ))}
+              {(Object.keys(PROJECT_FILE_CATEGORY_LABEL) as ProjectRequestFileCategory[])
+                .filter((k) => !PROJECT_FILE_SPECIALIZED_CATEGORIES.has(k))
+                .map((k) => (
+                  <option key={k} value={k}>
+                    {PROJECT_FILE_CATEGORY_LABEL[k]}
+                  </option>
+                ))}
             </select>
           </label>
         )}

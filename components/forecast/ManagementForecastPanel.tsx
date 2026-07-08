@@ -40,16 +40,21 @@ export async function ManagementForecastPanel({
   const totals = computeForecastTotals(deals);
 
   // Headline figures, bucketed per currency (mixed export books).
+  // "At 90%+" = full value of deals at 90 / 95 / 100% — the near-close
+  // slice of the pipeline (the old Commit bucket is gone).
   const weightedByCur = new Map<string, number>();
-  const commitByCur = new Map<string, number>();
+  const nearCloseByCur = new Map<string, number>();
   const quarterByCur = new Map<string, number>();
   for (const d of deals) {
     weightedByCur.set(
       d.currency,
       (weightedByCur.get(d.currency) ?? 0) + weightedValue(d.total, d.probability)
     );
-    if (d.category === "commit") {
-      commitByCur.set(d.currency, (commitByCur.get(d.currency) ?? 0) + d.total);
+    if (d.probability != null && d.probability >= 90) {
+      nearCloseByCur.set(
+        d.currency,
+        (nearCloseByCur.get(d.currency) ?? 0) + d.total
+      );
     }
     if (closesThisQuarter(d.expectedCloseDate)) {
       quarterByCur.set(
@@ -90,8 +95,8 @@ export async function ManagementForecastPanel({
           accent="emerald"
         />
         <Metric
-          label="Commit"
-          value={commitByCur.size > 0 ? formatMoneyMap(commitByCur) : "—"}
+          label="At 90%+"
+          value={nearCloseByCur.size > 0 ? formatMoneyMap(nearCloseByCur) : "—"}
         />
         <Metric
           label={`Closing ${thisQuarter}`}

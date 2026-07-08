@@ -634,6 +634,64 @@ export async function updateClientBlProfile(formData: FormData) {
     /* resolution is best-effort — saving the profile already succeeded */
   }
 
+  // --- Docs-requirements resolution loop (Operations ↔ Sales) ------------
+  // Saving the profile means Sales reviewed the client's document checklist
+  // (the answer to "which shipping documents does this customer require?"),
+  // whatever they ticked — even "nothing extra" is an answer. Close every
+  // pending request on this client's orders; this re-arms the anti-duplicate
+  // gate in requestShippingDocsRequirements. Best-effort by design.
+  try {
+    const { data: docReqEvents } = await supabase
+      .from("events")
+      .select("entity_id, created_at, payload")
+      .eq("event_type", "po.docs_requirements_requested")
+      .contains("payload", { client_id: id })
+      .order("created_at", { ascending: false })
+      .limit(25);
+    const seenDocOrders = new Set<string>();
+    for (const ev of (docReqEvents ?? []) as any[]) {
+      const orderId = ev.entity_id as string;
+      if (seenDocOrders.has(orderId)) continue;
+      seenDocOrders.add(orderId);
+      const { data: lastRes } = await supabase
+        .from("events")
+        .select("created_at")
+        .eq("entity_type", "production_order")
+        .eq("entity_id", orderId)
+        .eq("event_type", "po.docs_requirements_resolved")
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (lastRes && Date.parse(lastRes.created_at) >= Date.parse(ev.created_at)) {
+        continue; // already resolved
+      }
+      await emitEvent({
+        entity_type: "production_order",
+        entity_id: orderId,
+        event_type: "po.docs_requirements_resolved",
+        message:
+          "Sales reviewed the client's shipping-document checklist — required documents confirmed.",
+        payload: { client_id: id, section: "bl_profile_documents" },
+        bestEffort: true,
+      });
+      // Tick the sales to-do the request created (m103 pattern: exact
+      // title, scoped to the request's affair, only open actions).
+      const affairId = (ev.payload?.affair_id as string | null) ?? null;
+      if (affairId) {
+        await supabase
+          .from("planned_actions")
+          .update({ done_at: new Date().toISOString() })
+          .eq("affair_id", affairId)
+          .eq("title", "Confirm required shipping documents")
+          .is("done_at", null);
+      }
+      revalidatePath(`/production/orders/${orderId}`);
+    }
+    if (seenDocOrders.size > 0) revalidatePath("/dashboard");
+  } catch {
+    /* resolution is best-effort — saving the profile already succeeded */
+  }
+
   revalidatePath(`/clients/${id}`);
   revalidatePath(`/clients/${id}/edit`);
 }

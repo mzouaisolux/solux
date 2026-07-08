@@ -13,6 +13,12 @@
  * appendix plan and battery detection live in exactly one place.
  */
 
+import type {
+  ManualLanguage,
+  PackagingVersion,
+  UserManualBrand,
+} from "@/lib/industrial-spec";
+
 /** Bilingual section title — Simplified Chinese first, English underneath. */
 export type BiTitle = { zh: string; en: string };
 
@@ -37,6 +43,12 @@ export const DOSSIER_SECTIONS = {
   lighting_program: { zh: "灯光程序", en: "Lighting Program" },
   energy: { zh: "能源配置", en: "Energy Configuration" },
   stickers: { zh: "标签信息", en: "Stickers" },
+  industrial_file: { zh: "工业生产规格", en: "Industrial Production File" },
+  tilt_angle: { zh: "太阳能板倾角", en: "Solar Panel Tilt Angle" },
+  pole_accessories: { zh: "灯杆配件", en: "Pole Accessories" },
+  packaging: { zh: "包装要求", en: "Packaging" },
+  user_manual: { zh: "用户手册", en: "User Manual" },
+  spare_parts: { zh: "备品备件", en: "Spare Parts" },
   transport: { zh: "运输信息", en: "Transport Information" },
   quality: { zh: "质量控制", en: "Quality Control" },
   internal_notes: { zh: "内部备注", en: "Internal Notes" },
@@ -45,6 +57,41 @@ export const DOSSIER_SECTIONS = {
 } as const satisfies Record<string, BiTitle>;
 
 export type DossierSectionKey = keyof typeof DOSSIER_SECTIONS;
+
+/* ---------------------------------------------------------------------------
+   Industrial production file (m159) — bilingual labels for the enum values
+   of lib/industrial-spec.ts, so the dossier prints natural manufacturing
+   Chinese instead of raw enum codes. Kept here (not in industrial-spec.ts)
+   because the Chinese vocabulary is a DOSSIER concern.
+   --------------------------------------------------------------------------- */
+
+export const PACKAGING_VERSION_TITLES: Record<PackagingVersion, BiTitle> = {
+  neutral: { zh: "中性包装（无标识）", en: "Neutral version (no logo)" },
+  solux_standard: { zh: "SOLUX 标准包装", en: "Standard SOLUX version" },
+  french_branch: {
+    zh: "法国分公司专用包装",
+    en: "French Branch Exclusive version",
+  },
+  custom_client: {
+    zh: "客户定制包装（需客户标识及设计文件）",
+    en: "Customized Client version (customer logo + design files)",
+  },
+};
+
+export const MANUAL_BRAND_TITLES: Record<UserManualBrand, BiTitle> = {
+  solux: { zh: "SOLUX 品牌手册", en: "SOLUX branded manual" },
+  neutral: { zh: "中性手册（无品牌）", en: "Neutral manual (no brand)" },
+  custom: {
+    zh: "客户定制手册（客户提供图稿）",
+    en: "Customized customer manual (customer artwork)",
+  },
+};
+
+export const MANUAL_LANGUAGE_TITLES: Record<ManualLanguage, BiTitle> = {
+  en: { zh: "英文", en: "English" },
+  fr: { zh: "法文", en: "French" },
+  ar: { zh: "阿拉伯文", en: "Arabic" },
+};
 
 /* ---------------------------------------------------------------------------
    Battery detection — the Battery section aggregates every battery-bearing

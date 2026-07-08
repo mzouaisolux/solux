@@ -8,6 +8,7 @@
 
 import Link from "next/link";
 import { formatMoney, type AffairGroup } from "@/lib/affairs-prototype";
+import type { ProfitabilityResult } from "@/lib/profitability";
 import { fmtDate } from "@/components/affairs/badges";
 import {
   affairAccent,
@@ -69,6 +70,7 @@ export function AffairDetail({
   canRequestShipping,
   freshnessThresholds,
   canSetDocStatus,
+  profitability,
 }: {
   affair: AffairGroup;
   affairId: string;
@@ -86,6 +88,8 @@ export function AffairDetail({
   tenderOrigin?: TenderOrigin | null;
   /** hasUiCapability("document.set_status") — Documents status setter. */
   canSetDocStatus?: boolean;
+  /** m152 management widget — only passed to capability holders. */
+  profitability?: ProfitabilityResult | null;
 } & Partial<ShippingWorkspaceProps>) {
   const accent = affairAccent(affair);
   const value = affair.totalValue ? formatMoney(affair.totalValue, affair.currency) : "";
@@ -246,6 +250,7 @@ export function AffairDetail({
           canRequestShipping={canRequestShipping}
           freshnessThresholds={freshnessThresholds}
           canSetDocStatus={canSetDocStatus}
+          profitability={profitability}
         />
 
         {invoiceFamilies.length > 0 && (

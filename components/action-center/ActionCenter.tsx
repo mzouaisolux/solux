@@ -51,7 +51,7 @@ const CHIP_TONE: Record<NonNullable<ActionContextChip["tone"]>, string> = {
  * user can act on in one click — not a notification to dismiss.
  *
  * Each card now carries:
- *   - inline operational context (initial / current ETA, incoterm, etc.) so a
+ *   - inline operational context (baseline / production due, incoterm, etc.) so a
  *     sales person can inform the client without first opening the order
  *   - a separate "Added Xd ago" footer (independent of the issue magnitude)
  *   - a lightweight notes pane — micro-operational coordination pinned to the

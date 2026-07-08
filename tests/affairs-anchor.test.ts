@@ -177,3 +177,66 @@ test("attachments stored by affair_id surface on the group (no chain split)", ()
   // and both document versions are listed too
   assert.equal(files.filter((f) => f.kind === "quotation").length, 2);
 });
+
+// ---------------------------------------------------------------------
+// Regression 2026-07-08 (OIM Malanville): attachments written under the
+// LEGACY anchor conventions (chain root, raw member document id) must
+// keep surfacing after the grouping moved to the real affair id.
+// ---------------------------------------------------------------------
+import { affairAttachmentAnchors } from "../lib/affairs-prototype.ts";
+
+test("affairAttachmentAnchors: real affair id + anchor + member ids + chain roots", () => {
+  const quotation = doc({ id: "q1", root_document_id: "r0", affair_id: AFFAIR });
+  const proforma = doc({ id: "p1", type: "proforma", affair_id: AFFAIR });
+  const m = emptyMaps();
+  const [group] = groupIntoAffairs(
+    [quotation, proforma],
+    m.clients, m.owners, m.tl, m.po, m.events,
+    new Map([[AFFAIR, affairRec]]),
+  ).flatMap((c) => c.affairs);
+  const anchors = affairAttachmentAnchors(group);
+  for (const expected of [AFFAIR, "q1", "p1", "r0"])
+    assert.ok(anchors.has(expected), `anchor set must contain ${expected}`);
+});
+
+test("legacy-anchored attachments (doc id / chain root) still surface on the affair", () => {
+  // The OIM Malanville bug: files recorded with affair_id = the proforma's
+  // document id (m060 convention) vanished once the group anchored on the
+  // real affairs.id.
+  const quotation = doc({ id: "q1", status: "won", affair_id: AFFAIR });
+  const proforma = doc({ id: "p1", type: "proforma", date: "2026-07-06", affair_id: AFFAIR });
+  const m = emptyMaps();
+  const [group] = groupIntoAffairs(
+    [quotation, proforma],
+    m.clients, m.owners, m.tl, m.po, m.events,
+    new Map([[AFFAIR, affairRec]]),
+  ).flatMap((c) => c.affairs);
+  const attachments: AttachmentLite[] = [
+    { id: "a1", affair_id: "p1", file_name: "SP8MD-drawing.pdf", file_size: 5, attachment_type: "dimension_drawing", created_at: "2026-07-06" },
+    { id: "a2", affair_id: AFFAIR, file_name: "fiche-technique.pdf", file_size: 5, attachment_type: "technical_spec", created_at: "2026-07-06" },
+    { id: "a3", affair_id: "elsewhere", file_name: "unrelated.pdf", file_size: 5, attachment_type: "other", created_at: "2026-07-06" },
+  ];
+  const files = buildAffairFiles(group, attachments).filter((f) => f.kind === "attachment");
+  assert.deepEqual(
+    files.map((f) => f.name).sort(),
+    ["SP8MD-drawing.pdf", "fiche-technique.pdf"],
+    "both anchor conventions surface; foreign files stay out",
+  );
+});
+
+test("legacy chain (no affair link): attachments on the root still surface", () => {
+  const v1 = doc({ id: "r1", version: 1 });
+  const v2 = doc({ id: "d2", root_document_id: "r1", version: 2 });
+  const m = emptyMaps();
+  const [group] = groupIntoAffairs(
+    [v1, v2],
+    m.clients, m.owners, m.tl, m.po, m.events,
+    new Map(),
+  ).flatMap((c) => c.affairs);
+  const attachments: AttachmentLite[] = [
+    { id: "a1", affair_id: "r1", file_name: "root-anchored.pdf", file_size: 5, attachment_type: "other", created_at: "2026-07-01" },
+    { id: "a2", affair_id: "d2", file_name: "member-anchored.pdf", file_size: 5, attachment_type: "other", created_at: "2026-07-02" },
+  ];
+  const files = buildAffairFiles(group, attachments).filter((f) => f.kind === "attachment");
+  assert.equal(files.length, 2);
+});

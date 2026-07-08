@@ -48,12 +48,16 @@ export default async function QuickUpdatePage() {
   // Gate: anyone who can edit ANY production-order facet gets the workspace
   // (Operations / TLM / admin). Sales / finance land on Access Denied — they
   // keep their read-only /operations view. Backend actions re-check per field.
-  const [canStatus, canShipment, canPayments, canDeadline] = await Promise.all([
-    hasUiCapability("production_order.edit_status"),
-    hasUiCapability("production_order.edit_shipment"),
-    hasUiCapability("production_order.edit_payments"),
-    hasUiCapability("production_order.edit_deadline"),
-  ]);
+  const [canStatus, canShipment, canPayments, canDeadline, canCreateManual] =
+    await Promise.all([
+      hasUiCapability("production_order.edit_status"),
+      hasUiCapability("production_order.edit_shipment"),
+      hasUiCapability("production_order.edit_payments"),
+      hasUiCapability("production_order.edit_deadline"),
+      // Excel-transition entry (m155) — dormant until the migration seeds
+      // the capability (hasCapability is fail-closed).
+      hasUiCapability("production_order.create_manual"),
+    ]);
   if (!(canStatus || canShipment || canPayments || canDeadline)) {
     return (
       <AccessDenied
@@ -75,6 +79,7 @@ export default async function QuickUpdatePage() {
       `
       *,
       task_lists:task_list_id(number),
+      clients:client_id(id, company_name, country, client_code, bl_profile),
       documents:quotation_id(
         id, number, total_price, currency, payment_mode, payment_terms,
         incoterm, created_by, sales_owner_id,
@@ -98,10 +103,14 @@ export default async function QuickUpdatePage() {
   }
 
   // Visibility scope (m067) — same rule as /operations. Owner of an order = the
-  // quotation's sales_owner_id (m066) when set, else its creator.
+  // quotation's sales_owner_id (m066) when set, else its creator. Manual
+  // orders (m155, no quotation) are owned by whoever typed them in.
   const visScope = await getVisibilityScope(userId, effectiveRole);
   const ownerOf = (o: any): string | null =>
-    o?.documents?.sales_owner_id ?? o?.documents?.created_by ?? null;
+    o?.documents?.sales_owner_id ??
+    o?.documents?.created_by ??
+    o?.created_by ??
+    null;
   const visible = ((rawOrders ?? []) as any[])
     .filter((o) => canSeeRecord(visScope, { ownerId: ownerOf(o), kind: "order" }))
     // Active workspace: archived orders are out of scope for daily updates.
@@ -147,10 +156,33 @@ export default async function QuickUpdatePage() {
 
   const rows: QuickUpdateRow[] = visible.map((o: any) => {
     const doc = o.documents ?? {};
-    const client = doc.clients ?? {};
-    const totalPrice = Number(doc.total_price ?? 0);
-    const paymentMode = (doc.payment_mode ?? null) as PaymentMode | null;
-    const paymentTerms = (doc.payment_terms ?? null) as PaymentTerms | null;
+    const isManual = o.source === "manual" || (!o.quotation_id && !doc.id);
+    // Manual orders (m155) link a client directly; workflow orders go
+    // through the quotation. Same fallback for the money facts: the
+    // manual total + deposit % feed the SAME derivation helpers the
+    // quotation's payment terms normally provide.
+    const client = doc.clients ?? o.clients ?? {};
+    const manualTotal =
+      o.manual_total_price != null ? Number(o.manual_total_price) : null;
+    const manualDepositPct =
+      o.manual_deposit_percent != null ? Number(o.manual_deposit_percent) : null;
+    const totalPrice = isManual
+      ? manualTotal ?? 0
+      : Number(doc.total_price ?? 0);
+    const paymentMode = (
+      isManual
+        ? manualTotal != null && manualDepositPct != null
+          ? "deposit_balance"
+          : null
+        : doc.payment_mode ?? null
+    ) as PaymentMode | null;
+    const paymentTerms = (
+      isManual
+        ? manualDepositPct != null
+          ? { deposit_percent: manualDepositPct }
+          : null
+        : doc.payment_terms ?? null
+    ) as PaymentTerms | null;
     const depositReceived = Number(o.deposit_received_amount ?? 0);
     const balanceReceived = Number(o.balance_received_amount ?? 0);
     const expectedDeposit = computeExpectedDeposit(
@@ -191,21 +223,35 @@ export default async function QuickUpdatePage() {
       reqs,
       presentByOrder.get(o.id) ?? []
     );
+    // The actual checklist behind the "n/m docs" counter — shown in the
+    // Documents popover so Operations knows WHICH documents are needed.
+    const present = presentByOrder.get(o.id) ?? new Set<string>();
+    const docsItems = reqs.map((r) => ({
+      key: r.kind,
+      label: r.label,
+      level: r.level,
+      present: present.has(r.kind),
+    }));
     const ownerId = ownerOf(o);
 
     return {
       id: o.id,
       number: o.number ?? "—",
       detailHref: `/production/orders/${o.id}`,
-      clientName: client.company_name ?? "—",
+      clientName: client.company_name ?? o.manual_client_name ?? "—",
       clientCode: client.client_code ?? null,
       country: client.country ?? null,
       clientId: client.id ?? null,
-      salesLabel: ownerId ? salesLabels.get(ownerId)?.label ?? null : null,
+      salesLabel:
+        o.manual_sales_label ??
+        (ownerId ? salesLabels.get(ownerId)?.label ?? null : null),
       salesOwnerId: ownerId,
       status: o.status,
       archived: false,
-      currency: doc.currency ?? "USD",
+      currency: (isManual ? o.manual_currency : doc.currency) ?? "USD",
+      source: isManual ? "manual" : "workflow",
+      manualTotal,
+      manualDepositPct,
       paymentState,
       expectedDeposit,
       depositReceived,
@@ -218,10 +264,12 @@ export default async function QuickUpdatePage() {
       lcExpiryDate: o.lc_expiry_date ?? null,
       paymentNotes: o.payment_notes ?? null,
       initialDeadline: o.initial_production_deadline ?? null,
-      currentEta: o.current_production_deadline ?? null,
+      productionDue: o.current_production_deadline ?? null,
+      actualCompletion: o.actual_completion_date ?? null,
       factoryDelayDays: dl.factoryDays,
       externalDelayDays: dl.externalDays,
       shipmentBooked: !!o.shipment_booked,
+      incoterm: (isManual ? ship.incoterm : doc.incoterm) ?? null,
       etd: o.etd ?? null,
       eta: o.eta ?? null,
       carrier: ship.forwarder,
@@ -233,12 +281,29 @@ export default async function QuickUpdatePage() {
       ciNumber: o.commercial_invoice_number ?? null,
       docsReady: readiness.requiredReady,
       docsTotal: readiness.requiredTotal,
+      docsItems,
       notes: o.shipping_notes ?? null,
       alertLevel: alert.level,
       alertLabel: alert.label,
       updatedAt: o.updated_at ?? null,
     };
   });
+
+  // Slim client list for the manual-order picker (only fetched when the
+  // "+ Add order" button will actually render).
+  let clientOptions: { id: string; label: string }[] = [];
+  if (canCreateManual) {
+    const { data: clientRows } = await supabase
+      .from("clients")
+      .select("id, company_name, client_code")
+      .order("company_name");
+    clientOptions = ((clientRows ?? []) as any[]).map((c) => ({
+      id: c.id,
+      label: c.client_code
+        ? `${c.company_name} (${c.client_code})`
+        : c.company_name ?? c.id,
+    }));
+  }
 
   return (
     <QuickUpdateTable
@@ -250,7 +315,9 @@ export default async function QuickUpdatePage() {
         shipment: canShipment,
         payments: canPayments,
         deadline: canDeadline,
+        createManual: canCreateManual,
       }}
+      clientOptions={clientOptions}
     />
   );
 }

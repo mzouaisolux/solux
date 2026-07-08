@@ -23,6 +23,8 @@ import { AffairWorkspace, type ShippingWorkspaceProps } from "@/components/affai
 import { ProjectActionsMenu } from "@/components/affairs/ProjectActionsMenu";
 import { AssignableDoc } from "@/components/affairs/AssignDocumentPanel";
 import type { Option } from "@/components/affairs/NewProjectPanel";
+import { ProfitabilityChip } from "@/components/profitability/ProfitabilityChip";
+import type { ProfitabilityResult } from "@/lib/profitability";
 
 function Chevron({ open }: { open: boolean }) {
   return (
@@ -71,12 +73,15 @@ export function AffairRow({
   canRequestShipping,
   freshnessThresholds,
   canSetDocStatus,
+  profitability,
 }: {
   affair: AffairGroup;
   owners?: Option[];
   canAssignOwner?: boolean;
   assignableDocs?: AssignableDoc[];
   canSetDocStatus?: boolean;
+  /** m152 — only passed to capability holders; chip renders nothing otherwise. */
+  profitability?: ProfitabilityResult | null;
 } & Partial<ShippingWorkspaceProps>) {
   const [open, setOpen] = useState(false);
   const [opened, setOpened] = useState(false);
@@ -151,6 +156,14 @@ export function AffairRow({
                 </div>
               </div>
             </button>
+            {/* m152 — Overall margin at a glance (management only; renders
+                nothing without data). Outside the toggle button on purpose:
+                nested buttons are invalid HTML, and the chip opens the
+                breakdown drawer, not the expansion. */}
+            <ProfitabilityChip
+              data={profitability}
+              affairId={affair.affairId}
+            />
             {affair.affairId && (
               <ProjectActionsMenu
                 affairId={affair.affairId}
@@ -176,6 +189,7 @@ export function AffairRow({
                     canRequestShipping={canRequestShipping}
                     freshnessThresholds={freshnessThresholds}
                     canSetDocStatus={canSetDocStatus}
+                    profitability={profitability}
                   />
                 ) : (
                   <div className="space-y-2">

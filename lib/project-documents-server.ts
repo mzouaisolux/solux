@@ -31,11 +31,15 @@ import type { AffairGroup } from "@/lib/affairs-prototype";
 import { ATTACHMENTS_BUCKET, attachmentTypeLabel } from "@/lib/attachments";
 import { documentKindLabel } from "@/lib/document-label";
 import { resolveUserLabelStrings } from "@/lib/user-display";
+import { hasCapability } from "@/lib/permissions";
+import { PROJECT_FILE_CATEGORY_LABEL } from "@/lib/types";
 import {
   fileSizeLabel,
   folderForAttachment,
   folderForOrderDoc,
+  folderForRequestFile,
   latestOrderDocs,
+  currentAttachmentVersions,
   type ProjectDocStatus,
   type ProjectDocument,
 } from "@/lib/project-documents";
@@ -105,20 +109,36 @@ export async function loadProjectRepositories(
     }
   }
 
-  // ---- Lifecycle status of manual uploads (m150) — soft-fail pre-migration.
+  // ---- Manual-upload metadata: lifecycle status (m150) + version chains
+  //      (m151). Cascading soft-fail so any migration combo keeps working.
   const attachmentStatus = new Map<string, ProjectDocStatus>();
+  let attachmentVersionMeta: { id: string; group_id: string | null; version: number | null }[] =
+    [];
   if (attachmentIds.length) {
-    const { data, error } = await supabase
-      .from("attachments")
-      .select("id, doc_status")
-      .in("id", attachmentIds);
-    if (!error) {
-      for (const r of (data ?? []) as any[]) {
+    let res: { data: any[] | null; error: { message?: string } | null } =
+      await supabase
+        .from("attachments")
+        .select("id, doc_status, group_id, version")
+        .in("id", attachmentIds);
+    if (res.error && /group_id|version/.test(res.error.message ?? "")) {
+      res = await supabase
+        .from("attachments")
+        .select("id, doc_status")
+        .in("id", attachmentIds);
+    }
+    if (!res.error) {
+      for (const r of (res.data ?? []) as any[]) {
         const s = asDocStatus(r.doc_status);
         if (s) attachmentStatus.set(r.id, s);
+        attachmentVersionMeta.push({
+          id: r.id,
+          group_id: r.group_id ?? null,
+          version: r.version ?? null,
+        });
       }
     }
   }
+  const attachmentVersions = currentAttachmentVersions(attachmentVersionMeta);
 
   // ---- Source: product_lighting_setups (Study Lab files, m144) — batch.
   type LightingRow = {
@@ -192,6 +212,55 @@ export async function loadProjectRepositories(
     }
   }
 
+  // ---- Source: project_request_files (SR technical dossier, m090/m157) —
+  //      batch via project_requests.affair_id (m124: every SR has an affair).
+  //      Costing Excels are COST-SENSITIVE: filtered out unless the viewer
+  //      holds project.view_cost (same rule as the SR page).
+  type RequestFileRow = {
+    id: string;
+    project_request_id: string;
+    storage_path: string;
+    file_name: string;
+    file_size: number | null;
+    category: string | null;
+    created_at: string | null;
+    uploaded_by: string | null;
+  };
+  const requestFilesByAffair = new Map<
+    string,
+    (RequestFileRow & { requestName: string | null })[]
+  >();
+  if (affairIds.length) {
+    const prs = await supabase
+      .from("project_requests")
+      .select("id, affair_id, name")
+      .in("affair_id", affairIds);
+    const prMeta = new Map<string, { affairId: string; name: string | null }>(
+      ((prs.data ?? []) as any[])
+        .filter((r) => r.affair_id)
+        .map((r) => [r.id, { affairId: r.affair_id, name: r.name ?? null }])
+    );
+    if (!prs.error && prMeta.size) {
+      const files = await supabase
+        .from("project_request_files")
+        .select(
+          "id, project_request_id, storage_path, file_name, file_size, category, created_at, uploaded_by"
+        )
+        .in("project_request_id", Array.from(prMeta.keys()));
+      if (!files.error && (files.data ?? []).length) {
+        const canViewCost = await hasCapability("project.view_cost");
+        for (const f of (files.data ?? []) as RequestFileRow[]) {
+          if (f.category === "costing" && !canViewCost) continue;
+          const meta = prMeta.get(f.project_request_id);
+          if (!meta) continue;
+          const list = requestFilesByAffair.get(meta.affairId) ?? [];
+          list.push({ ...f, requestName: meta.name });
+          requestFilesByAffair.set(meta.affairId, list);
+        }
+      }
+    }
+  }
+
   // ---- ONE label resolution for every author uuid we met. ----------------
   const authorIds = new Set<string>();
   for (const g of groups)
@@ -202,6 +271,8 @@ export async function loadProjectRepositories(
     for (const r of rows) if (r.created_by) authorIds.add(r.created_by);
   for (const [, rows] of invoicesByAffair)
     for (const r of rows) if (r.created_by) authorIds.add(r.created_by);
+  for (const [, rows] of requestFilesByAffair)
+    for (const r of rows) if (r.uploaded_by) authorIds.add(r.uploaded_by);
   const authors = authorIds.size
     ? await resolveUserLabelStrings(Array.from(authorIds))
     : new Map<string, string>();
@@ -219,6 +290,8 @@ export async function loadProjectRepositories(
       if (r.dialux_path) pathsToSign.push(r.dialux_path);
     }
   }
+  for (const [, rows] of requestFilesByAffair)
+    for (const r of rows) pathsToSign.push(r.storage_path);
   const signed = new Map<string, string>();
   if (pathsToSign.length) {
     const { data } = await supabase.storage
@@ -319,8 +392,14 @@ export async function loadProjectRepositories(
       );
 
     // Customer / Technical / Study Lab / Production — manual uploads.
+    // m151: Replace chains versions — only the top of each chain is Current;
+    // older versions stay downloadable/shareable but lose Replace/Delete.
     for (const f of g.files) {
       if (f.kind !== "attachment" || !f.attachmentId) continue;
+      const isCurrent = attachmentVersions.currentIds.size
+        ? attachmentVersions.currentIds.has(f.attachmentId)
+        : true; // meta unavailable → everything current (legacy)
+      const groupSize = attachmentVersions.groupSizeById.get(f.attachmentId) ?? 1;
       docs.push({
         key: f.key,
         name: f.name,
@@ -331,15 +410,18 @@ export async function loadProjectRepositories(
         downloadHref: f.downloadHref,
         date: f.createdAt,
         sizeLabel: f.sizeLabel,
-        version: null,
+        version:
+          groupSize > 1
+            ? attachmentVersions.versionById.get(f.attachmentId) ?? null
+            : null,
         status: null,
-        attachmentId: f.attachmentId,
-        documentId: f.documentId,
+        attachmentId: isCurrent ? f.attachmentId : null,
+        documentId: isCurrent ? f.documentId : null,
         attachmentType: f.attachmentType,
         author: authorOf(f.uploadedBy),
-        docStatus: attachmentStatus.get(f.attachmentId) ?? null,
-        sourceId: f.attachmentId,
-        isCurrent: true,
+        docStatus: isCurrent ? attachmentStatus.get(f.attachmentId) ?? null : null,
+        sourceId: isCurrent ? f.attachmentId : null,
+        isCurrent,
         share: { source: "attachment", id: f.attachmentId },
       });
     }
@@ -380,6 +462,38 @@ export async function loadProjectRepositories(
         sourceId: isCurrent ? r.id : null, // only the current version is status-editable
         isCurrent,
         share: { source: "order_document", id: r.id },
+      });
+    }
+
+    // SR technical dossier — project_request_files (m090/m157): costing
+    // Excel (view_cost-filtered upstream), pole drawings, tender docs…
+    const reqRows = g.affairId ? requestFilesByAffair.get(g.affairId) ?? [] : [];
+    for (const r of reqRows) {
+      const url = signed.get(r.storage_path);
+      if (!url) continue;
+      docs.push({
+        key: `prf:${r.id}`,
+        name: r.file_name,
+        folder: folderForRequestFile(r.category),
+        kindLabel:
+          (PROJECT_FILE_CATEGORY_LABEL as Record<string, string>)[
+            r.category ?? "other"
+          ] ?? "Request file",
+        source: "request_file",
+        href: url,
+        downloadHref: url,
+        date: r.created_at,
+        sizeLabel: fileSizeLabel(r.file_size),
+        version: null,
+        status: null,
+        attachmentId: null,
+        documentId: null,
+        attachmentType: null,
+        author: authorOf(r.uploaded_by),
+        docStatus: null,
+        sourceId: null,
+        isCurrent: true,
+        share: null,
       });
     }
 

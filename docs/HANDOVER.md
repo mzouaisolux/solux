@@ -298,3 +298,22 @@ Sous `42ebf688` (la chaîne complète) : affaires `25908980` (Affair 001), `55e3
 
 ## Ce qu'il ne faut pas faire
 - ❌ `git stash` (casse ici). ❌ merger les 206 fichiers WIP d'un bloc. ❌ committer CRM/Requests (prototype non testé) avec le cœur. ❌ ajouter une **nouvelle feature** avant d'avoir figé le cœur (P0-P1). ❌ ré-importer une lib browser-only en SSR. ❌ se fier à "View As" pour conclure sur permissions/RLS.
+
+---
+
+# 15. SESSION 2026-07-08 — Documents d'affaire (bug OIM) + SR dossier technique [V]
+
+## Bug corrigé : documents disparus des affaires (rapport owner, OIM Malanville)
+- **Cause racine [V]** : la convention d'ancrage de `attachments.affair_id` a changé (m060 : racine de chaîne `root_document_id ?? id` → post-5307a : vraie `affairs.id`), mais les lignes existantes ET le chemin d'écriture portaient l'ancien ancrage → tous les uploads manuels invisibles sur les pages affaires. Diagnostic données réelles : **17/17 attachments** de la base sur l'ancien ancrage, dont **15 orphelins durs** (document d'ancrage supprimé) — inventaire dans `docs/attachments-orphans-2026-07-08.md`.
+- **Fix app-side [V]** (marche AVANT migration) : matching **multi-ancres** partout — `affairAttachmentAnchors()` (lib/affairs-prototype) + `resolveAttachmentAnchors()` (lib/attachments-server, nouveau) ; consommateurs : buildAffairFiles, lib/client-affairs (fetch 2 endroits + buckets), affairs/[id]/page, AttachmentsPanel, task-lists exportData. Écriture : `resolveAttachmentWriteAnchor()` écrit la vraie `affairs.id` **une fois m156 appliquée** (probe ledger), sinon ancre legacy (RLS sales préservée).
+- **m156 à appliquer** (`156_attachments_affair_anchor.sql`) : backfill `attachments.affair_id` → vraie affaire + bras RLS `d.affair_id` sur la policy read + ledger (le probe d'écriture lit cette ligne).
+- **Preuves [V]** : 3 tests unitaires (tests/affairs-anchor.test.ts) ; repro data-level `e2e/audit/oim-repro-ui.tmp.ts` PASS ; UI réelle `oim-ui-verify.tmp.ts` PASS (plans mât + fiche technique + études énergétiques de nouveau visibles sur /affairs/OIM).
+
+## SR = dossier technique (Excel costing · panneau réel · drawing mât)
+- **m157 à appliquer** (`157_sr_technical_dossier.sql`) : catégories `costing` + `pole_drawing` sur `project_request_files` (pattern m094) + colonnes `project_requests.solar_panel_power_w / _length_mm / _width_mm / _thickness_mm / _reference`. **App dormante avant m157** (uploaders + champs panneau gatés sur le ledger via `lib/migrations.ts::migrationApplied`).
+- **UI** (`/projects/[id]`, section ① Factory cost, view_cost-gatée) : uploader **Costing Excel** (cost-sensible : jamais montré aux Sales, filtré aussi de la liste Documents globale) ; bloc **Pole drawing** avec note « Strongly recommended » (jamais bloquant) ; champs **Actual solar panel used** dans le formulaire `enterFactoryCost` (persistés sur la SR, affichés dans la carte Solar configuration).
+- **SSoT** : collector `project_request_files` ajouté à `lib/project-documents-server.ts` (+ `folderForRequestFile` dans lib/project-documents) → les fichiers SR remontent dans l'onglet Documents de l'affaire (costing filtré par `project.view_cost`).
+- **Preuves [V]** : `sr-dossier-verify.tmp.ts` PASS (ops voit les blocs + hints dormants ; sales ne voit RIEN de costing) ; `sr-collector-verify.tmp.ts` PASS (round-trip réel upload SR → onglet Documents affaire → cleanup) ; 567 tests unitaires ; régression 23/23 ; check:schema + check:capabilities verts.
+
+## Migrations — APPLIQUÉES par l'owner le 2026-07-08 [V]
+- **m156 + m157 APPLIQUÉES et re-vérifiées** : backfill complet (0 legacy résoluble restant, 15 orphelins durs assumés), colonnes solar_panel_* actives, catégories costing/pole_drawing acceptées, RLS sales OK, uploaders/champs panneau ACTIFS sur la SR, costing Excel visible admin / INVISIBLE sales dans l'onglet Documents affaire (`post-m156-m157-verify.tmp.ts` + `costing-visibility-verify.tmp.ts` PASS), régression 23/23.

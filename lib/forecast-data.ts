@@ -13,11 +13,7 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { resolveUserLabelStrings } from "@/lib/user-display";
-import type {
-  ForecastDeal,
-  ForecastProbability,
-  ForecastCategory,
-} from "@/lib/forecast";
+import type { ForecastDeal, ForecastProbability } from "@/lib/forecast";
 
 /**
  * Load ALL active quotations (status sent / negotiating, not archived)
@@ -40,7 +36,7 @@ export async function loadActiveQuotationsForForecast(
     .from("documents")
     .select(
       "id, number, total_price, currency, created_by, client_id, status, " +
-        "forecast_probability, forecast_category, forecast_expected_close_date, " +
+        "forecast_probability, forecast_expected_close_date, " +
         "forecast_updated_at, version, root_document_id, clients(company_name, country)"
     )
     .in("status", ["sent", "negotiating"])
@@ -147,7 +143,6 @@ export async function loadActiveQuotationsForForecast(
     total: Number(d.total_price || 0),
     currency: (d.currency ?? "USD") as string,
     probability: (d.forecast_probability ?? null) as ForecastProbability | null,
-    category: (d.forecast_category ?? null) as ForecastCategory | null,
     expectedCloseDate: d.forecast_expected_close_date ?? null,
     updatedAt: d.forecast_updated_at ?? null,
     ownerId: d.created_by ?? null,

@@ -6,6 +6,7 @@ import {
   computeMargin,
   resolveStandardUnitPrice,
 } from "@/lib/pricing";
+import { COST_REVISION_REASONS } from "@/lib/cost-revision";
 import {
   CUSTOM_OPTION_SENTINEL,
   customValueKey,
@@ -466,11 +467,15 @@ type Props = {
   onRemove?: () => void;
   onClearSuggestion?: () => void; // hides the "previous" comparison
   /**
-   * m139 — ask the Sales Director to re-cost the source Service Request (reopen
-   * for pricing + notify). Wired by the builder; when absent the "Request
-   * Costing Revision" action is hidden. Receives the source project_request id.
+   * m139/m153 — ask for a manufacturing cost revision on the source Service
+   * Request (reopen for pricing + pending revision + notify). Wired by the
+   * builder; when absent the "Request Costing Revision" action is hidden.
+   * Receives the source project_request id and the MANDATORY reason.
    */
-  onRequestCostingRevision?: (projectRequestId: string) => Promise<void>;
+  onRequestCostingRevision?: (
+    projectRequestId: string,
+    reason: string
+  ) => Promise<void>;
 };
 
 export default function ProductConfigurator({
@@ -533,8 +538,10 @@ export default function ProductConfigurator({
   const [recalcArmed, setRecalcArmed] = useState(false);
   const [recalcError, setRecalcError] = useState<string | null>(null);
   const [revisionState, setRevisionState] = useState<
-    "idle" | "pending" | "sent" | "error"
+    "idle" | "arming" | "pending" | "sent" | "error"
   >("idle");
+  // m153 — the revision reason is MANDATORY (traceability rule).
+  const [revisionReason, setRevisionReason] = useState("");
 
   useEffect(() => {
     setFavorites(loadFavorites());
@@ -921,15 +928,17 @@ export default function ProductConfigurator({
     setSpecTouched(false);
   }
 
-  // m139 — explicit escape #2: ask the Sales Director to re-cost the source
-  // Service Request. Reopens the SR for pricing + notifies; the quotation keeps
-  // its approved price until a new costing is approved. (Phase 2 turns this into
-  // a full costing-version revision.)
+  // m139/m153 — explicit escape #2: ask for a manufacturing cost revision on
+  // the source Service Request (reopen for pricing + pending revision +
+  // notify). The reason is MANDATORY; the quotation keeps its approved price
+  // until a new costing is approved and explicitly applied.
   async function requestCostingRevision() {
     if (!onRequestCostingRevision || !value.source_project_request_id) return;
+    const reason = revisionReason.trim();
+    if (!reason) return; // button is disabled anyway — belt & braces
     setRevisionState("pending");
     try {
-      await onRequestCostingRevision(value.source_project_request_id);
+      await onRequestCostingRevision(value.source_project_request_id, reason);
       setRevisionState("sent");
     } catch {
       setRevisionState("error");
@@ -1071,18 +1080,56 @@ export default function ProductConfigurator({
                   Costing revision requested — the Director will re-cost the
                   Service Request.
                 </span>
+              ) : revisionState === "arming" ||
+                revisionState === "pending" ||
+                revisionState === "error" ? (
+                <div className="flex w-full flex-wrap items-center gap-2 text-xs">
+                  <input
+                    type="text"
+                    value={revisionReason}
+                    onChange={(e) => setRevisionReason(e.target.value)}
+                    list="cost-revision-reasons"
+                    autoFocus
+                    placeholder="Reason (required) — e.g. Supplier quotation updated"
+                    className="min-w-[240px] flex-1 rounded-md border border-neutral-300 bg-white px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-neutral-400/40"
+                  />
+                  <datalist id="cost-revision-reasons">
+                    {COST_REVISION_REASONS.map((r) => (
+                      <option key={r} value={r} />
+                    ))}
+                  </datalist>
+                  <button
+                    type="button"
+                    onClick={requestCostingRevision}
+                    disabled={
+                      revisionState === "pending" || !revisionReason.trim()
+                    }
+                    className="rounded-md bg-neutral-900 px-2.5 py-1.5 font-semibold text-white hover:bg-neutral-800 disabled:opacity-50"
+                  >
+                    {revisionState === "pending"
+                      ? "Requesting…"
+                      : revisionState === "error"
+                      ? "Retry"
+                      : "Send request"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setRevisionState("idle");
+                      setRevisionReason("");
+                    }}
+                    className="rounded-md border border-neutral-300 px-2.5 py-1.5 text-neutral-600 hover:bg-neutral-50"
+                  >
+                    Cancel
+                  </button>
+                </div>
               ) : (
                 <button
                   type="button"
-                  onClick={requestCostingRevision}
-                  disabled={revisionState === "pending"}
-                  className="rounded-md border border-neutral-300 bg-white px-2.5 py-1 text-xs font-medium text-neutral-700 hover:bg-neutral-50 disabled:opacity-50"
+                  onClick={() => setRevisionState("arming")}
+                  className="rounded-md border border-neutral-300 bg-white px-2.5 py-1 text-xs font-medium text-neutral-700 hover:bg-neutral-50"
                 >
-                  {revisionState === "pending"
-                    ? "Requesting…"
-                    : revisionState === "error"
-                    ? "Retry request"
-                    : "Request Costing Revision"}
+                  Request Costing Revision
                 </button>
               ))}
           </div>

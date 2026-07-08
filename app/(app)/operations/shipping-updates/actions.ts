@@ -11,9 +11,12 @@
  * enterFreight sync does: per-container unit prices are updated so the
  * container breakdown, the page totals and the PDF all stay coherent;
  * insurance / additional charges use the m146 columns (with the same
- * retry-without-extras fallback). Like enterFreight, `total_price`
- * refreshes when Sales re-saves the document — shipping columns are the
- * single source the builder recomputes from.
+ * retry-without-extras fallback). UNLIKE the m098 sync (draft-only — Sales
+ * re-saves before sending, which refreshes the total), m149 touches sent /
+ * won documents nobody re-saves, so completion also recomputes
+ * `total_price` + `commission_amount` with the builder's math
+ * (lib/document-total): m146 extras add to total_price (and to the m141
+ * invoice ceiling); the commission base is items + freight only.
  */
 
 import { revalidatePath } from "next/cache";
@@ -25,6 +28,7 @@ import {
   normalizeAdditionalCharges,
   totalFreight,
 } from "@/lib/logistics";
+import { documentGrandTotal } from "@/lib/document-total";
 import {
   normalizeSnapshot,
   type ShippingSnapshot,
@@ -186,9 +190,11 @@ export async function completeShippingUpdate(formData: FormData): Promise<void> 
     throw new Error(`Request is already ${req.status}.`);
   }
 
+  // "*" on purpose: the total recompute below needs the commission flags and
+  // the current m146 extras, and a "*" select can never 42703 on a pre-m146 DB.
   const { data: doc } = await supabase
     .from("documents")
-    .select("id, number, freight_cost")
+    .select("*")
     .eq("id", req.document_id)
     .maybeSingle();
   if (!doc) throw new Error("Document not found.");
@@ -230,15 +236,62 @@ export async function completeShippingUpdate(formData: FormData): Promise<void> 
   }
   const opsNotes = optStr(formData, "ops_notes");
 
+  // Rebuild the grand total the way the builder does. Anyone allowed to run
+  // the doc UPDATE below can read these lines (dl read RLS is transitive on
+  // documents read, which is wider than documents update — m046). A real
+  // document always has lines (saveDocument enforces ≥1); if none come back
+  // anyway, leave total_price alone rather than store a lines-less figure.
+  const { data: lineRows, error: linesErr } = await supabase
+    .from("document_lines")
+    .select("total_price")
+    .eq("document_id", req.document_id);
+  if (linesErr) throw new Error(linesErr.message);
+  const haveLines = (lineRows ?? []).length > 0;
+  const itemsTotal = (lineRows ?? []).reduce(
+    (s: number, l: any) => s + (Number(l.total_price) || 0),
+    0
+  );
+  const commission = {
+    enabled: !!(doc as any).commission_enabled,
+    percentage: Number((doc as any).commission_percentage) || 0,
+  };
+  // Effective extras = the values being written now, else what the document
+  // already carries. The no-extras variant backs the pre-m146 retry: nothing
+  // is persisted there, so nothing may be totalled.
+  const totals = documentGrandTotal({
+    itemsTotal,
+    freightTotal: newFreight,
+    commission,
+    insuranceCost: newInsurance ?? (doc as any).insurance_cost,
+    additionalCharges: charges ?? (doc as any).additional_charges,
+  });
+  const totalsNoExtras = documentGrandTotal({
+    itemsTotal,
+    freightTotal: newFreight,
+    commission,
+  });
+  let persistedTotal: number | null = null;
+
   // Push onto the document — m146 retry pattern (freight_cost always exists).
   const docPatch: Record<string, unknown> = { freight_cost: newFreight };
   if (newInsurance != null) docPatch.insurance_cost = newInsurance;
   if (charges != null) docPatch.additional_charges = charges;
+  if (haveLines) {
+    docPatch.total_price = totals.grand_total;
+    docPatch.commission_amount = totals.commission_amount;
+    persistedTotal = totals.grand_total;
+  }
   const up = await supabase.from("documents").update(docPatch).eq("id", req.document_id);
   if (up.error && /(insurance_cost|additional_charges)/.test(up.error.message ?? "")) {
+    const fallback: Record<string, unknown> = { freight_cost: newFreight };
+    if (haveLines) {
+      fallback.total_price = totalsNoExtras.grand_total;
+      fallback.commission_amount = totalsNoExtras.commission_amount;
+      persistedTotal = totalsNoExtras.grand_total;
+    }
     const retry = await supabase
       .from("documents")
-      .update({ freight_cost: newFreight })
+      .update(fallback)
       .eq("id", req.document_id);
     if (retry.error) throw new Error(retry.error.message);
   } else if (up.error) {
@@ -271,6 +324,8 @@ export async function completeShippingUpdate(formData: FormData): Promise<void> 
       previous_freight_cost: oldF,
       new_freight_cost: newFreight,
       new_insurance_cost: newInsurance,
+      previous_total_price: Number((doc as any).total_price) || 0,
+      new_total_price: persistedTotal,
     },
     bestEffort: true,
   });

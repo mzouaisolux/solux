@@ -17,6 +17,7 @@ import {
   updateProductionOrderPayments,
   updateProductionOrderDeadline,
   requestBlInfoFromSales,
+  requestShippingDocsRequirements,
 } from "@/app/(app)/production/orders/actions";
 import { updateOrderCell } from "./actions";
 import styles from "./quick-update.module.css";
@@ -133,6 +134,37 @@ export function PaymentPopoverBody({
   const [dueDate, setDueDate] = useState(s(row.balanceDueDate));
   const [lc, setLc] = useState(s(row.lcExpiryDate));
   const [notes, setNotes] = useState(s(row.paymentNotes));
+  // Manual orders (m155) have no quotation to read total/terms from — the
+  // expected amounts derive from these two editable facts instead.
+  const [mTotal, setMTotal] = useState(s(row.manualTotal ?? ""));
+  const [mPct, setMPct] = useState(s(row.manualDepositPct ?? ""));
+
+  /** Granular save of one manual money fact (whitelisted updateOrderCell). */
+  const commitManualFact = (
+    field: "manual_total_price" | "manual_deposit_percent",
+    value: string,
+    prevValue: string,
+    patch: Record<string, unknown>,
+    prev: Record<string, unknown>
+  ) => {
+    const fd = new FormData();
+    fd.set("id", row.id);
+    fd.set("field", field);
+    fd.set("value", value);
+    const prevFd = new FormData();
+    prevFd.set("id", row.id);
+    prevFd.set("field", field);
+    prevFd.set("value", prevValue);
+    commit({
+      id: row.id,
+      patch,
+      prev,
+      run: () => updateOrderCell(fd),
+      undoRun: () => updateOrderCell(prevFd),
+      label: `${field === "manual_total_price" ? "Order total" : "Deposit %"} · ${row.number}`,
+      touched: ["deposit", "balance", "payment_status"],
+    });
+  };
 
   const build = (vals: {
     depAmt: string;
@@ -156,6 +188,48 @@ export function PaymentPopoverBody({
   };
 
   const save = () => {
+    // Manual money facts first (independent granular writes) — the expected
+    // amounts in the optimistic patch mirror the server derivation.
+    if (row.source === "manual") {
+      const totalN = mTotal.trim() === "" ? null : Number(mTotal);
+      const pctN = mPct.trim() === "" ? null : Number(mPct);
+      const expDep =
+        totalN != null && pctN != null ? (totalN * pctN) / 100 : 0;
+      const expBal = totalN != null ? Math.max(0, totalN - expDep) : 0;
+      const derived = {
+        manualTotal: totalN,
+        manualDepositPct: pctN,
+        expectedDeposit: expDep,
+        expectedBalance: expBal,
+        balanceRemaining: Math.max(0, expBal - Number(balAmt || 0)),
+      };
+      const prevDerived = {
+        manualTotal: row.manualTotal,
+        manualDepositPct: row.manualDepositPct,
+        expectedDeposit: row.expectedDeposit,
+        expectedBalance: row.expectedBalance,
+        balanceRemaining: row.balanceRemaining,
+      };
+      if (totalN !== (row.manualTotal ?? null)) {
+        commitManualFact(
+          "manual_total_price",
+          mTotal.trim(),
+          s(row.manualTotal ?? ""),
+          derived,
+          prevDerived
+        );
+      }
+      if (pctN !== (row.manualDepositPct ?? null)) {
+        commitManualFact(
+          "manual_deposit_percent",
+          mPct.trim(),
+          s(row.manualDepositPct ?? ""),
+          derived,
+          prevDerived
+        );
+      }
+    }
+
     const nextDeposit = Number(depAmt || 0);
     const nextBalance = Number(balAmt || 0);
     const patch: Record<string, unknown> = {
@@ -218,6 +292,33 @@ export function PaymentPopoverBody({
         Expected deposit {money(row.currency, row.expectedDeposit)} · balance{" "}
         {money(row.currency, row.expectedBalance)}
       </div>
+      {row.source === "manual" && (
+        <div className={styles.popRow}>
+          <label className={styles.field} style={{ flex: 2 }}>
+            <span className={styles.fieldLabel}>
+              Order total ({row.currency})
+            </span>
+            <input
+              className={styles.popInput}
+              type="number"
+              min="0"
+              value={mTotal}
+              onChange={(e) => setMTotal(e.target.value)}
+            />
+          </label>
+          <label className={styles.field} style={{ flex: 1 }}>
+            <span className={styles.fieldLabel}>Deposit %</span>
+            <input
+              className={styles.popInput}
+              type="number"
+              min="0"
+              max="100"
+              value={mPct}
+              onChange={(e) => setMPct(e.target.value)}
+            />
+          </label>
+        </div>
+      )}
       <div className={styles.popRow}>
         <label className={styles.field} style={{ flex: 1 }}>
           <span className={styles.fieldLabel}>Deposit received</span>
@@ -442,7 +543,7 @@ export function TimelinePopoverBody({
       },
       run: () => updateProductionOrderDeadline(fd),
       label: `Delay ${n > 0 ? "+" : ""}${n}d · ${row.number}`,
-      touched: ["factory_delay", "external_delay", "current_eta"],
+      touched: ["factory_delay", "external_delay", "production_due"],
     });
     onClose();
   };
@@ -451,7 +552,7 @@ export function TimelinePopoverBody({
     <div>
       <div className={styles.popTitle}>Timeline · {row.number}</div>
       <div style={{ fontSize: 12, color: "#374151", marginBottom: 10 }}>
-        Current ETA <b>{row.currentEta ?? "—"}</b>
+        Production due <b>{row.productionDue ?? "—"}</b>
         <br />
         Initial deadline {row.initialDeadline ?? "—"} · factory{" "}
         {row.factoryDelayDays >= 0 ? "+" : ""}
@@ -508,18 +609,41 @@ export function TimelinePopoverBody({
 }
 
 /* ============================================================
-   Documents popover — read-only readiness + link out (upload lives on
-   the order detail page; deferred to a later lot).
+   Documents popover — the requirement CHECKLIST behind the "n/m"
+   counter (which docs, ready or missing), plus the Operations → Sales
+   loop: "which shipping documents does this customer require?" (Sales
+   ticks them on the client's Shipping/BL profile — the same source
+   these requirements derive from). Upload stays on the order page.
    ============================================================ */
 
 export function DocumentsPopoverBody({
   row,
+  canEdit,
   onClose,
 }: {
   row: QuickUpdateRow;
+  canEdit: boolean;
   onClose: () => void;
 }) {
+  const [pending, startTransition] = useTransition();
   const allReady = row.docsTotal > 0 && row.docsReady === row.docsTotal;
+
+  const requestRequirements = () => {
+    const fd = new FormData();
+    fd.set("id", row.id);
+    startTransition(async () => {
+      try {
+        await requestShippingDocsRequirements(fd);
+        toast.success(
+          "Request sent to Sales — they'll confirm the client's required documents"
+        );
+        onClose();
+      } catch (e: any) {
+        toast.error(e?.message ?? "Could not send the request");
+      }
+    });
+  };
+
   return (
     <div>
       <div className={styles.popTitle}>Shipping documents · {row.number}</div>
@@ -529,13 +653,62 @@ export function DocumentsPopoverBody({
         </b>{" "}
         required documents ready.
       </div>
-      <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 10 }}>
+
+      {/* the actual checklist — no more guessing what "0/7" means */}
+      {row.docsItems.length > 0 && (
+        <ul className={styles.docList}>
+          {row.docsItems.map((d) => (
+            <li key={d.key} className={styles.docItem}>
+              <span
+                className={styles.dot}
+                style={{ background: d.present ? "#22c55e" : "#ef4444" }}
+              />
+              <span
+                style={{
+                  flex: 1,
+                  color: d.present ? "#374151" : "#111827",
+                }}
+              >
+                {d.label}
+              </span>
+              <span style={{ color: "#9ca3af", fontSize: 10 }}>
+                {d.present ? "ready" : d.level}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      <div style={{ fontSize: 12, color: "#6b7280", margin: "8px 0 10px" }}>
         Commercial Invoice:{" "}
         {row.ciNumber ? <b>{row.ciNumber}</b> : "not generated yet"}
+        <br />
+        <span style={{ fontSize: 11 }}>
+          The list derives from the payment terms + the client's document
+          checklist (Shipping / BL profile).
+        </span>
       </div>
-      <Link href={row.detailHref} className={styles.chip} onClick={onClose}>
-        Open documents on the order →
-      </Link>
+
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        {canEdit && (
+          <button
+            type="button"
+            className={styles.chip}
+            onClick={requestRequirements}
+            disabled={pending || !row.clientId}
+            title={
+              row.clientId
+                ? "Ask the Sales owner to confirm which shipping documents this customer requires"
+                : "Link a client to this order first"
+            }
+          >
+            {pending ? "Requesting…" : "Request requirements from Sales"}
+          </button>
+        )}
+        <Link href={row.detailHref} className={styles.chip} onClick={onClose}>
+          Open documents on the order →
+        </Link>
+      </div>
     </div>
   );
 }

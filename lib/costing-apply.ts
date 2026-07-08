@@ -13,10 +13,26 @@
  * the exact class of bug Phase 1 exists to prevent.
  */
 
-import { applyDiscount } from "./pricing";
-import { commissionAmount } from "./commission";
-import { totalFreight } from "./logistics";
+// Value imports carry the .ts extension so the node --experimental-strip-types
+// test runner accepts them (type-only imports are erased and safe either way).
+// applyDiscount below stays a MIRROR — keep in sync with its source.
 import type { DiscountType, DocumentContainer } from "./types";
+import {
+  documentGrandTotal,
+  type DocumentTotalParts,
+} from "./document-total.ts";
+import { totalFreight } from "./logistics.ts";
+
+/** MIRROR of lib/pricing applyDiscount — keep in sync. */
+function applyDiscount(
+  original: number,
+  type: DiscountType | null,
+  value: number
+): number {
+  if (!type || !value || value <= 0) return original;
+  if (type === "percentage") return Math.max(0, original * (1 - value / 100));
+  return Math.max(0, original - value);
+}
 
 export type LineComponent = "product" | "pole";
 
@@ -179,14 +195,19 @@ export function versionContainers(version: ApplyVersion): DocumentContainer[] {
 }
 
 /**
- * Recompute the document's derived money columns after line/freight changes —
- * the exact mirror of saveDocument's formula (documents/new/actions.ts):
+ * Recompute the document's derived money columns after line/freight changes.
+ * Delegates to documentGrandTotal (lib/document-total.ts) — the canonical,
+ * tested mirror of saveDocument's builder math — so an apply lands on the
+ * exact figure a Sales re-save would store:
  *   items_total = Σ line.total_price (ALL lines, updated values included)
  *   freight     = Σ container lines (qty × unit + LCL wooden box)…
  *                 …or the legacy freight_cost scalar when no container rows
  *   commission  = commissionAmount(items + freight)  — depends on the subtotal,
  *                 so it MUST be rewritten alongside total_price
- *   total_price = items + freight + commission
+ *   total_price = items + freight + commission + m146 extras (insurance +
+ *                 additional charges — added AFTER commission, never its base)
+ * No rounding: the builder persists unrounded figures, and a 1¢ drift is the
+ * total ≠ breakdown mismatch fixed 2026-07-08 in completeShippingUpdate.
  */
 export function recomputeDocTotals(input: {
   lineTotals: number[];
@@ -194,25 +215,34 @@ export function recomputeDocTotals(input: {
   legacyFreightCost?: number | null;
   commission_enabled?: boolean | null;
   commission_percentage?: number | null;
-}): { items_total: number; freight_total: number; commission_amount: number; total_price: number } {
-  const items_total = round2(
-    input.lineTotals.reduce((s, t) => s + Number(t || 0), 0)
-  );
-  const freight_total = round2(
-    input.containers.length
-      ? totalFreight(input.containers)
-      : Number(input.legacyFreightCost || 0)
-  );
-  const commission_amount = round2(
-    commissionAmount(items_total + freight_total, {
+  insurance_cost?: DocumentTotalParts["insuranceCost"];
+  additional_charges?: DocumentTotalParts["additionalCharges"];
+}): {
+  items_total: number;
+  freight_total: number;
+  commission_amount: number;
+  shipping_extras: number;
+  total_price: number;
+} {
+  const items_total = input.lineTotals.reduce((s, t) => s + Number(t || 0), 0);
+  const freight_total = input.containers.length
+    ? totalFreight(input.containers)
+    : Number(input.legacyFreightCost || 0);
+  const totals = documentGrandTotal({
+    itemsTotal: items_total,
+    freightTotal: freight_total,
+    commission: {
       enabled: !!input.commission_enabled,
       percentage: Number(input.commission_percentage || 0),
-    })
-  );
+    },
+    insuranceCost: input.insurance_cost,
+    additionalCharges: input.additional_charges,
+  });
   return {
     items_total,
     freight_total,
-    commission_amount,
-    total_price: round2(items_total + freight_total + commission_amount),
+    commission_amount: totals.commission_amount,
+    shipping_extras: totals.shipping_extras,
+    total_price: totals.grand_total,
   };
 }

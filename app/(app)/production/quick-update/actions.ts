@@ -20,14 +20,19 @@
 import { createClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
 import { requireCapability } from "@/lib/permissions";
+import { getCurrentUserRole } from "@/lib/auth";
 import { emitEvent } from "@/lib/events";
 import { normalizeShippingDetails } from "@/lib/shipping";
+import { todayISO } from "@/lib/working-days";
+import { PRODUCTION_ORDER_STATUSES } from "@/lib/types";
 import { EDITABLE_FIELDS } from "@/lib/quick-update-columns";
 
 const FIELD_LABEL: Record<string, string> = {
   etd: "ETD",
   eta: "ETA",
   shipping_notes: "Notes",
+  manual_total_price: "Order total",
+  manual_deposit_percent: "Deposit %",
   bl_number: "BL#",
   forwarder: "Carrier",
   vessel: "Vessel",
@@ -81,16 +86,16 @@ export async function updateOrderCell(formData: FormData): Promise<void> {
   let before: unknown = null;
   let after: unknown = null;
 
-  if (meta.kind === "scalar") {
-    // `field` is a whitelisted column name (etd | eta | shipping_notes) — safe
-    // to interpolate into the select.
+  if (meta.kind === "scalar" || meta.kind === "scalar-num") {
+    // `field` is a whitelisted column name — safe to interpolate into the
+    // select. scalar-num (manual money facts, m155) parses to a number.
     const { data: prev } = await supabase
       .from("production_orders")
       .select(field)
       .eq("id", id)
       .maybeSingle();
     before = (prev as Record<string, unknown> | null)?.[field] ?? null;
-    after = normStr(raw);
+    after = meta.kind === "scalar-num" ? normNum(raw) : normStr(raw);
     const { error } = await supabase
       .from("production_orders")
       .update({ [field]: after, updated_at: now })
@@ -142,4 +147,109 @@ export async function updateOrderCell(formData: FormData): Promise<void> {
   revalidatePath("/operations");
   revalidatePath(`/production/orders/${id}`);
   revalidatePath("/dashboard");
+}
+
+/**
+ * Create a MANUAL production order (m155) — the Excel-transition entry point.
+ *
+ * Manual orders are real `production_orders` rows with NO quotation and NO
+ * task list: they live in the same Quick Update table, carry the same
+ * statuses/payments/shipping, and the pages fall back to the `manual_*`
+ * columns where a workflow order would read its linked quotation. The core
+ * workflow is untouched — `launchProduction` remains the ONLY path that
+ * creates workflow orders, and this action can never link a quotation.
+ *
+ * FormData: { number*, client_id?, client_name?, sales_label?, total?,
+ *             currency?, deposit_percent?, status?, production_due?, notes? }
+ */
+export async function createManualOrder(
+  formData: FormData
+): Promise<{ id: string }> {
+  await requireCapability("production_order.create_manual");
+
+  const number = normStr(formData.get("number"));
+  if (!number) throw new Error("PO number is required");
+
+  const status = normStr(formData.get("status")) ?? "awaiting_deposit";
+  if (!(PRODUCTION_ORDER_STATUSES as readonly string[]).includes(status)) {
+    throw new Error(`Invalid status: ${status}`);
+  }
+
+  const clientId = normStr(formData.get("client_id"));
+  const clientName = normStr(formData.get("client_name"));
+  const salesLabel = normStr(formData.get("sales_label"));
+  const total = normNum(formData.get("total"));
+  const depositPct = normNum(formData.get("deposit_percent"));
+  if (depositPct != null && (depositPct < 0 || depositPct > 100)) {
+    throw new Error("Deposit % must be between 0 and 100");
+  }
+  const currency = normStr(formData.get("currency")) ?? "USD";
+  const incoterm = normStr(formData.get("incoterm"));
+  const productionDue = normStr(formData.get("production_due"));
+  const notes = normStr(formData.get("notes"));
+
+  const supabase = createClient();
+  const { userId } = await getCurrentUserRole();
+  const today = todayISO();
+
+  const { data: created, error } = await supabase
+    .from("production_orders")
+    .insert({
+      number,
+      quotation_id: null,
+      task_list_id: null,
+      client_id: clientId,
+      source: "manual",
+      manual_client_name: clientId ? null : clientName,
+      manual_sales_label: salesLabel,
+      manual_total_price: total,
+      manual_currency: currency,
+      manual_deposit_percent: depositPct,
+      status,
+      initial_production_deadline: productionDue,
+      current_production_deadline: productionDue,
+      // manual orders carry their incoterm in the shipping blob (workflow
+      // orders read the quotation's — see lib/shipping.ts)
+      shipping_details: incoterm ? { incoterm } : null,
+      shipping_notes: notes,
+      // entry date — keeps manual rows sorted naturally with workflow ones
+      // (the list orders by production_validation_date desc).
+      production_validation_date: today,
+      created_by: userId,
+    })
+    .select("id")
+    .single();
+
+  if (error) {
+    if (error.code === "23505") {
+      throw new Error(
+        `PO number "${number}" already exists — order numbers are unique across the whole order book.`
+      );
+    }
+    // Pre-m155 database: columns/nullability missing → clear activation hint.
+    if (
+      error.code === "42703" ||
+      error.code === "23502" ||
+      /column .* does not exist|null value in column/i.test(error.message ?? "")
+    ) {
+      throw new Error(
+        "Manual orders need migration 155_manual_production_orders.sql — apply it in the Supabase SQL editor first."
+      );
+    }
+    throw new Error(error.message);
+  }
+
+  await emitEvent({
+    entity_type: "production_order",
+    entity_id: created.id,
+    event_type: "po.created",
+    message: `Manual order ${number} registered (Excel transition)`,
+    payload: { via: "quick_update_manual", number, client_id: clientId ?? null },
+    bestEffort: true,
+  });
+
+  revalidatePath("/production/quick-update");
+  revalidatePath("/operations");
+  revalidatePath("/dashboard");
+  return { id: created.id };
 }

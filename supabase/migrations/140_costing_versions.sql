@@ -16,8 +16,14 @@
 --     'approved'   the Director priced it (approved_by/at, prices filled,
 --                  previous_* snapshot the prior approved prices);
 --     'superseded' a newer approval replaced it (history, kept forever);
---     'cancelled'  zombie pending closed when the SR reached a terminal
---                  status (won/lost/cancelled).
+--     'cancelled'  zombie pending closed AUTOMATICALLY when the SR reached a
+--                  terminal status (won/lost/cancelled);
+--     'dismissed'  a HUMAN reviewed the request and dismissed it
+--                  (dismissed_by/at; distinct from 'cancelled' so the banner
+--                  history never lies about who closed what).
+--   `previous_status` records the SR status at request time so a dismissal
+--   can RESTORE it — without it a dismissed SR would stay stuck in the
+--   Director's ready_for_pricing queue.
 --   Invariant: at most ONE 'pending' (partial unique index) and — by the
 --   write path — at most one 'approved' per SR.
 --
@@ -53,7 +59,7 @@ create table if not exists project_costing_versions (
   project_request_id  uuid not null references project_requests(id) on delete cascade,
   version_no          integer not null,
   status              text not null default 'pending'
-    check (status in ('pending','approved','superseded','cancelled')),
+    check (status in ('pending','approved','superseded','cancelled','dismissed')),
   -- selling snapshot (NEVER cost / margins)
   currency            text not null default 'USD',
   quantity            integer,
@@ -74,6 +80,10 @@ create table if not exists project_costing_versions (
   requested_at        timestamptz,
   approved_by         uuid references auth.users(id) on delete set null,
   approved_at         timestamptz,
+  dismissed_by        uuid references auth.users(id) on delete set null,
+  dismissed_at        timestamptz,
+  -- SR status at request time — restored when the request is dismissed.
+  previous_status     text,
   reason              text,
   notes               text,
   previous_product_unit_price numeric,
@@ -185,7 +195,7 @@ create index if not exists idx_doc_lines_source_pr
 
 insert into schema_migrations (filename, note)
 values ('140_costing_versions.sql',
-        'Costing Versions & Validity: project_costing_versions (V1..Vn inside the SR, pending->approved in-place, superseded history, selling prices only, owner-inclusive RLS, no delete) + backfill V1 from project_products; pricing_settings costing_aging_after_days/costing_expired_after_days/costing_require_revision_when_expired; documents.costing_version_ack (newer-costing prompt ack); document_lines.source_component (product|pole) + index on source_project_request_id. Validity derived at read time (freight-validity pattern m098).')
+        'Costing Versions & Validity: project_costing_versions (V1..Vn inside the SR, pending->approved in-place, superseded history, human dismissed status + dismissed_by/at + previous_status restore, selling prices only, owner-inclusive RLS, no delete) + backfill V1 from project_products; pricing_settings costing_aging_after_days/costing_expired_after_days/costing_require_revision_when_expired; documents.costing_version_ack (newer-costing prompt ack); document_lines.source_component (product|pole) + index on source_project_request_id. Validity derived at read time (freight-validity pattern m098).')
 on conflict (filename) do nothing;
 
 notify pgrst, 'reload schema';

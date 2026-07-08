@@ -144,6 +144,14 @@ export async function quickCreateAffair(input: {
     }
   }
   if (res.error || !res.data) {
+    // FK 23503 on client_id = the client row is GONE (deleted while this
+    // builder was open; a client delete SET NULLs its affairs, m076). The raw
+    // Postgres message reads like a server bug — say what actually happened.
+    if (res.error?.code === "23503" && /client/i.test(res.error.message)) {
+      throw new Error(
+        "This client no longer exists — it may have been deleted while this page was open. Reload the page and select a current client."
+      );
+    }
     throw new Error(res.error?.message ?? "Could not create the project");
   }
   revalidatePath("/clients");

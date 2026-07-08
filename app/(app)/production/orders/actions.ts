@@ -1773,3 +1773,115 @@ export async function requestBlInfoFromSales(formData: FormData) {
   revalidatePath("/dashboard");
   if (affairId) revalidatePath(`/affairs/${affairId}`);
 }
+
+/* =====================================================================
+   REQUEST SHIPPING DOCS REQUIREMENTS — Operations → Sales loop
+   =====================================================================
+   Owner req 2026-07-08 (Quick Update): Operations doesn't always know
+   WHICH shipping documents a specific customer requires, so the "n/m
+   docs" counter can be based on an unconfirmed checklist. This action
+   asks the Sales owner to review/tick the client's document checklist
+   (the BL profile documents, m054 — the SAME source requiredShippingDocs
+   derives from, incl. custom rows). Resolution is emitted when Sales
+   saves the client's Shipping/BL profile (see clients/actions.ts), which
+   re-arms the anti-duplicate gate — same mechanics as the BL-info loop.
+   ===================================================================== */
+export async function requestShippingDocsRequirements(formData: FormData) {
+  await requireCapability("production_order.edit_shipment");
+
+  const id = String(formData.get("id"));
+  if (!id) throw new Error("Missing production order id");
+
+  const supabase = createClient();
+  const { userId } = await getCurrentUserRole();
+
+  const { data: order } = await supabase
+    .from("production_orders")
+    .select(
+      "id, number, client_id, quotation_id, documents:quotation_id(id, number, affair_id, affair_name, sales_owner_id, created_by), clients:client_id(company_name)"
+    )
+    .eq("id", id)
+    .maybeSingle();
+  if (!order) throw new Error("Production order not found");
+
+  const o = order as any;
+  if (!o.client_id) {
+    throw new Error(
+      "This order is not linked to a client yet — link a client first so Sales knows whose document checklist to confirm."
+    );
+  }
+  const clientName = o.clients?.company_name ?? "—";
+  const affairId = (o.documents?.affair_id as string | null) ?? null;
+
+  // Anti-duplicate: ONE pending request per order; re-armed when Sales
+  // saves the client's Shipping/BL profile (docs_requirements_resolved).
+  const { data: lastReq } = await supabase
+    .from("events")
+    .select("created_at")
+    .eq("entity_type", "production_order")
+    .eq("entity_id", id)
+    .eq("event_type", "po.docs_requirements_requested")
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (lastReq) {
+    const { data: lastRes } = await supabase
+      .from("events")
+      .select("created_at")
+      .eq("entity_type", "production_order")
+      .eq("entity_id", id)
+      .eq("event_type", "po.docs_requirements_resolved")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    const stillPending =
+      !lastRes ||
+      Date.parse(lastRes.created_at) < Date.parse(lastReq.created_at);
+    if (stillPending) {
+      throw new Error(
+        `Request already sent to Sales on ${new Date(
+          lastReq.created_at
+        ).toLocaleString()} — still pending until they review the client's document checklist. No duplicate was sent.`
+      );
+    }
+  }
+
+  await emitEvent({
+    entity_type: "production_order",
+    entity_id: id,
+    event_type: "po.docs_requirements_requested",
+    message:
+      `Operations asks which shipping documents ${clientName} requires — ` +
+      `please review and tick the document checklist on the client's Shipping / BL profile.`,
+    payload: {
+      client_id: o.client_id,
+      client_name: clientName,
+      affair_id: affairId,
+      affair_name: (o.documents?.affair_name as string | null) ?? null,
+      requested_by: userId,
+      order_number: o.number ?? null,
+      doc_number: o.documents?.number ?? null,
+    },
+    bestEffort: true,
+  });
+
+  // Sales to-do on the affair, when the order is filed under one (manual
+  // Excel-transition orders may not be — the notification still lands).
+  if (affairId) {
+    await supabase.from("planned_actions").insert({
+      affair_id: affairId,
+      action_type: "other",
+      title: "Confirm required shipping documents",
+      due_date: new Date().toISOString().slice(0, 10),
+      notes:
+        `Operations needs the confirmed list of shipping documents for ` +
+        `${clientName} — tick them on the client's Shipping / BL profile ` +
+        `(order ${o.number ?? ""}).`,
+      created_by: userId ?? null,
+    });
+  }
+
+  revalidatePath(`/production/orders/${id}`);
+  revalidatePath("/dashboard");
+  if (affairId) revalidatePath(`/affairs/${affairId}`);
+}

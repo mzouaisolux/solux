@@ -127,6 +127,43 @@ function ShareButton({ d }: { d: ProjectDocument }) {
   );
 }
 
+/** Inline preview overlay (PDFs & images render natively in an iframe). */
+function PreviewButton({ d }: { d: ProjectDocument }) {
+  const [open, setOpen] = useState(false);
+  if (d.source === "record" || d.source === "quotation") return null;
+  return (
+    <>
+      <button type="button" onClick={() => setOpen(true)} className={ACT}>
+        Preview
+      </button>
+      {open && (
+        <div
+          className="fixed inset-0 z-50 flex flex-col bg-black/70 p-4 md:p-8"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setOpen(false);
+          }}
+        >
+          <div className="mb-2 flex items-center justify-between gap-3">
+            <span className="truncate text-sm font-medium text-white">{d.name}</span>
+            <button
+              type="button"
+              onClick={() => setOpen(false)}
+              className="rounded-md bg-white/10 px-2.5 py-1 text-xs font-semibold text-white hover:bg-white/20"
+            >
+              ✕ Close
+            </button>
+          </div>
+          <iframe
+            src={d.href}
+            title={d.name}
+            className="min-h-0 flex-1 rounded-lg border border-white/20 bg-white"
+          />
+        </div>
+      )}
+    </>
+  );
+}
+
 function DocRow({ d, canSetDocStatus }: { d: ProjectDocument; canSetDocStatus: boolean }) {
   const isExternal = d.source !== "record" && d.source !== "quotation";
   const meta = [
@@ -153,12 +190,13 @@ function DocRow({ d, canSetDocStatus }: { d: ProjectDocument; canSetDocStatus: b
         </a>
         <div className="truncate text-[10.5px] text-neutral-400">{meta}</div>
       </div>
-      {d.version != null && d.source === "order_document" && (
-        <span className="text-[10px] font-semibold uppercase text-neutral-400">
-          v{d.version}
-          {d.isCurrent ? " · current" : ""}
-        </span>
-      )}
+      {d.version != null &&
+        (d.source === "order_document" || d.source === "attachment") && (
+          <span className="text-[10px] font-semibold uppercase text-neutral-400">
+            v{d.version}
+            {d.isCurrent ? " · current" : ""}
+          </span>
+        )}
       <DocStatusControl d={d} canSet={canSetDocStatus} />
       {d.status && (
         <span className="text-[10px] font-medium uppercase tracking-wide text-neutral-400">
@@ -169,6 +207,7 @@ function DocRow({ d, canSetDocStatus }: { d: ProjectDocument; canSetDocStatus: b
         <span className="text-[11px] text-neutral-400">{d.sizeLabel}</span>
       )}
       <div className="flex shrink-0 items-center gap-2.5">
+        <PreviewButton d={d} />
         <a
           href={d.href}
           {...(isExternal ? { target: "_blank", rel: "noreferrer" } : {})}

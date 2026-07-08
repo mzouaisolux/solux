@@ -13,6 +13,7 @@ import {
   latestOrderDocs,
   filterProjectDocuments,
   repositoryAuthors,
+  currentAttachmentVersions,
   groupByFolder,
   fileSizeLabel,
   type ProjectDocument,
@@ -140,10 +141,41 @@ test("filter: by author + author searchable + repositoryAuthors distinct sorted"
   assert.deepEqual(repositoryAuthors(docs), ["Olivia Ops", "Sam Sales"]);
 });
 
+test("currentAttachmentVersions: max version per group is current; legacy rows are own group", () => {
+  const { currentIds, versionById, groupSizeById } = currentAttachmentVersions([
+    { id: "a1", group_id: "g1", version: 1 },
+    { id: "a2", group_id: "g1", version: 2 },
+    { id: "b1", group_id: null, version: null }, // pre-m151 legacy
+    { id: "c1", group_id: "c1", version: 1 },
+  ]);
+  assert.deepEqual(Array.from(currentIds).sort(), ["a2", "b1", "c1"]);
+  assert.equal(versionById.get("a1"), 1);
+  assert.equal(versionById.get("a2"), 2);
+  assert.equal(versionById.get("b1"), 1);
+  assert.equal(groupSizeById.get("a1"), 2);
+  assert.equal(groupSizeById.get("c1"), 1);
+});
+
 test("fileSizeLabel formats bytes", () => {
   assert.equal(fileSizeLabel(500), "500 B");
   assert.equal(fileSizeLabel(150 * 1024), "150 KB");
   assert.equal(fileSizeLabel(2.5 * 1024 * 1024), "2.5 MB");
   assert.equal(fileSizeLabel(0), null);
   assert.equal(fileSizeLabel(null), null);
+});
+
+// m157 — SR technical dossier files land in the right repository folder.
+import { folderForRequestFile } from "../lib/project-documents.ts";
+
+test("folderForRequestFile: SR categories → folders", () => {
+  assert.equal(folderForRequestFile("costing"), "commercial");
+  assert.equal(folderForRequestFile("pole_drawing"), "technical");
+  assert.equal(folderForRequestFile("spec"), "technical");
+  assert.equal(folderForRequestFile("drawing"), "technical");
+  assert.equal(folderForRequestFile("packing"), "logistics");
+  assert.equal(folderForRequestFile("tender"), "customer");
+  assert.equal(folderForRequestFile("requirement"), "customer");
+  assert.equal(folderForRequestFile("image"), "customer");
+  assert.equal(folderForRequestFile("other"), "customer");
+  assert.equal(folderForRequestFile(null), "customer");
 });

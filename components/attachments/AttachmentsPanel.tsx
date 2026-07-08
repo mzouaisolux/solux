@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { resolveUserLabelStrings } from "@/lib/user-display";
 import { formatFileSize, type AttachmentRow } from "@/lib/attachments";
+import { resolveAttachmentAnchors } from "@/lib/attachments-server";
 import { AttachmentUploader } from "./AttachmentUploader";
 import { AttachmentDeleteButton } from "./AttachmentDeleteButton";
 import { AttachmentRowEditor } from "./AttachmentRowEditor";
@@ -28,25 +29,22 @@ export async function AttachmentsPanel({
 }) {
   const supabase = createClient();
 
-  // Affair root (root_document_id ?? id), tolerating pre-m059.
-  let affairId = documentId;
-  try {
-    const { data } = await supabase
-      .from("documents")
-      .select("id, root_document_id")
-      .eq("id", documentId)
-      .maybeSingle();
-    affairId = (data?.root_document_id as string | null) ?? documentId;
-  } catch {
-    affairId = documentId;
-  }
+  // EVERY anchor the affair's rows may carry (real affair id, chain root,
+  // sibling document ids) — the anchor convention changed over time and no
+  // file must disappear because of it. legacyAnchor keeps the Storage path
+  // prefix (`attachments/<anchor>/…`) stable for the uploader.
+  const { anchors, legacyAnchor } = await resolveAttachmentAnchors(
+    supabase,
+    documentId
+  );
+  const affairId = legacyAnchor;
 
   // Attachments for the affair (RLS scopes visibility).
   let rows: AttachmentRow[] = [];
   const res = await supabase
     .from("attachments")
     .select("*")
-    .eq("affair_id", affairId)
+    .in("affair_id", anchors)
     .order("created_at", { ascending: false });
   if (!res.error) {
     rows = (res.data ?? []) as AttachmentRow[];

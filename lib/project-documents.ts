@@ -47,6 +47,7 @@ export type ProjectDocumentSource =
   | "attachment" // attachments table (manual uploads on the affair)
   | "order_document" // order_documents table (PO uploads incl. shipping docs)
   | "lighting" // product_lighting_setups (energy study / dialux)
+  | "request_file" // project_request_files (SR technical dossier, m090/m157)
   | "record"; // in-app record page (task list, production order…)
 
 /** Lifecycle status of a repository file (m150) — quotations keep their own. */
@@ -146,6 +147,27 @@ export function folderForAttachment(
   return ATTACHMENT_FOLDER[attachmentType ?? "other"] ?? "customer";
 }
 
+/** project_request_files.category → folder (SR technical dossier). */
+export function folderForRequestFile(
+  category: string | null | undefined
+): ProjectFolder {
+  switch (category) {
+    case "spec":
+    case "drawing":
+    case "pole_drawing":
+      return "technical";
+    case "packing":
+      return "logistics";
+    case "costing":
+      return "commercial"; // the cost basis of the offer (view_cost-gated upstream)
+    case "tender":
+    case "requirement":
+    case "image":
+    default:
+      return "customer";
+  }
+}
+
 /** order_documents.category → folder. */
 export function folderForOrderDoc(category: string | null | undefined): ProjectFolder {
   switch (category) {
@@ -187,6 +209,50 @@ export function latestOrderDocs(rows: OrderDocLite[]): OrderDocLite[] {
     if (!cur || (r.version ?? 1) > (cur.version ?? 1)) byGroup.set(r.group_id, r);
   }
   return Array.from(byGroup.values());
+}
+
+/* ===========================================================================
+   Attachment version collapsing (m151 — group_id chains Replace history)
+   =========================================================================== */
+
+export type AttachmentVersionMeta = {
+  id: string;
+  group_id: string | null;
+  version: number | null;
+};
+
+/**
+ * Which attachment rows are the CURRENT version of their group. Pre-m151
+ * rows (no group_id) are their own group. Returns the current ids plus the
+ * version number to display for every id.
+ */
+export function currentAttachmentVersions(rows: AttachmentVersionMeta[]): {
+  currentIds: Set<string>;
+  versionById: Map<string, number>;
+  groupSizeById: Map<string, number>;
+} {
+  const byGroup = new Map<string, AttachmentVersionMeta[]>();
+  for (const r of rows) {
+    const key = r.group_id ?? r.id;
+    const list = byGroup.get(key) ?? [];
+    list.push(r);
+    byGroup.set(key, list);
+  }
+  const currentIds = new Set<string>();
+  const versionById = new Map<string, number>();
+  const groupSizeById = new Map<string, number>();
+  for (const [, list] of byGroup) {
+    let top: AttachmentVersionMeta = list[0];
+    for (const r of list) {
+      if ((r.version ?? 1) > (top.version ?? 1)) top = r;
+    }
+    currentIds.add(top.id);
+    for (const r of list) {
+      versionById.set(r.id, r.version ?? 1);
+      groupSizeById.set(r.id, list.length);
+    }
+  }
+  return { currentIds, versionById, groupSizeById };
 }
 
 /* ===========================================================================

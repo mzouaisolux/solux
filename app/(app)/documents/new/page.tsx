@@ -1,5 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import NewDocumentForm from "./NewDocumentForm";
+import { loadCostingSettings } from "@/lib/pricing-settings";
+import { computeCostingStatus } from "@/lib/costing-validity";
 import { getEffectiveRole } from "@/lib/auth";
 import { buildTierPriceMap, buildTierPriceMapByCategory } from "@/lib/pricing";
 import { getCataloguePriceVisibility } from "@/lib/pricing-visibility";
@@ -94,19 +96,20 @@ export default async function NewDocumentPage({
         // Resilient to a not-yet-applied m139 (pricing_source & friends): fall
         // back to the pre-m139 column list so edit/revise still loads its lines.
         (async () => {
+          // THREE-stage fallback: m140 (source_component) → m139 (lock cols)
+          // → base, so any partially-migrated env still loads its lines.
           const base =
             "product_id, category_id, quantity, selected_options, unit_price, total_price, pricing_mode, pricing_tier, original_unit_price, discount_type, discount_value, client_product_name, config_values";
-          const full = await supabase
-            .from("document_lines")
-            .select(
-              `${base}, pricing_source, source_project_request_id, approved_by, approved_at`
-            )
-            .eq("document_id", sourceId);
-          if (!full.error) return full;
-          return await supabase
-            .from("document_lines")
-            .select(base)
-            .eq("document_id", sourceId);
+          const m139 = `${base}, pricing_source, source_project_request_id, approved_by, approved_at`;
+          const m140 = `${m139}, source_component`;
+          for (const cols of [m140, m139, base]) {
+            const res = await supabase
+              .from("document_lines")
+              .select(cols)
+              .eq("document_id", sourceId);
+            if (!res.error) return res;
+          }
+          return { data: [] } as any;
         })(),
         // Resilient to a missing wooden_box_cost column (migration 007).
         (async () => {
@@ -148,6 +151,7 @@ export default async function NewDocumentPage({
           source_project_request_id: l.source_project_request_id ?? null,
           approved_by: l.approved_by ?? null,
           approved_at: l.approved_at ?? null,
+          source_component: l.source_component ?? null, // m140
         })),
         containers: (() => {
           const mapped = (srcContainers ?? []).map((c: any) => ({
@@ -177,6 +181,45 @@ export default async function NewDocumentPage({
         })(),
       };
     }
+  }
+
+  // m140/m153 — costing-validity notice for SR-derived quotes being edited/
+  // revised. Server-computed (RSC data flow), fallback-guarded, non-blocking:
+  // the builder banner only informs; requesting a revision lives on the
+  // locked line card. "Duplicate" = ?revise= — covered by the same path.
+  let costingNotice: { status: "aging" | "expired"; label: string } | null = null;
+  try {
+    const srIds = Array.from(
+      new Set(
+        ((initialDoc?.lines ?? []) as any[])
+          .filter((l) => l.pricing_source === "approved_service_request")
+          .map((l) => l.source_project_request_id)
+          .filter(Boolean)
+      )
+    ) as string[];
+    if (srIds.length) {
+      const [settings, snaps] = await Promise.all([
+        loadCostingSettings(supabase),
+        supabase
+          .from("project_products")
+          .select("project_request_id, priced_at")
+          .in("project_request_id", srIds),
+      ]);
+      const oldest = ((snaps.data ?? []) as any[])
+        .map((s) => s.priced_at as string | null)
+        .filter(Boolean)
+        .sort()[0] as string | undefined;
+      const v = computeCostingStatus(
+        oldest ?? null,
+        new Date().toISOString().slice(0, 10),
+        settings
+      );
+      if (v.status === "aging" || v.status === "expired") {
+        costingNotice = { status: v.status, label: v.label };
+      }
+    }
+  } catch {
+    /* unmigrated env — dormant */
   }
 
   // Resolve which published price list applies to the deal's seller per
@@ -330,6 +373,26 @@ export default async function NewDocumentPage({
       ) : (
         <div className="mb-4 rounded-md border border-neutral-200 bg-neutral-50 px-4 py-2 text-sm text-neutral-600">
           Using standard pricing — no published price list is assigned to you.
+        </div>
+      )}
+      {/* m140 — non-blocking costing-validity notice (aging/expired). The
+          request action lives on the locked line card below. */}
+      {costingNotice && (
+        <div
+          className={`mx-auto mb-4 max-w-5xl rounded-lg border px-4 py-3 text-sm ${
+            costingNotice.status === "expired"
+              ? "border-rose-300 bg-rose-50 text-rose-800"
+              : "border-amber-300 bg-amber-50 text-amber-900"
+          }`}
+        >
+          <span className="font-semibold">
+            {costingNotice.status === "expired"
+              ? "✗ Costing status: Expired. "
+              : "⚠ Costing status: Aging. "}
+          </span>
+          {costingNotice.label}. Component prices, freight costs and exchange
+          rates may have changed — you can continue with the current pricing,
+          or request a costing revision from the product card below.
         </div>
       )}
       <NewDocumentForm

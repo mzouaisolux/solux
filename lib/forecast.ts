@@ -5,214 +5,71 @@
  * -----------------
  * The forecast is a thin projection layer on top of the quotation
  * (the `documents` row). No separate opportunity object. This module
- * holds only pure logic — types, the probability ladder, category
- * definitions, staleness detection, weighting + time-bucketing. No DB
- * access, so it's safe to import from both client (chips) and server
- * (the /forecast page aggregations).
+ * holds only pure logic — types, the allowed probability values,
+ * staleness detection, weighting + time-bucketing. No DB access, so
+ * it's safe to import from both client (chips) and server (the
+ * /forecast page aggregations).
  *
- * Two operational dials, deliberately kept separate:
- *   - PROBABILITY  → quantitative likelihood (drives weighted revenue)
- *   - CATEGORY     → qualitative commit bucket (drives commit revenue)
- *
- * Probability alone isn't enough for management ("a 50% deal I'd bet
- * my quarter on" vs "a 50% deal that could evaporate") — the category
- * captures that judgment.
+ * ONE dial only: PROBABILITY. It is a CONTROLLED value — a dropdown of
+ * exact percentages, never free text, never ranges, never qualitative
+ * buckets (the old Pipeline / Best case / Commit categories are gone).
+ * The weighted forecast is simply value × probability.
  */
 
 /* ============================================================
-   Probability stages — fixed ladder, not free numeric
+   Probability — controlled exact values, not free numeric
    ============================================================ */
 
-export type ForecastProbability = 10 | 25 | 50 | 75 | 90;
+export type ForecastProbability =
+  | 10 | 20 | 30 | 40 | 50 | 60 | 70 | 80 | 90 | 95 | 100;
 
-export type ProbabilityStage = {
+/** The ONLY selectable probability values, in display order.
+ *  100% = won / confirmed order; 95% = almost certain, not yet
+ *  confirmed. Anything else (33%, 45%, 67%…) is rejected. */
+export const ALLOWED_PROBABILITIES: readonly ForecastProbability[] = [
+  10, 20, 30, 40, 50, 60, 70, 80, 90, 95, 100,
+];
+
+export function isAllowedProbability(n: number): n is ForecastProbability {
+  return (ALLOWED_PROBABILITIES as readonly number[]).includes(n);
+}
+
+export type ProbabilityOption = {
   value: ForecastProbability;
+  /** Display label — always the exact percentage. */
   label: string;
-  /** Short label for tight chip rows. */
-  short: string;
-  tone: ForecastTone;
-  /** Expected confidence level, in plain words. */
-  confidence: string;
-  /** Operational definition — what this stage actually means. */
+  /** Operational meaning, surfaced as tooltip + methodology text. */
   meaning: string;
-  /** The typical sales situation that maps to this stage. */
-  situation: string;
 };
 
 /**
- * The shared forecast ladder. The whole company reads these the same
- * way — that's the entire point. The `meaning` / `situation` text is
- * the operational glossary surfaced as tooltips + the methodology
- * panel so a "50%" from one rep means the same as a "50%" from another.
+ * The shared probability glossary. The whole company reads these the
+ * same way — a "50%" from one rep must mean the same as a "50%" from
+ * another. Labels are the exact percentages (the spec: no stages, no
+ * ranges, no categories — only controlled values).
  */
-export const PROBABILITY_STAGES: ProbabilityStage[] = [
-  {
-    value: 10,
-    label: "Cold",
-    short: "Cold",
-    tone: "neutral",
-    confidence: "Low",
-    meaning: "Early interest, no real engagement yet.",
-    situation:
-      "Quote sent, the client hasn't seriously engaged. Could easily go quiet.",
-  },
-  {
-    value: 25,
-    label: "Active discussion",
-    short: "Active",
-    tone: "info",
-    confidence: "Low to medium",
-    meaning: "The client is engaging — questions, back-and-forth.",
-    situation:
-      "Live conversation underway, but no technical or budget commitment yet.",
-  },
-  {
-    value: 50,
-    label: "Serious",
-    short: "Serious",
-    tone: "violet",
-    confidence: "Medium",
-    meaning: "Technically interested, configuration discussions active.",
-    situation:
-      "Specs being validated, budget not fully secured yet. The technical-validation moment.",
-  },
-  {
-    value: 75,
-    label: "Very likely",
-    short: "Likely",
-    tone: "amber",
-    confidence: "Medium to high",
-    meaning: "Budget confirmed, terms being finalized.",
-    situation:
-      "Client intends to buy, negotiating the final details (price, delivery, payment).",
-  },
-  {
-    value: 90,
-    label: "Expected win",
-    short: "Win",
-    tone: "success",
-    confidence: "High",
-    meaning: "Verbal or written commitment, closing imminent.",
-    situation:
-      "Only the paperwork or PO is left. You're counting on this one to land.",
-  },
+export const PROBABILITY_OPTIONS: ProbabilityOption[] = [
+  { value: 10, label: "10%", meaning: "Early interest — no real engagement yet." },
+  { value: 20, label: "20%", meaning: "First exchanges — the client is responding." },
+  { value: 30, label: "30%", meaning: "Active discussion — questions, back-and-forth." },
+  { value: 40, label: "40%", meaning: "Genuine interest — specs being discussed." },
+  { value: 50, label: "50%", meaning: "Serious — technical validation underway." },
+  { value: 60, label: "60%", meaning: "Budget being confirmed — shortlist stage." },
+  { value: 70, label: "70%", meaning: "Budget confirmed — terms under negotiation." },
+  { value: 80, label: "80%", meaning: "Client intends to buy — final details open." },
+  { value: 90, label: "90%", meaning: "Verbal commitment — closing imminent." },
+  { value: 95, label: "95%", meaning: "Almost certain — not fully confirmed yet." },
+  { value: 100, label: "100%", meaning: "Won / confirmed order." },
 ];
-
-/** Look up the full stage record by value. */
-export function probabilityStage(
-  p: number | null | undefined
-): ProbabilityStage | null {
-  if (p == null) return null;
-  return PROBABILITY_STAGES.find((s) => s.value === p) ?? null;
-}
 
 export function probabilityLabel(p: number | null | undefined): string {
   if (p == null) return "—";
-  return PROBABILITY_STAGES.find((s) => s.value === p)?.label ?? `${p}%`;
+  return `${p}%`;
 }
 
-/* ============================================================
-   Forecast categories — operational commit buckets
-   ============================================================ */
-
-export type ForecastCategory =
-  | "pipeline"
-  | "best_case"
-  | "commit"
-  | "upside"
-  | "at_risk";
-
-export const FORECAST_CATEGORIES: Array<{
-  value: ForecastCategory;
-  label: string;
-  tone: ForecastTone;
-  description: string;
-}> = [
-  {
-    value: "pipeline",
-    label: "Pipeline",
-    tone: "neutral",
-    description: "In the funnel, no strong read yet",
-  },
-  {
-    value: "best_case",
-    label: "Best case",
-    tone: "info",
-    description: "Could land if things break our way",
-  },
-  {
-    value: "commit",
-    label: "Commit",
-    tone: "success",
-    description: "Confident — counting on this to close",
-  },
-  {
-    value: "upside",
-    label: "Upside",
-    tone: "violet",
-    description: "Not in the number, would be a bonus",
-  },
-  {
-    value: "at_risk",
-    label: "At risk",
-    tone: "danger",
-    description: "Slipping — needs intervention now",
-  },
-];
-
-export function categoryLabel(c: string | null | undefined): string {
-  if (!c) return "—";
-  return (
-    FORECAST_CATEGORIES.find((x) => x.value === c)?.label ?? c
-  );
-}
-
-/* ============================================================
-   Tone palette — shared chip chrome
-   ============================================================ */
-
-export type ForecastTone =
-  | "neutral"
-  | "info"
-  | "violet"
-  | "amber"
-  | "success"
-  | "danger";
-
-/** Idle (unselected) chip chrome. */
-export const FORECAST_TONE_IDLE: Record<ForecastTone, string> = {
-  neutral: "border-neutral-200 bg-white text-neutral-600 hover:bg-neutral-50",
-  info: "border-sky-200 bg-white text-sky-700 hover:bg-sky-50",
-  violet: "border-violet-200 bg-white text-violet-700 hover:bg-violet-50",
-  amber: "border-amber-200 bg-white text-amber-700 hover:bg-amber-50",
-  success: "border-emerald-200 bg-white text-emerald-700 hover:bg-emerald-50",
-  danger: "border-rose-200 bg-white text-rose-700 hover:bg-rose-50",
-};
-
-/** Active (selected) chip chrome — filled. */
-export const FORECAST_TONE_ACTIVE: Record<ForecastTone, string> = {
-  neutral: "border-neutral-900 bg-neutral-900 text-white",
-  info: "border-sky-600 bg-sky-600 text-white",
-  violet: "border-violet-600 bg-violet-600 text-white",
-  amber: "border-amber-600 bg-amber-600 text-white",
-  success: "border-emerald-600 bg-emerald-600 text-white",
-  danger: "border-rose-600 bg-rose-600 text-white",
-};
-
-/** Soft pill chrome for read-only surfaces (tables, KPI breakdowns). */
-export const FORECAST_TONE_PILL: Record<ForecastTone, string> = {
-  neutral: "border-neutral-200 bg-neutral-50 text-neutral-700",
-  info: "border-sky-200 bg-sky-50 text-sky-800",
-  violet: "border-violet-200 bg-violet-50 text-violet-800",
-  amber: "border-amber-200 bg-amber-50 text-amber-800",
-  success: "border-emerald-200 bg-emerald-50 text-emerald-800",
-  danger: "border-rose-200 bg-rose-50 text-rose-800",
-};
-
-export function categoryTone(c: string | null | undefined): ForecastTone {
-  return (
-    FORECAST_CATEGORIES.find((x) => x.value === c)?.tone ?? "neutral"
-  );
+export function probabilityMeaning(p: number | null | undefined): string | null {
+  if (p == null) return null;
+  return PROBABILITY_OPTIONS.find((o) => o.value === p)?.meaning ?? null;
 }
 
 /* ============================================================
@@ -312,10 +169,10 @@ export function closesThisQuarter(
 /** A normalized forecast row the aggregations operate on. Built by the
  *  /forecast page from the raw documents query.
  *
- *  Note: `probability` / `category` may be null — the workspace loads
- *  ALL active quotations (so sales can set a forecast inline), not just
- *  the ones already forecasted. The KPI aggregations simply contribute
- *  0 weighted for null-probability rows. */
+ *  Note: `probability` may be null — the workspace loads ALL active
+ *  quotations (so sales can set a forecast inline), not just the ones
+ *  already forecasted. The KPI aggregations simply contribute 0
+ *  weighted for null-probability rows. */
 export type ForecastDeal = {
   id: string;
   number: string | null;
@@ -326,7 +183,6 @@ export type ForecastDeal = {
   total: number;
   currency: string;
   probability: ForecastProbability | null;
-  category: ForecastCategory | null;
   expectedCloseDate: string | null;
   updatedAt: string | null;
   ownerId: string | null;
@@ -342,12 +198,6 @@ export type ForecastDeal = {
 export type ForecastTotals = {
   /** Sum of total × probability across all forecasted deals. */
   weighted: number;
-  /** Sum of total for deals in the 'commit' category. */
-  commit: number;
-  /** Sum of total for 'best_case' deals. */
-  bestCase: number;
-  /** Sum of total for 'at_risk' deals. */
-  atRisk: number;
   /** Raw count of forecasted deals. */
   count: number;
   /** Count of stale forecasts. */
@@ -362,25 +212,12 @@ export type ForecastTotals = {
  */
 export function computeForecastTotals(deals: ForecastDeal[]): ForecastTotals {
   let weighted = 0;
-  let commit = 0;
-  let bestCase = 0;
-  let atRisk = 0;
   let staleCount = 0;
   for (const d of deals) {
     weighted += weightedValue(d.total, d.probability);
-    if (d.category === "commit") commit += d.total;
-    if (d.category === "best_case") bestCase += d.total;
-    if (d.category === "at_risk") atRisk += d.total;
     if (isForecastStale(d.updatedAt, d.probability != null)) staleCount++;
   }
-  return {
-    weighted,
-    commit,
-    bestCase,
-    atRisk,
-    count: deals.length,
-    staleCount,
-  };
+  return { weighted, count: deals.length, staleCount };
 }
 
 export type ForecastBucket = {
@@ -390,8 +227,6 @@ export type ForecastBucket = {
   weighted: number;
   /** Raw (unweighted) revenue. */
   raw: number;
-  /** Commit revenue in this bucket. */
-  commit: number;
   count: number;
 };
 
@@ -411,10 +246,9 @@ export function groupForecast(
     if (!k) continue;
     const existing =
       map.get(k.key) ??
-      { key: k.key, label: k.label, weighted: 0, raw: 0, commit: 0, count: 0 };
+      { key: k.key, label: k.label, weighted: 0, raw: 0, count: 0 };
     existing.weighted += weightedValue(d.total, d.probability);
     existing.raw += d.total;
-    if (d.category === "commit") existing.commit += d.total;
     existing.count += 1;
     map.set(k.key, existing);
   }
@@ -430,6 +264,26 @@ export function forecastByQuarter(deals: ForecastDeal[]): ForecastBucket[] {
     if (!k) return null;
     return { key: k, label: quarterLabel(k) };
   });
+}
+
+/**
+ * Exact-probability breakdown — one bucket per allowed value that has
+ * at least one deal, sorted ascending (10% … 100%). This is the
+ * "forecast grouped by exact probability" dashboard view: value at
+ * 10%, at 20%, … at 95%, at 100%. No ranges, no categories.
+ */
+export function forecastByProbability(deals: ForecastDeal[]): ForecastBucket[] {
+  return groupForecast(
+    deals,
+    (d) => {
+      if (d.probability == null) return null;
+      // Zero-pad so string sort = numeric sort (010 < 095 < 100).
+      return {
+        key: String(d.probability).padStart(3, "0"),
+        label: `${d.probability}%`,
+      };
+    }
+  );
 }
 
 /** Owner breakdown — sorted by weighted revenue descending. Labels are

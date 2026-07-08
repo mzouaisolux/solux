@@ -228,29 +228,58 @@ export async function saveDocument(
       source_project_request_id: l.source_project_request_id ?? null,
       approved_by: l.approved_by ?? null,
       approved_at: l.approved_at ?? null,
+      // m140 — product|pole tag for the selective Keep/Apply flow.
+      source_component: l.source_component ?? null,
     }));
 
-  // Insert lines, tolerating an environment where m139 is not yet applied:
-  // on a 42703 for the new columns, retry with them stripped (today's shape).
-  const m139Cols = /(pricing_source|source_project_request_id|approved_by|approved_at)/;
+  // Insert lines, tolerating environments where m139/m140 are not yet
+  // applied: TWO-STAGE fallback so an env with m139 but not m140 only loses
+  // the m140 tag, never the m139 price lock.
+  // ⚠ Every new line column MUST be added to a stage here or an unmigrated
+  // env hard-fails every quotation save.
+  const m139Cols =
+    /(pricing_source|source_project_request_id|approved_by|approved_at)/;
   const insertLineRows = async (docId: string) => {
     const rows = buildLineRows(docId);
     const attempt = await supabase.from("document_lines").insert(rows);
-    if (attempt.error && m139Cols.test(attempt.error.message ?? "")) {
-      const baseRows = rows.map(
+    if (!attempt.error) return;
+    if (/source_component/.test(attempt.error.message ?? "")) {
+      // m140 not applied — strip only its column, keep the m139 lock.
+      const noM140 = rows.map(({ source_component, ...rest }) => rest);
+      const second = await supabase.from("document_lines").insert(noM140);
+      if (!second.error) return;
+      if (m139Cols.test(second.error.message ?? "")) {
+        const base = noM140.map(
+          ({
+            pricing_source,
+            source_project_request_id,
+            approved_by,
+            approved_at,
+            ...rest
+          }) => rest
+        );
+        const fb = await supabase.from("document_lines").insert(base);
+        if (fb.error) throw new Error(fb.error.message);
+        return;
+      }
+      throw new Error(second.error.message);
+    }
+    if (m139Cols.test(attempt.error.message ?? "")) {
+      const base = rows.map(
         ({
           pricing_source,
           source_project_request_id,
           approved_by,
           approved_at,
+          source_component,
           ...rest
         }) => rest
       );
-      const fb = await supabase.from("document_lines").insert(baseRows);
+      const fb = await supabase.from("document_lines").insert(base);
       if (fb.error) throw new Error(fb.error.message);
       return;
     }
-    if (attempt.error) throw new Error(attempt.error.message);
+    throw new Error(attempt.error.message);
   };
 
   async function insertContainers(docId: string) {

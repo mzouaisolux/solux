@@ -17,6 +17,7 @@ import {
   EDITABLE_FIELDS,
   isEditableField,
   daysBetweenISO,
+  fmtShortDate,
   SMART_FILTERS,
   getSmartFilter,
   matchesSearch,
@@ -38,6 +39,9 @@ function makeRow(overrides: Partial<QuickUpdateRow> = {}): QuickUpdateRow {
     status: "in_production",
     archived: false,
     currency: "USD",
+    source: "workflow",
+    manualTotal: null,
+    manualDepositPct: null,
     paymentState: "deposit_received",
     expectedDeposit: 10000,
     depositReceived: 10000,
@@ -50,10 +54,12 @@ function makeRow(overrides: Partial<QuickUpdateRow> = {}): QuickUpdateRow {
     lcExpiryDate: null,
     paymentNotes: null,
     initialDeadline: "2026-07-01",
-    currentEta: "2026-07-10",
+    productionDue: "2026-07-10",
+    actualCompletion: null,
     factoryDelayDays: 0,
     externalDelayDays: 0,
     shipmentBooked: false,
+    incoterm: "FOB",
     etd: null,
     eta: null,
     carrier: null,
@@ -65,6 +71,7 @@ function makeRow(overrides: Partial<QuickUpdateRow> = {}): QuickUpdateRow {
     ciNumber: null,
     docsReady: 0,
     docsTotal: 3,
+    docsItems: [],
     notes: null,
     alertLevel: "ok",
     alertLabel: "On track",
@@ -75,11 +82,35 @@ function makeRow(overrides: Partial<QuickUpdateRow> = {}): QuickUpdateRow {
 
 /* -------- column catalogue -------- */
 
-test("column keys are unique and PO Number is the sticky first column", () => {
+test("column keys are unique and identity block (PO→Status) is sticky", () => {
   const keys = QUICK_UPDATE_COLUMNS.map((c) => c.key);
   assert.equal(new Set(keys).size, keys.length, "duplicate column key");
   assert.equal(QUICK_UPDATE_COLUMNS[0].key, "number");
   assert.equal(QUICK_UPDATE_COLUMNS[0].sticky, true);
+  // sticky columns must be a contiguous prefix (the pinning math assumes it)
+  const stickyKeys = QUICK_UPDATE_COLUMNS.filter((c) => c.sticky).map((c) => c.key);
+  assert.deepEqual(stickyKeys, ["number", "client", "sales", "status"]);
+  assert.deepEqual(keys.slice(0, 4), stickyKeys);
+});
+
+test("default layout follows the workflow: production → payment → transport → docs", () => {
+  assert.deepEqual(DEFAULT_VISIBLE_KEYS, [
+    "number",
+    "client",
+    "sales",
+    "status",
+    "deposit",
+    "balance",
+    "production_due",
+    "factory_delay",
+    "incoterm",
+    "carrier",
+    "etd",
+    "eta",
+    "bl",
+    "documents",
+    "notes",
+  ]);
 });
 
 test("DEFAULT_VISIBLE_KEYS excludes columns marked defaultVisible:false", () => {
@@ -87,6 +118,22 @@ test("DEFAULT_VISIBLE_KEYS excludes columns marked defaultVisible:false", () => 
   assert.ok(DEFAULT_VISIBLE_KEYS.includes("carrier"));
   assert.ok(!DEFAULT_VISIBLE_KEYS.includes("booking")); // opt-in column
   assert.ok(!DEFAULT_VISIBLE_KEYS.includes("production_deadline"));
+  assert.ok(!DEFAULT_VISIBLE_KEYS.includes("payment_status")); // dot on amounts covers it
+  assert.ok(!DEFAULT_VISIBLE_KEYS.includes("alert"));
+});
+
+test("terminology: production date is Production Due, ETA/ETD are transport-only", () => {
+  const byKey = new Map(QUICK_UPDATE_COLUMNS.map((c) => [c.key, c]));
+  assert.equal(byKey.get("production_due")?.label, "Production Due");
+  assert.equal(byKey.get("production_due")?.group, "production");
+  assert.equal(byKey.get("etd")?.group, "shipping");
+  assert.equal(byKey.get("eta")?.group, "shipping");
+  // no column outside the shipping group may call itself ETA/ETD
+  for (const c of QUICK_UPDATE_COLUMNS) {
+    if (c.group !== "shipping") {
+      assert.ok(!/\b(eta|etd)\b/i.test(c.label), `${c.key} label misuses ETA/ETD`);
+    }
+  }
 });
 
 test("every text/date column edits a whitelisted field", () => {
@@ -112,12 +159,23 @@ test("EDITABLE_FIELDS holds only neutral shipment fields, never workflow fields"
   assert.ok(isEditableField("container_number"));
   assert.ok(isEditableField("tracking_url"));
   assert.ok(isEditableField("shipping_notes"));
+  // manual-order money facts (m155) — derived-only, receipts stay bundled
+  assert.equal(EDITABLE_FIELDS["manual_total_price"]?.kind, "scalar-num");
+  assert.equal(
+    EDITABLE_FIELDS["manual_total_price"]?.capability,
+    "production_order.edit_payments"
+  );
+  assert.equal(EDITABLE_FIELDS["manual_deposit_percent"]?.kind, "scalar-num");
   // side-effect fields must NOT be granular-editable
   assert.ok(!isEditableField("status"));
   assert.ok(!isEditableField("deposit_received_amount"));
   assert.ok(!isEditableField("balance_received_amount"));
   assert.ok(!isEditableField("shipment_booked"));
   assert.ok(!isEditableField("balance_due_date"));
+  // provenance must never be editable (a manual row can't become workflow)
+  assert.ok(!isEditableField("source"));
+  assert.ok(!isEditableField("quotation_id"));
+  assert.ok(!isEditableField("task_list_id"));
   // every whitelisted field carries a capability
   for (const [f, meta] of Object.entries(EDITABLE_FIELDS)) {
     assert.ok(meta.capability.startsWith("production_order."), `${f} capability`);
@@ -125,6 +183,23 @@ test("EDITABLE_FIELDS holds only neutral shipment fields, never workflow fields"
 });
 
 /* -------- date helper -------- */
+
+test("fmtShortDate renders compact fixed-locale dates and tolerates junk", () => {
+  assert.equal(fmtShortDate("2026-08-12"), "12 Aug 26");
+  assert.equal(fmtShortDate("2026-01-05"), "5 Jan 26");
+  assert.equal(fmtShortDate("2026-08-12T10:00:00Z"), "12 Aug 26");
+  assert.equal(fmtShortDate(null), "");
+  assert.equal(fmtShortDate("nope"), "");
+  assert.equal(fmtShortDate("2026-13-40"), ""); // invalid month
+});
+
+test("incoterm is blob-editable under the shipment capability (manual orders)", () => {
+  assert.equal(EDITABLE_FIELDS["incoterm"]?.kind, "blob-str");
+  assert.equal(
+    EDITABLE_FIELDS["incoterm"]?.capability,
+    "production_order.edit_shipment"
+  );
+});
 
 test("daysBetweenISO computes signed calendar days and tolerates timestamps", () => {
   assert.equal(daysBetweenISO("2026-07-01", "2026-07-10"), 9);
@@ -170,13 +245,13 @@ test("bl_missing fires in shipping phase with no BL number, not on early/termina
   assert.ok(!f.test(makeRow({ status: "delivered", blNumber: null }), CTX));
 });
 
-test("eta_this_week is the [today, today+7] window on currentEta", () => {
-  const f = getSmartFilter("eta_this_week")!;
-  assert.ok(f.test(makeRow({ currentEta: "2026-07-05" }), CTX)); // today
-  assert.ok(f.test(makeRow({ currentEta: "2026-07-12" }), CTX)); // +7
-  assert.ok(!f.test(makeRow({ currentEta: "2026-07-13" }), CTX)); // +8
-  assert.ok(!f.test(makeRow({ currentEta: "2026-07-04" }), CTX)); // yesterday
-  assert.ok(!f.test(makeRow({ currentEta: null }), CTX));
+test("due_this_week is the [today, today+7] window on productionDue", () => {
+  const f = getSmartFilter("due_this_week")!;
+  assert.ok(f.test(makeRow({ productionDue: "2026-07-05" }), CTX)); // today
+  assert.ok(f.test(makeRow({ productionDue: "2026-07-12" }), CTX)); // +7
+  assert.ok(!f.test(makeRow({ productionDue: "2026-07-13" }), CTX)); // +8
+  assert.ok(!f.test(makeRow({ productionDue: "2026-07-04" }), CTX)); // yesterday
+  assert.ok(!f.test(makeRow({ productionDue: null }), CTX));
 });
 
 test("late = overdue alert OR a positive factory delay", () => {

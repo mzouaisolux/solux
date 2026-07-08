@@ -20,7 +20,34 @@ export type OverviewRow = {
   owner: string;
   createdAt: string | null;
   updatedAt: string | null;
+  /** m152 — Overall margin (management only; null = not computed / no data).
+   *  Static tinted pill here; the breakdown drawer lives on the SR page. */
+  margin?: {
+    pct: number | null;
+    health: "green" | "yellow" | "red" | null;
+    partial: boolean;
+  } | null;
 };
+
+const MARGIN_TINT: Record<"green" | "yellow" | "red", string> = {
+  green: "border-green-300 bg-green-50 text-green-800",
+  yellow: "border-amber-300 bg-amber-50 text-amber-900",
+  red: "border-red-300 bg-red-50 text-red-800",
+};
+
+function MarginPill({ m }: { m: OverviewRow["margin"] }) {
+  if (!m || m.pct == null || !m.health) {
+    return <span className="text-neutral-300">—</span>;
+  }
+  return (
+    <span
+      className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold tabular-nums ${MARGIN_TINT[m.health]}`}
+      title="Overall margin — open the request for the full breakdown"
+    >
+      {m.pct.toFixed(0)}%{m.partial ? "*" : ""}
+    </span>
+  );
+}
 
 type SortKey = "updated" | "created";
 
@@ -49,9 +76,13 @@ function fmtMoney(n: number | null): string {
 export function OverviewTable({
   rows,
   total,
+  showMargin = false,
 }: {
   rows: OverviewRow[];
   total: number;
+  /** m152 — true only for project.view_profitability holders; the whole
+   *  column is absent otherwise (no greyed placeholder). */
+  showMargin?: boolean;
 }) {
   const [q, setQ] = useState("");
   const [status, setStatus] = useState("");
@@ -193,6 +224,7 @@ export function OverviewTable({
               <th>Customer</th>
               <th>Salesperson</th>
               <th className="r">Amount</th>
+              {showMargin && <th className="r">Margin</th>}
               <th>Status</th>
               <th>
                 <button type="button" className="cursor-pointer" onClick={() => toggleSort("created")}>
@@ -210,7 +242,7 @@ export function OverviewTable({
           <tbody>
             {filtered.length === 0 ? (
               <tr>
-                <td colSpan={8}>
+                <td colSpan={showMargin ? 9 : 8}>
                   <div className="sx-empty">
                     {hasFilter
                       ? "No request matches the current filters."
@@ -229,6 +261,11 @@ export function OverviewTable({
                   <td>{r.client}</td>
                   <td>{r.owner}</td>
                   <td className="r sx-tnum">{fmtMoney(r.amount)}</td>
+                  {showMargin && (
+                    <td className="r">
+                      <MarginPill m={r.margin} />
+                    </td>
+                  )}
                   <td>
                     <ProjectStatusBadge
                       status={r.status as ProjectRequestStatus}

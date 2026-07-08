@@ -1,0 +1,10 @@
+import { chromium } from "@playwright/test";
+const browser = await chromium.launch();
+const ctx = await browser.newContext({ storageState: "e2e/.auth/operation.json" });
+const page = await ctx.newPage();
+await page.goto("http://localhost:3000/production/quick-update", { waitUntil: "networkidle" });
+console.log("url:", page.url());
+console.log("rows:", await page.locator("table tbody tr").count());
+console.log("headers:", (await page.$$eval("table thead th", ths => ths.map(t => (t.textContent??"").trim()))).join(" | "));
+await page.screenshot({ path: "e2e/.runs/qu-headers-debug.png" });
+await browser.close();

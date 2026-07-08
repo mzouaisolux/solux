@@ -128,9 +128,10 @@ export default function ProductionDossierActions({
       {!compact && !done && !error && (
         <p className="text-xs text-neutral-500 max-w-xl">
           One complete PDF: customer &amp; project info, product configuration,
-          factory mapping &amp; instructions, battery, lighting program,
-          stickers, transport, QA — plus every uploaded document merged as an
-          appendix. Bilingual section titles (中文 / English).
+          factory mapping &amp; instructions, battery, industrial specs (tilt
+          angle, pole accessories, packaging, manuals, spare parts), lighting
+          program, stickers, transport, QA — plus every uploaded document
+          merged as an appendix. Bilingual section titles (中文 / English).
         </p>
       )}
     </div>

@@ -53,6 +53,18 @@ export const CAPABILITY_CATALOG = [
     description:
       "Read-only central list of EVERY service request in the system (status, owner, dates) — supervision visibility, no workflow actions.",
   },
+  {
+    key: "project.view_profitability",
+    label: "View project profitability (margins)",
+    description:
+      "Management widget: Product / Pole / Overall margin %, financial breakdown drawer and margin history on every project. Exposes margins and costs — managers only; sales must never hold it.",
+  },
+  {
+    key: "project.request_cost_revision",
+    label: "Request a cost revision",
+    description:
+      "Flag a Service Request whose manufacturing costing may be outdated (mandatory reason). Request only — updating the costs stays with enter_cost / override_cost.",
+  },
   // Shipping rate refresh (m149)
   {
     key: "shipping.request_update",
@@ -90,6 +102,7 @@ export const CAPABILITY_CATALOG = [
   { key: "production_order.start_without_deposit", label: "Start production without a deposit" },
   { key: "production_order.archive", label: "Archive a production order" },
   { key: "production_order.delete", label: "Delete a production order" },
+  { key: "production_order.create_manual", label: "Create a manual order (Excel transition)" },
   // Sales orders / clients
   { key: "sales_order.edit", label: "Edit sales orders" },
   { key: "sales_client.merge", label: "Merge client records" },
@@ -101,6 +114,12 @@ export const CAPABILITY_CATALOG = [
   { key: "finance.view", label: "View Finance (balances & LC)" },
   // Forecast
   { key: "forecast.view_global", label: "View the global forecast" },
+  {
+    key: "forecast.view_audit",
+    label: "View the forecast audit trail & behavior analytics",
+    description:
+      "Management-only: per-deal forecast change history (who changed what, when) and behavior analytics (probability reliability, close-date slippage, optimism/conservatism by rep). Sales users must not hold it — their forecast surface stays simple.",
+  },
   // Sales & analytics
   { key: "sales_analytics.view", label: "View the Sales & Analytics register" },
   // Prospects / CRM

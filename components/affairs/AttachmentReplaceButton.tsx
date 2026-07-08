@@ -1,16 +1,17 @@
 "use client";
 
 // =====================================================================
-// Replace an existing attachment in place: pick a new file → upload to
-// Storage (browser, same path the uploader uses) → record the new row
-// (preserving the attachment type) → delete the old row. Reuses the proven
-// two-step attachment flow. Compact inline control for the Files card.
+// Replace an existing attachment with a NEW VERSION (SSoT Lot 4, m151):
+// pick a new file → upload to Storage (browser, same path the uploader
+// uses) → replaceAttachment chains it to the same version group and KEEPS
+// the old file as history ("Latest only" hides it). Pre-m151 the action
+// falls back to the legacy delete-old behaviour on its own.
 // =====================================================================
 
 import { useRef, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { createClient as createBrowserSupabase } from "@/lib/supabase/client";
-import { recordAttachment, deleteAttachment } from "@/app/(app)/_actions/attachments";
+import { replaceAttachment } from "@/app/(app)/_actions/attachments";
 import {
   ATTACHMENTS_BUCKET,
   ATTACHMENT_MAX_BYTES,
@@ -52,18 +53,13 @@ export function AttachmentReplaceButton({
         if (upErr) throw new Error(upErr.message);
 
         const fd = new FormData();
+        fd.set("replaces_id", attachmentId);
         fd.set("document_id", documentId);
         fd.set("storage_path", path);
         fd.set("file_name", file.name);
         fd.set("file_size", String(file.size));
         fd.set("mime_type", file.type || "");
-        fd.set("attachment_type", attachmentType || "other");
-        await recordAttachment(fd);
-
-        const del = new FormData();
-        del.set("id", attachmentId);
-        del.set("document_id", documentId);
-        await deleteAttachment(del);
+        await replaceAttachment(fd);
 
         router.refresh();
       } catch (err: any) {

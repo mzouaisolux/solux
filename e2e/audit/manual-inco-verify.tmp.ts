@@ -1,0 +1,38 @@
+import { chromium } from "@playwright/test";
+import { createClient } from "@supabase/supabase-js";
+import { BASE_URL, storageStatePath } from "../config.ts";
+const NUMBER = `MANU-INCO-${Math.floor(Math.random() * 1_000_000)}`;
+let pass = 0, fail = 0;
+const check = (l: string, ok: boolean, d = "") => { ok ? pass++ : fail++; console.log(`  ${ok ? "✅" : "❌"} ${l}${d ? ` — ${d}` : ""}`); };
+
+const browser = await chromium.launch();
+const ctx = await browser.newContext({ storageState: storageStatePath("operation"), viewport: { width: 1600, height: 900 } });
+const page = await ctx.newPage();
+await page.goto(`${BASE_URL}/production/quick-update`, { waitUntil: "networkidle" });
+await page.locator("button", { hasText: "+ Add order" }).click();
+await page.fill('input[placeholder*="existing number"]', NUMBER);
+await page.locator('div[role="dialog"], div').locator("select").last(); // noop
+const incoSelect = page.locator("label", { hasText: "Incoterm" }).locator("select");
+await incoSelect.selectOption("CIF");
+await page.locator("button", { hasText: "Create order" }).click();
+const row = page.locator("table tbody tr", { hasText: NUMBER });
+await row.waitFor({ state: "visible", timeout: 15000 });
+const inco = row.locator('input[data-qcol="incoterm"]');
+check("manual row incoterm is an editable input", (await inco.count()) === 1);
+check("incoterm persisted as CIF via the modal", (await inco.inputValue()) === "CIF");
+await inco.fill("FOB");
+await page.keyboard.press("Enter");
+await page.waitForTimeout(2500);
+await page.reload({ waitUntil: "networkidle" });
+const after = await page.locator("table tbody tr", { hasText: NUMBER }).locator('input[data-qcol="incoterm"]').inputValue();
+check("inline edit CIF→FOB round-trips the DB", after === "FOB", after);
+await page.screenshot({ path: "e2e/.runs/quick-update-v2.png" });
+await browser.close();
+const sb = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!.trim(), process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!.trim(), { auth: { persistSession: false } });
+await sb.auth.signInWithPassword({ email: process.env.E2E_OPERATION_EMAIL!, password: process.env.E2E_PASSWORD! });
+const { data: dbRow } = await sb.from("production_orders").select("shipping_details").eq("number", NUMBER).maybeSingle();
+check("DB shipping_details.incoterm = FOB", (dbRow?.shipping_details as any)?.incoterm === "FOB", JSON.stringify(dbRow?.shipping_details));
+await sb.from("production_orders").delete().eq("number", NUMBER).eq("source", "manual");
+console.log(`  (cleanup: ${NUMBER})`);
+console.log(`\nRESULT: ${pass} passed, ${fail} failed`);
+process.exit(fail === 0 ? 0 : 1);

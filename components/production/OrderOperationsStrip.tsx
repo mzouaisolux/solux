@@ -3,13 +3,13 @@
  *
  * Five cards, sized for instant read at a glance:
  *
- *   INITIAL ETA · CURRENT ETA · DELAY · PAYMENT STATUS · SHIPPING STATUS
+ *   COMMITTED DATE · PRODUCTION DUE · DELAY · PAYMENT STATUS · SHIPPING STATUS
  *
  * The DELAY card shows the FACTORY / EXTERNAL split with distinct colors
  * (rose for factory — counts toward factory KPI; amber for external —
  * does not). This is the single most operationally important card on
  * the page: at a glance, anyone can tell who is responsible for the
- * current ETA being later than the baseline.
+ * production due date being later than the baseline.
  *
  * Pure presentation — every value is computed by the page loader and
  * passed in. No DB calls here.
@@ -28,8 +28,8 @@ export type OperationsShippingState =
   | "cancelled";
 
 export type OrderOperationsStripProps = {
-  initialEta: string | null;
-  currentEta: string | null;
+  initialDeadline: string | null;
+  productionDue: string | null;
   /** Day-deltas attributed to the factory (red KPI). */
   factoryDelayDays: number;
   /** Day-deltas attributed to external causes (amber, non-KPI). */
@@ -42,7 +42,7 @@ export type OrderOperationsStripProps = {
   balanceRemaining?: number | null;
   /** Currency for display. */
   currency?: string | null;
-  /** Days until ETA — drives "Due in Nd" hint on the payment card. */
+  /** Days until the production due date — drives "Due in Nd" hint on the payment card. */
   daysToEta?: number | null;
   /** Shipping execution state — derived from production_status. */
   shipping: OperationsShippingState;
@@ -75,8 +75,8 @@ function fmtMoney(v: number | null | undefined, c: string | null | undefined) {
 }
 
 export function OrderOperationsStrip({
-  initialEta,
-  currentEta,
+  initialDeadline,
+  productionDue,
   factoryDelayDays,
   externalDelayDays,
   latestDelayType,
@@ -91,13 +91,13 @@ export function OrderOperationsStrip({
     <section className="grid grid-cols-2 lg:grid-cols-5 gap-3.5">
       <div className="po-kpi">
         <div className="k">Committed date</div>
-        <div className="val">{fmtLongDate(initialEta)}</div>
+        <div className="val">{fmtLongDate(initialDeadline)}</div>
         <div className="sub">Baseline · locked at start</div>
       </div>
 
       <div className="po-kpi">
-        <div className="k">Estimated finish</div>
-        <div className="val">{fmtLongDate(currentEta)}</div>
+        <div className="k">Production Due</div>
+        <div className="val">{fmtLongDate(productionDue)}</div>
         <div className="sub">
           {daysToEta == null
             ? "—"

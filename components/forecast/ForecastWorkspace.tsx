@@ -4,31 +4,34 @@ import { useMemo, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { updateQuotationForecast } from "@/app/(app)/documents/[id]/actions";
+import { ForecastHistoryDrawer } from "@/components/forecast/ForecastHistoryDrawer";
 import {
-  PROBABILITY_STAGES,
-  FORECAST_CATEGORIES,
-  FORECAST_TONE_PILL,
-  categoryTone,
+  ALLOWED_PROBABILITIES,
+  PROBABILITY_OPTIONS,
+  isAllowedProbability,
   isForecastStale,
   forecastAgeDays,
   weightedValue,
   fmtMoney,
   type ForecastProbability,
-  type ForecastCategory,
 } from "@/lib/forecast";
 
 /**
  * ForecastWorkspace — the operational heart of /forecast.
  *
  * Lists EVERY active quotation (sent / negotiating) and lets sales set
- * the forecast inline — probability dropdown, category dropdown, close
- * date — without ever opening the quotation. Each change auto-saves
- * (optimistic local state + server action + router.refresh to
- * reconcile the KPIs above).
+ * the forecast inline — probability dropdown (controlled values only)
+ * and close date — without ever opening the quotation. Each change
+ * auto-saves (optimistic local state + server action + router.refresh
+ * to reconcile the KPIs above).
  *
  * This is deliberately a dense, grid-like data surface: fast scanning,
  * fast editing, zero navigation. The opposite of a CRM opportunity
  * form.
+ *
+ * `canViewAudit` (management only) adds a per-row History button that
+ * opens the forecast audit trail drawer. Sales users never see it —
+ * their surface stays simple.
  */
 
 export type ForecastRow = {
@@ -41,7 +44,6 @@ export type ForecastRow = {
   currency: string;
   status: string;
   probability: ForecastProbability | null;
-  category: ForecastCategory | null;
   expectedCloseDate: string | null;
   updatedAt: string | null;
 };
@@ -51,9 +53,11 @@ type SortKey = "weighted" | "value" | "close" | "stale";
 export function ForecastWorkspace({
   initialRows,
   showOwner,
+  canViewAudit = false,
 }: {
   initialRows: ForecastRow[];
   showOwner: boolean;
+  canViewAudit?: boolean;
 }) {
   const router = useRouter();
   const [rows, setRows] = useState<ForecastRow[]>(initialRows);
@@ -62,6 +66,10 @@ export function ForecastWorkspace({
   const [, startTransition] = useTransition();
   const [sortKey, setSortKey] = useState<SortKey>("weighted");
   const [onlyUnset, setOnlyUnset] = useState(false);
+  // Multi-select filter on EXACT probability values (spec: filter by
+  // one or several exact probabilities — no ranges).
+  const [probFilter, setProbFilter] = useState<Set<number>>(new Set());
+  const [historyRow, setHistoryRow] = useState<ForecastRow | null>(null);
 
   const setSaving = (id: string, v: boolean) =>
     setSavingIds((s) => ({ ...s, [id]: v }));
@@ -109,19 +117,26 @@ export function ForecastWorkspace({
     const p = value === "" ? null : (Number(value) as ForecastProbability);
     patchRow(id, { probability: p }, { probability: value });
   };
-  const onCategory = (id: string, value: string) => {
-    patchRow(
-      id,
-      { category: value === "" ? null : (value as ForecastCategory) },
-      { category: value }
-    );
-  };
   const onDate = (id: string, value: string) => {
     patchRow(id, { expectedCloseDate: value || null }, { expected_close_date: value });
   };
 
+  const toggleProbFilter = (p: number) => {
+    setProbFilter((prev) => {
+      const next = new Set(prev);
+      if (next.has(p)) next.delete(p);
+      else next.add(p);
+      return next;
+    });
+  };
+
   const visibleRows = useMemo(() => {
     let out = onlyUnset ? rows.filter((r) => r.probability == null) : rows;
+    if (probFilter.size > 0) {
+      out = out.filter(
+        (r) => r.probability != null && probFilter.has(r.probability)
+      );
+    }
     out = [...out].sort((a, b) => {
       switch (sortKey) {
         case "value":
@@ -145,7 +160,7 @@ export function ForecastWorkspace({
       }
     });
     return out;
-  }, [rows, sortKey, onlyUnset]);
+  }, [rows, sortKey, onlyUnset, probFilter]);
 
   const unsetCount = rows.filter((r) => r.probability == null).length;
 
@@ -191,6 +206,40 @@ export function ForecastWorkspace({
         </div>
       </div>
 
+      {/* Probability filter — exact values, multi-select */}
+      <div className="px-5 py-2 border-b border-neutral-100 flex items-center gap-1.5 flex-wrap">
+        <span className="text-[10px] uppercase tracking-wider text-neutral-400 font-medium mr-1">
+          Probability
+        </span>
+        {ALLOWED_PROBABILITIES.map((p) => {
+          const active = probFilter.has(p);
+          return (
+            <button
+              key={p}
+              type="button"
+              onClick={() => toggleProbFilter(p)}
+              aria-pressed={active}
+              className={`rounded-full border px-2 py-0.5 text-[10px] font-medium tabular-nums transition-colors ${
+                active
+                  ? "border-neutral-900 bg-neutral-900 text-white"
+                  : "border-neutral-200 bg-white text-neutral-500 hover:bg-neutral-50"
+              }`}
+            >
+              {p}%
+            </button>
+          );
+        })}
+        {probFilter.size > 0 && (
+          <button
+            type="button"
+            onClick={() => setProbFilter(new Set())}
+            className="text-[10px] text-neutral-400 hover:text-neutral-700 underline underline-offset-2 ml-1"
+          >
+            Clear filter
+          </button>
+        )}
+      </div>
+
       <div className="overflow-x-auto">
         <table className="w-full text-xs">
           <thead>
@@ -201,11 +250,11 @@ export function ForecastWorkspace({
               {showOwner && <th className="px-3 py-2 font-medium">Rep</th>}
               <th className="px-3 py-2 font-medium text-right">Value</th>
               <th className="px-3 py-2 font-medium">Status</th>
-              <th className="px-3 py-2 font-medium w-[150px]">Probability</th>
-              <th className="px-3 py-2 font-medium w-[130px]">Category</th>
+              <th className="px-3 py-2 font-medium w-[110px]">Probability</th>
               <th className="px-3 py-2 font-medium w-[150px]">Expected close</th>
               <th className="px-3 py-2 font-medium text-right">Weighted</th>
               <th className="px-3 py-2 font-medium">Updated</th>
+              {canViewAudit && <th className="px-3 py-2 font-medium" />}
             </tr>
           </thead>
           <tbody>
@@ -214,7 +263,8 @@ export function ForecastWorkspace({
               const age = forecastAgeDays(r.updatedAt);
               const saving = !!savingIds[r.id];
               const errored = errorId === r.id;
-              const tone = categoryTone(r.category);
+              const legacy =
+                r.probability != null && !isAllowedProbability(r.probability);
               return (
                 <tr
                   key={r.id}
@@ -253,42 +303,29 @@ export function ForecastWorkspace({
                   <td className="px-3 py-2">
                     <StatusPill status={r.status} />
                   </td>
-                  {/* Probability */}
+                  {/* Probability — controlled dropdown, exact values only */}
                   <td className="px-3 py-2">
                     <select
                       value={r.probability == null ? "" : String(r.probability)}
                       disabled={saving}
                       onChange={(e) => onProbability(r.id, e.target.value)}
-                      className={`w-full rounded-md border px-2 py-1 text-[11px] focus:outline-none focus:ring-1 focus:ring-neutral-400 disabled:opacity-60 ${
+                      className={`w-full rounded-md border px-2 py-1 text-[11px] tabular-nums focus:outline-none focus:ring-1 focus:ring-neutral-400 disabled:opacity-60 ${
                         r.probability == null
                           ? "border-neutral-200 bg-white text-neutral-400"
                           : "border-neutral-300 bg-white text-neutral-900"
                       }`}
                     >
                       <option value="">— set —</option>
-                      {PROBABILITY_STAGES.map((s) => (
-                        <option key={s.value} value={s.value}>
-                          {s.label} · {s.value}%
+                      {/* Legacy pre-standard value (25 / 75) — shown so the
+                          select isn't blank, but not offered as a choice. */}
+                      {legacy && (
+                        <option value={String(r.probability)} disabled>
+                          {r.probability}% (legacy)
                         </option>
-                      ))}
-                    </select>
-                  </td>
-                  {/* Category */}
-                  <td className="px-3 py-2">
-                    <select
-                      value={r.category ?? ""}
-                      disabled={saving}
-                      onChange={(e) => onCategory(r.id, e.target.value)}
-                      className={`w-full rounded-md border px-2 py-1 text-[11px] focus:outline-none focus:ring-1 focus:ring-neutral-400 disabled:opacity-60 ${
-                        r.category == null
-                          ? "border-neutral-200 bg-white text-neutral-400"
-                          : "border-neutral-300 bg-white text-neutral-900"
-                      }`}
-                    >
-                      <option value="">— set —</option>
-                      {FORECAST_CATEGORIES.map((c) => (
-                        <option key={c.value} value={c.value}>
-                          {c.label}
+                      )}
+                      {PROBABILITY_OPTIONS.map((o) => (
+                        <option key={o.value} value={o.value} title={o.meaning}>
+                          {o.label}
                         </option>
                       ))}
                     </select>
@@ -339,6 +376,19 @@ export function ForecastWorkspace({
                       </span>
                     )}
                   </td>
+                  {/* Admin-only audit trail */}
+                  {canViewAudit && (
+                    <td className="px-3 py-2 whitespace-nowrap text-right">
+                      <button
+                        type="button"
+                        onClick={() => setHistoryRow(r)}
+                        title="Forecast change history (management)"
+                        className="rounded-md border border-neutral-200 bg-white px-2 py-1 text-[10px] font-medium text-neutral-500 hover:bg-neutral-50 hover:text-neutral-800"
+                      >
+                        History
+                      </button>
+                    </td>
+                  )}
                 </tr>
               );
             })}
@@ -348,10 +398,19 @@ export function ForecastWorkspace({
 
       {visibleRows.length === 0 && (
         <div className="px-5 py-8 text-center text-xs text-neutral-400">
-          {onlyUnset
-            ? "Every active quotation has a forecast. Nice."
+          {onlyUnset || probFilter.size > 0
+            ? "No quotation matches the current filters."
             : "No active quotations to forecast right now."}
         </div>
+      )}
+
+      {canViewAudit && historyRow && (
+        <ForecastHistoryDrawer
+          documentId={historyRow.id}
+          title={historyRow.number ?? historyRow.id.slice(0, 8) + "…"}
+          subtitle={historyRow.clientName ?? undefined}
+          onClose={() => setHistoryRow(null)}
+        />
       )}
     </section>
   );

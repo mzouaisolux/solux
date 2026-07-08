@@ -3,6 +3,8 @@ import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import GeneratePdfButton from "./GeneratePdfButton";
 import { StatusBadge } from "@/components/StatusBadge";
+import { loadDocumentProfitability } from "@/lib/profitability-server";
+import { ProfitabilityChip } from "@/components/profitability/ProfitabilityChip";
 import { Timeline } from "@/components/Timeline";
 import { ForecastPanel } from "@/components/forecast/ForecastPanel";
 import { QuotationVersionsPanel } from "@/components/documents/QuotationVersionsPanel";
@@ -34,7 +36,13 @@ import {
   unarchiveQuotation,
   deleteQuotation,
   assignDocumentOwner,
+  applyLatestCosting,
+  keepCurrentCosting,
 } from "./actions";
+import { requestCostingRevisionForm } from "@/app/(app)/projects/actions";
+import { loadCostingSettings } from "@/lib/pricing-settings";
+import { computeCostingStatus } from "@/lib/costing-validity";
+import { COST_REVISION_REASONS } from "@/lib/cost-revision";
 import { OwnerAssignSelect } from "@/components/OwnerAssignSelect";
 import { listAssignableOwners } from "@/lib/owner";
 import { resolveUserLabelStrings } from "@/lib/user-display";
@@ -114,7 +122,7 @@ export default async function DocumentViewPage({
   let docWithAttention = await supabase
     .from("documents")
     .select(
-      "id, number, type, date, status, incoterm, freight_type, freight_cost, total_price, manual_pricing, pdf_url, payment_mode, payment_terms, port_of_loading, port_of_destination, production_mode, production_days, production_date, currency, include_sales_conditions, sales_conditions_id, bank_account_id, purchase_order_number, commission_enabled, commission_percentage, commission_amount, commission_description, show_commission_in_pdf, client_id, affair_id, attention_to, warranty_years, offer_validity_products_days, offer_validity_transport_days, forecast_probability, forecast_category, forecast_expected_close_date, forecast_updated_at, archived_at, affair_name, version, root_document_id, insurance_cost, additional_charges, clients(company_name, contact_name, email, phone_number, country, client_code, custom_fields), sales_conditions(id, title, content, is_default), bank_accounts(id, account_name, business_account_name, currency, bank_name, bank_address, account_number, swift, is_default)"
+      "id, number, type, date, status, incoterm, freight_type, freight_cost, total_price, manual_pricing, pdf_url, payment_mode, payment_terms, port_of_loading, port_of_destination, production_mode, production_days, production_date, currency, include_sales_conditions, sales_conditions_id, bank_account_id, purchase_order_number, commission_enabled, commission_percentage, commission_amount, commission_description, show_commission_in_pdf, client_id, affair_id, attention_to, warranty_years, offer_validity_products_days, offer_validity_transport_days, forecast_probability, forecast_expected_close_date, forecast_updated_at, archived_at, affair_name, version, root_document_id, insurance_cost, additional_charges, clients(company_name, contact_name, email, phone_number, country, client_code, custom_fields), sales_conditions(id, title, content, is_default), bank_accounts(id, account_name, business_account_name, currency, bank_name, bank_address, account_number, swift, is_default)"
     )
     .eq("id", params.id)
     .maybeSingle();
@@ -553,6 +561,9 @@ export default async function DocumentViewPage({
     getNumberSetting(supabase, FRESHNESS_CRITICAL_DAYS_KEY, FRESHNESS_DEFAULTS.criticalDays),
   ]);
   const freshnessThresholds: FreshnessThresholds = { warnDays, criticalDays };
+  // m152 — management profitability chip (capability-gated inside; null for
+  // non-managers and for legacy documents without an affair).
+  const profitability = await loadDocumentProfitability(supabase, params.id);
   const shippingStatus =
     (await loadShippingStatuses(supabase, [params.id])).get(params.id) ?? {
       documentId: params.id,
@@ -753,6 +764,125 @@ export default async function DocumentViewPage({
   const proformaFirst = process.env.DOC_COCKPIT !== "off";
   const useCockpit = proformaFirst && (doc as any).type === "quotation";
 
+  // ---- m140/m153 — costing validity + newer-costing decision --------------
+  // Self-contained, fallback-guarded compute: unmigrated envs stay silent.
+  // Sales never receives a cost here — only validity metadata and the
+  // approved SELLING prices (owner-readable by design, m095/m140 RLS).
+  let costingNotice: {
+    status: "aging" | "expired";
+    label: string;
+    srId: string;
+    pendingExists: boolean;
+  } | null = null;
+  let newerCosting: {
+    versionId: string;
+    versionNo: number;
+    approvedAt: string | null;
+    hasProduct: boolean;
+    hasPole: boolean;
+    hasFreight: boolean;
+    hasTransport: boolean;
+  } | null = null;
+  if (["draft", "sent", "negotiating"].includes(doc.status)) {
+    try {
+      const lineRes = await supabase
+        .from("document_lines")
+        .select("source_project_request_id, approved_at, pricing_source")
+        .eq("document_id", params.id)
+        .eq("pricing_source", "approved_service_request");
+      const srIds = Array.from(
+        new Set(
+          ((lineRes.data ?? []) as any[])
+            .map((l) => l.source_project_request_id)
+            .filter(Boolean)
+        )
+      ) as string[];
+      if (srIds.length) {
+        const [settings, snaps] = await Promise.all([
+          loadCostingSettings(supabase),
+          supabase
+            .from("project_products")
+            .select("project_request_id, priced_at")
+            .in("project_request_id", srIds),
+        ]);
+        const snapRows = ((snaps.data ?? []) as any[]).filter((s) => s.priced_at);
+        const oldest = snapRows.map((s) => s.priced_at as string).sort()[0] as
+          | string
+          | undefined;
+        const validity = computeCostingStatus(
+          oldest ?? null,
+          new Date().toISOString().slice(0, 10),
+          settings
+        );
+        // m140 extras (versions + the doc's ack) — separately guarded.
+        let pendingExists = false;
+        let latestApproved: any = null;
+        let ackId: string | null = null;
+        try {
+          const [{ data: vRows }, ackRes] = await Promise.all([
+            supabase
+              .from("project_costing_versions")
+              .select(
+                "id, project_request_id, version_no, status, approved_at, product_unit_price, pole_unit_price, containers, incoterm, port_of_destination"
+              )
+              .in("project_request_id", srIds),
+            supabase
+              .from("documents")
+              .select("costing_version_ack")
+              .eq("id", params.id)
+              .maybeSingle(),
+          ]);
+          ackId = (ackRes.data as any)?.costing_version_ack ?? null;
+          const rows = (vRows ?? []) as any[];
+          pendingExists = rows.some((v) => v.status === "pending");
+          latestApproved =
+            rows
+              .filter((v) => v.status === "approved")
+              .sort((a, b) =>
+                String(b.approved_at ?? "").localeCompare(String(a.approved_at ?? ""))
+              )[0] ?? null;
+        } catch {
+          /* pre-m140 */
+        }
+        if (validity.status === "aging" || validity.status === "expired") {
+          costingNotice = {
+            status: validity.status,
+            label: validity.label,
+            srId: srIds[0],
+            pendingExists,
+          };
+        }
+        if (latestApproved) {
+          const lineApprovedMax = ((lineRes.data ?? []) as any[])
+            .map((l) => l.approved_at as string | null)
+            .filter(Boolean)
+            .sort()
+            .pop() as string | undefined;
+          const newer =
+            latestApproved.approved_at &&
+            (!lineApprovedMax || latestApproved.approved_at > lineApprovedMax) &&
+            latestApproved.id !== ackId;
+          if (newer) {
+            newerCosting = {
+              versionId: latestApproved.id,
+              versionNo: latestApproved.version_no ?? 1,
+              approvedAt: latestApproved.approved_at ?? null,
+              hasProduct: latestApproved.product_unit_price != null,
+              hasPole: latestApproved.pole_unit_price != null,
+              hasFreight:
+                Array.isArray(latestApproved.containers) &&
+                latestApproved.containers.length > 0,
+              hasTransport:
+                !!latestApproved.incoterm || !!latestApproved.port_of_destination,
+            };
+          }
+        }
+      }
+    } catch {
+      /* unmigrated env — features dormant */
+    }
+  }
+
   // One-line "what's next?" so a first-timer never has to search (redesign #5).
   const nextAction = (() => {
     if (doc.archived_at) return null;
@@ -806,6 +936,132 @@ export default async function DocumentViewPage({
           )}
         </div>
       )}
+
+      {/* m140/m153 — costing validity warning (aging/expired; company
+          thresholds). Never blocks here — Policy 2's block lives in the
+          send action so drafts stay editable/printable. */}
+      {costingNotice && (
+        <div
+          className={`flex flex-wrap items-center justify-between gap-3 rounded-lg border px-4 py-3 text-sm ${
+            costingNotice.status === "expired"
+              ? "border-rose-300 bg-rose-50 text-rose-800"
+              : "border-amber-300 bg-amber-50 text-amber-900"
+          }`}
+        >
+          <div className="min-w-0">
+            <span className="font-semibold">
+              {costingNotice.status === "expired"
+                ? "✗ Costing status: Expired. "
+                : "⚠ Costing status: Aging. "}
+            </span>
+            {costingNotice.label}. Component prices, freight costs and exchange
+            rates may have changed —{" "}
+            {costingNotice.status === "expired"
+              ? "a costing revision is strongly recommended before issuing this quotation."
+              : "we recommend requesting a costing revision before sending this quotation."}
+          </div>
+          {costingNotice.pendingExists ? (
+            <span className="shrink-0 text-xs font-medium">
+              ⏳ Revision requested — waiting on the Director
+            </span>
+          ) : (
+            <ActionForm
+              action={requestCostingRevisionForm}
+              success="✓ Costing revision requested"
+              className="flex shrink-0 flex-wrap items-center gap-2"
+            >
+              <input type="hidden" name="project_id" value={costingNotice.srId} />
+              <input
+                name="reason"
+                required
+                list="cost-revision-reasons-doc"
+                placeholder="Reason (required)"
+                className="rounded border border-current/30 bg-white/70 px-2 py-1 text-xs"
+              />
+              <datalist id="cost-revision-reasons-doc">
+                {COST_REVISION_REASONS.map((r) => (
+                  <option key={r} value={r} />
+                ))}
+              </datalist>
+              <SubmitButton className="btn-secondary text-xs" pendingLabel="Requesting…">
+                Request Costing Revision
+              </SubmitButton>
+            </ActionForm>
+          )}
+        </div>
+      )}
+
+      {/* m140 — A NEWER COSTING WAS APPROVED: the user decides, nothing is
+          automatic. Draft → selective apply (owner's checklist); sent →
+          Keep or revise-to-apply (a sent doc is the record of what the
+          client received). */}
+      {newerCosting && (
+        <div className="rounded-lg border border-indigo-300 bg-indigo-50/60 px-4 py-3 text-sm text-indigo-950">
+          <div className="font-semibold">
+            A newer costing has been approved for this project
+            {newerCosting.approvedAt
+              ? ` (V${newerCosting.versionNo} · ${newerCosting.approvedAt.slice(0, 10)})`
+              : ` (V${newerCosting.versionNo})`}
+            .
+          </div>
+          {doc.status === "draft" ? (
+            <ActionForm
+              action={applyLatestCosting}
+              success="✓ Latest costing applied"
+              className="mt-2 flex flex-wrap items-center gap-3"
+            >
+              <input type="hidden" name="id" value={doc.id} />
+              <span className="text-xs text-indigo-900">Update:</span>
+              {newerCosting.hasProduct && (
+                <label className="flex items-center gap-1.5 text-xs">
+                  <input type="checkbox" name="sel_product" defaultChecked /> Product pricing
+                </label>
+              )}
+              {newerCosting.hasPole && (
+                <label className="flex items-center gap-1.5 text-xs">
+                  <input type="checkbox" name="sel_pole" defaultChecked /> Pole pricing
+                </label>
+              )}
+              {newerCosting.hasFreight && (
+                <label className="flex items-center gap-1.5 text-xs">
+                  <input type="checkbox" name="sel_freight" /> Freight / Shipping
+                </label>
+              )}
+              {newerCosting.hasTransport && (
+                <label className="flex items-center gap-1.5 text-xs">
+                  <input type="checkbox" name="sel_transport" /> Transport assumptions
+                </label>
+              )}
+              <SubmitButton className="btn-secondary text-xs" pendingLabel="Applying…">
+                Update selected items
+              </SubmitButton>
+            </ActionForm>
+          ) : (
+            <p className="mt-1 text-xs text-indigo-900">
+              This quotation was already sent — the record of what the client
+              received never changes in place. Create a new version to apply
+              the new costing:{" "}
+              <Link href={`/documents/new?revise=${doc.id}`} className="font-semibold underline">
+                Edit → new version (revise)
+              </Link>
+            </p>
+          )}
+          <ActionForm
+            action={keepCurrentCosting}
+            success="✓ Existing costing kept"
+            className="mt-2"
+          >
+            <input type="hidden" name="id" value={doc.id} />
+            <input type="hidden" name="version_id" value={newerCosting.versionId} />
+            <SubmitButton
+              className="text-xs text-indigo-800 underline decoration-indigo-300 underline-offset-2 hover:text-indigo-950"
+              pendingLabel="Keeping…"
+            >
+              Keep current quotation
+            </SubmitButton>
+          </ActionForm>
+        </div>
+      )}
       <div className="flex items-start justify-between pb-4 border-b border-neutral-200">
         <div>
           <div className="eyebrow-brand">
@@ -830,6 +1086,12 @@ export default async function DocumentViewPage({
               </span>
             )}
             <StatusBadge status={doc.status} size="md" />
+            {/* m152 — Overall margin chip (management only; renders nothing
+                without the capability). Click → financial breakdown drawer. */}
+            <ProfitabilityChip
+              data={profitability}
+              affairId={(doc as any).affair_id ?? null}
+            />
             {/* Personal reminder badge — only renders when the current
                 user has an OPEN reminder due today or overdue on this
                 doc. Hidden for upcoming reminders to keep the header
@@ -1193,7 +1455,6 @@ export default async function DocumentViewPage({
             total={Number(doc.total_price || 0)}
             currency={(doc.currency ?? "USD") as string}
             initialProbability={doc.forecast_probability ?? null}
-            initialCategory={doc.forecast_category ?? null}
             initialExpectedCloseDate={doc.forecast_expected_close_date ?? null}
             initialUpdatedAt={doc.forecast_updated_at ?? null}
             prominent={hasMultipleVersions}

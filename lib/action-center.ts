@@ -140,7 +140,7 @@ export type ActionItem = {
   openedDaysAgo: number | null;
   amount: { value: number; currency: string } | null;
   /**
-   * Inline operational context — initial / current ETAs on production_late,
+   * Inline operational context — baseline / production due on production_late,
    * incoterm + destination on BL cards, etc. Lets a sales person inform a
    * client without first opening the order. Empty array when there's nothing
    * extra to surface.
@@ -324,7 +324,7 @@ type Signal = {
    *  When ageDays is omitted, it's derived from this. */
   since?: string | null;
   amount?: { value: number; currency: string } | null;
-  /** Inline operational context (initial ETA, current ETA, incoterm, balance…). */
+  /** Inline operational context (baseline, production due, incoterm, balance…). */
   contextChips?: ActionContextChip[];
   /** info items carry a dynamic title + a distinct key/href. */
   titleOverride?: string;

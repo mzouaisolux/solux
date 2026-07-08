@@ -31,6 +31,9 @@ export type ShippingDetails = {
   container_number: string | null;
   /** Carrier tracking URL (Quick Update — jsonb, no migration). */
   tracking_url: string | null;
+  /** Incoterm for MANUAL orders only (workflow orders read the quotation's
+   *  incoterm — source of truth). Jsonb key, no migration. */
+  incoterm: string | null;
 };
 
 export function emptyShippingDetails(): ShippingDetails {
@@ -47,6 +50,7 @@ export function emptyShippingDetails(): ShippingDetails {
     booking_number: null,
     container_number: null,
     tracking_url: null,
+    incoterm: null,
   };
 }
 
@@ -79,6 +83,7 @@ export function normalizeShippingDetails(raw: unknown): ShippingDetails {
     booking_number: str(p.booking_number),
     container_number: str(p.container_number),
     tracking_url: str(p.tracking_url),
+    incoterm: str(p.incoterm),
   };
 }
 

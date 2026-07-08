@@ -1,16 +1,19 @@
 /* Quick Update spreadsheet — scoped styles (CSS module, no global impact).
-   Sticky header + sticky first column, borderless inline inputs, a blue
-   "recently updated" flash, resizable column handles, popover + undo bar.
-   Palette kept aligned with SOLUX (neutral lines, green/amber/rose accents). */
+   Production Control Center: dense, calm, keyboard-first. Sticky header +
+   sticky identity columns (PO/Client/Sales/Status), borderless inline inputs,
+   a blue "recently updated" flash, resizable column handles, popover + undo
+   bar + save-state indicator.
+   Palette strictly SOLUX-aligned (neutral lines, green/amber/rose accents) —
+   no new colours, only contrast/space tuning. */
 
 .wrap {
   position: relative;
   overflow: auto;
   border: 1px solid var(--line, #e7e7ea);
-  border-radius: 12px;
+  border-radius: 10px;
   background: #fff;
   /* leaves room for the app header + this page's toolbar */
-  max-height: calc(100vh - 220px);
+  max-height: calc(100vh - 200px);
 }
 
 .table {
@@ -20,35 +23,47 @@
   min-width: 100%;
   font-size: 13px;
   color: #111827;
+  /* lining figures — amounts and dates align vertically across rows */
+  font-variant-numeric: tabular-nums;
 }
 
 .table td {
   border-bottom: 1px solid #eef0f2;
   border-right: 1px solid #f3f4f6;
   padding: 0;
-  height: 38px;
+  /* two-line cells (dates under amounts, plan under due date) need 40px;
+     still dense — most cells stay single-line vertically centred */
+  height: 40px;
   box-sizing: border-box;
   background: #fff;
   vertical-align: middle;
+}
+
+/* subtle zebra — helps the eye track a row across 14 dense columns */
+.row:nth-child(even) td {
+  background: #fafbfc;
+}
+.row:hover td {
+  background: #f3f6fa;
 }
 
 .table thead th {
   position: sticky;
   top: 0;
   z-index: 3;
-  background: #fafbfc;
-  border-bottom: 1px solid #e5e7eb;
-  border-right: 1px solid #f0f1f3;
+  background: #f8f9fb;
+  border-bottom: 1px solid #dfe3e8;
+  border-right: 1px solid #eef0f2;
   font-weight: 600;
   font-size: 11px;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: #6b7280;
+  letter-spacing: 0.05em;
+  color: #57606a;
   text-align: left;
   white-space: nowrap;
-  height: 40px;
+  height: 36px;
   padding: 0 10px;
-  position: sticky;
+  box-sizing: border-box;
 }
 
 .headLabel {
@@ -57,24 +72,34 @@
   height: 100%;
 }
 
-/* sticky first column (PO Number) */
+/* sticky identity columns (PO / Client / Sales / Status) — inline `left`
+   offsets are computed from live column widths in the component */
 .stickyCol {
   position: sticky;
-  left: 0;
   z-index: 2;
-  box-shadow: 1px 0 0 #e7e7ea;
-  background: #fff;
 }
 .table thead th.stickyCol {
   z-index: 5;
-  background: #fafbfc;
 }
-.row:hover .stickyCol {
-  background: #f7f9fb;
+/* edge of the pinned block — a crisp line + soft fade so the scrolled
+   content visibly slides under it */
+.stickyLast {
+  box-shadow: 1px 0 0 #dfe3e8, 6px 0 8px -6px rgba(15, 23, 42, 0.12);
 }
 
-.row:hover td {
-  background: #f9fafb;
+/* stronger separator at each column-group boundary
+   (production | payment | transport | docs) */
+.groupStart {
+  border-left: 1px solid #dfe3e8;
+}
+
+/* right-aligned money / delay columns */
+.numCol .cell,
+.numCol .trigger {
+  justify-content: flex-end;
+}
+th.numCol {
+  text-align: right;
 }
 
 /* generic cell padding for readonly / badge content */
@@ -87,6 +112,31 @@
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
+}
+
+/* payment amounts — received always prominent, expected quieter */
+.amount {
+  font-weight: 500;
+}
+.amountExpected {
+  color: #9ca3af;
+  font-size: 11px;
+}
+
+/* stacked two-line cell (main fact + quiet secondary line) */
+.stack {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 1px;
+  line-height: 1.15;
+}
+.sub {
+  font-size: 10.5px;
+  font-weight: 400;
+  color: #9ca3af;
+  white-space: nowrap;
 }
 
 /* inline editable input filling the whole cell (borderless until focus) */
@@ -104,7 +154,7 @@
   color: #c4c7cc;
 }
 .input:hover {
-  background: #f7f8fa;
+  background: #f3f6fa;
 }
 .input:focus {
   background: #eff6ff;
@@ -124,6 +174,7 @@
   appearance: none;
 }
 .select:focus {
+  background: #eff6ff;
   box-shadow: inset 0 0 0 2px #3b82f6;
 }
 
@@ -141,9 +192,15 @@
   text-align: left;
   font: inherit;
   color: inherit;
+  outline: none;
 }
 .trigger:hover {
-  background: #f2f5f9;
+  background: #eef2f7;
+}
+/* keyboard focus must be unmistakable — same ring as inputs */
+.trigger:focus-visible {
+  background: #eff6ff;
+  box-shadow: inset 0 0 0 2px #3b82f6;
 }
 
 /* "recently updated" flash */
@@ -194,6 +251,70 @@
   height: 7px;
   border-radius: 999px;
   flex: none;
+}
+
+/* auto-save state indicator (header, fixed slot — no layout shift) */
+.saveState {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  min-width: 76px;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.saveStateSaving {
+  color: #854d0e;
+}
+.saveStateSaved {
+  color: #166534;
+}
+
+/* manual-order entry modal (m155) */
+.modalOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 85;
+  background: rgba(15, 23, 42, 0.35);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 8vh 16px 16px;
+}
+.modal {
+  width: 480px;
+  max-width: 100%;
+  max-height: 84vh;
+  overflow: auto;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  box-shadow: 0 20px 60px rgba(15, 23, 42, 0.28);
+  padding: 16px;
+}
+.modalHint {
+  font-size: 12px;
+  color: #6b7280;
+  margin: -4px 0 12px;
+}
+
+/* shipping-documents checklist (Documents popover) */
+.docList {
+  list-style: none;
+  margin: 0 0 4px;
+  padding: 6px 8px;
+  border: 1px solid #eef0f2;
+  border-radius: 8px;
+  background: #fafbfc;
+  max-height: 220px;
+  overflow: auto;
+}
+.docItem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 0;
+  font-size: 12px;
 }
 
 /* popover (portal, fixed) */

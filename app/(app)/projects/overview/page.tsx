@@ -1,7 +1,8 @@
 import { createClient } from "@/lib/supabase/server";
-import { canAccessOrAdmin } from "@/lib/permissions";
+import { canAccessOrAdmin, hasUiCapability } from "@/lib/permissions";
 import { resolveUserLabelStrings } from "@/lib/user-display";
 import AccessDenied from "@/components/AccessDenied";
+import { loadAffairProfitability } from "@/lib/profitability-server";
 import { OverviewTable, type OverviewRow } from "./OverviewTable";
 
 export const dynamic = "force-dynamic";
@@ -36,7 +37,7 @@ export default async function ServiceRequestOverviewPage() {
   const { data, count } = await supabase
     .from("project_requests")
     .select(
-      "id, name, status, opportunity_value, created_at, updated_at, archived_at, owner_id, clients:client_id(company_name)",
+      "id, name, status, opportunity_value, created_at, updated_at, archived_at, owner_id, affair_id, clients:client_id(company_name)",
       { count: "exact" }
     )
     .order("updated_at", { ascending: false })
@@ -48,6 +49,40 @@ export default async function ServiceRequestOverviewPage() {
   ) as string[];
   const ownerLabels = await resolveUserLabelStrings(ownerIds);
 
+  // m152 — Overall-margin column, management only. Bounded on purpose (perf):
+  // only priced/quoted/won rows can have a margin, newest-first, hard cap —
+  // rows beyond it show a dash. The loader batches everything; the column is
+  // entirely absent for non-holders (no greyed placeholder).
+  const MARGIN_ROW_CAP = 300;
+  const showMargin = await hasUiCapability("project.view_profitability");
+  const marginByAffair = new Map<
+    string,
+    { pct: number | null; health: "green" | "yellow" | "red" | null; partial: boolean }
+  >();
+  if (showMargin) {
+    const eligible = raw
+      .filter(
+        (r) =>
+          !r.archived_at &&
+          r.affair_id &&
+          ["priced", "quotation_generated", "won"].includes(r.status)
+      )
+      .slice(0, MARGIN_ROW_CAP);
+    const profitMap = await loadAffairProfitability(
+      supabase,
+      eligible.map((r) => r.affair_id)
+    );
+    for (const [affairId, res] of profitMap) {
+      if (res.ok) {
+        marginByAffair.set(affairId, {
+          pct: res.overallPct,
+          health: res.overallHealth,
+          partial: res.partial,
+        });
+      }
+    }
+  }
+
   const rows: OverviewRow[] = raw.map((r) => ({
     id: r.id,
     name: r.name ?? "—",
@@ -58,6 +93,7 @@ export default async function ServiceRequestOverviewPage() {
     owner: r.owner_id ? ownerLabels.get(r.owner_id) ?? "—" : "—",
     createdAt: r.created_at,
     updatedAt: r.updated_at,
+    margin: r.affair_id ? marginByAffair.get(r.affair_id) ?? null : null,
   }));
 
   return (
@@ -76,7 +112,11 @@ export default async function ServiceRequestOverviewPage() {
             </p>
           </div>
         </div>
-        <OverviewTable rows={rows} total={count ?? rows.length} />
+        <OverviewTable
+          rows={rows}
+          total={count ?? rows.length}
+          showMargin={showMargin}
+        />
       </div>
     </div>
   );

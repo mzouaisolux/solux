@@ -9,9 +9,13 @@ import {
   BATTERY_CELL_KEY,
   DOSSIER_SECTIONS,
   isBatteryLabel,
+  MANUAL_BRAND_TITLES,
+  MANUAL_LANGUAGE_TITLES,
+  PACKAGING_VERSION_TITLES,
   type AppendixItem,
   type BiTitle,
 } from "@/lib/production-dossier";
+import { formatTiltAngle } from "@/lib/industrial-spec";
 import {
   BrandHeader,
   Rule,
@@ -737,6 +741,14 @@ export default function ProductionDossierPDF({
       data.lighting.approved_optics ||
       data.lighting.dialux_configurations.length > 0)
   );
+  // m159 — industrial production file: render when the columns exist AND the
+  // TLM actually set something (tilt angle or a saved spec blob). Pre-m159
+  // task lists (industrial = null) simply omit the section.
+  const industrial = data.industrial;
+  const showIndustrial = !!(
+    industrial &&
+    (industrial.solar_panel_tilt_angle != null || industrial.spec)
+  );
   const requiredStickers = data.stickers?.items.filter((i) => i.required) ?? [];
   const showStickers = requiredStickers.length > 0 || !!data.stickers?.notes;
   const showTransport = !!(data.logistics || data.shipping_method);
@@ -749,6 +761,7 @@ export default function ProductionDossierPDF({
   const nSummary = num();
   const nNotes = showNotes ? num() : 0;
   const lineNumbers = data.lines.map(() => num());
+  const nIndustrial = showIndustrial ? num() : 0;
   const nLighting = showLighting ? num() : 0;
   const nStickers = showStickers ? num() : 0;
   const nTransport = showTransport ? num() : 0;
@@ -862,6 +875,9 @@ export default function ProductionDossierPDF({
               (l, i) =>
                 `${lineNumbers[i]}. ${S.product_configuration.zh} · ${S.product_configuration.en} — ${l.product_name}`
             ),
+            ...(showIndustrial
+              ? [`${nIndustrial}. ${S.industrial_file.zh} · ${S.industrial_file.en}`]
+              : []),
             ...(showLighting
               ? [`${nLighting}. ${S.lighting_program.zh} · ${S.lighting_program.en}`]
               : []),
@@ -1061,6 +1077,246 @@ export default function ProductionDossierPDF({
             )}
           </View>
         ))}
+
+        {/* ---------- INDUSTRIAL PRODUCTION FILE (m159) ---------- */}
+        {showIndustrial && industrial && (
+          <View break>
+            <BiSection n={nIndustrial} title={S.industrial_file} />
+
+            {/* Tilt angle + pole drawing checkpoint — critical production
+                parameter, boxed like the battery block. */}
+            {industrial.solar_panel_tilt_angle != null && (
+              <>
+                <BiSub title={S.tilt_angle} />
+                <View style={s.batteryBox} wrap={false}>
+                  <View style={s.batteryTypeRow}>
+                    <Text style={s.notesLabelZh}>{S.tilt_angle.zh}</Text>
+                    <Text style={s.notesLabelEn}>{S.tilt_angle.en}</Text>
+                    <Text style={s.batteryTypeValue}>
+                      {formatTiltAngle(industrial.solar_panel_tilt_angle)}
+                    </Text>
+                  </View>
+                  {industrial.pole_drawing_tilt_verified ? (
+                    <Text style={s.notesText}>
+                      灯杆图纸倾角已核对 · Pole drawing checked against the
+                      required tilt angle
+                      {industrial.pole_drawing_tilt_verified_at
+                        ? ` (${fmtDate(industrial.pole_drawing_tilt_verified_at)})`
+                        : ""}
+                      .
+                    </Text>
+                  ) : (
+                    <Text style={s.instructionMuted}>
+                      灯杆图纸倾角未核对 · Pole drawing NOT yet checked against
+                      the required tilt angle — confirm before production.
+                    </Text>
+                  )}
+                </View>
+              </>
+            )}
+
+            {industrial.spec && (
+              <>
+                {/* Pole accessories — included by default, unchecked rows are
+                    explicit exclusions the factory must respect. */}
+                <BiSub title={S.pole_accessories} />
+                <View style={s.table}>
+                  <View style={s.tHead} fixed>
+                    <Text style={[s.tHeadCell, { flex: 2.4 }]}>
+                      配件 · Accessory
+                    </Text>
+                    <Text style={[s.tHeadCell, { flex: 1.6 }]}>
+                      是否包含 · Included
+                    </Text>
+                    <Text style={[s.tHeadCell, { flex: 3 }]}>备注 · Note</Text>
+                  </View>
+                  {industrial.spec.pole_accessories.items.map((it, i) => (
+                    <View
+                      key={i}
+                      style={i % 2 === 1 ? [s.tRow, s.tRowAlt] : s.tRow}
+                      wrap={false}
+                    >
+                      <Text style={[s.tCellStrong, { flex: 2.4, paddingRight: 6 }]}>
+                        {it.label}
+                      </Text>
+                      <Text
+                        style={[
+                          s.tCell,
+                          { flex: 1.6 },
+                          it.included ? {} : { color: COLORS.dangerText },
+                        ]}
+                      >
+                        {it.included ? "包含 · Included" : "不包含 · EXCLUDED"}
+                      </Text>
+                      <Text style={[s.tCell, { flex: 3 }]}>{it.note ?? "—"}</Text>
+                    </View>
+                  ))}
+                </View>
+                {industrial.spec.pole_accessories.notes && (
+                  <View style={{ marginTop: 6 }}>
+                    <NotesBlock
+                      zh="配件备注"
+                      en="Accessory notes"
+                      text={industrial.spec.pole_accessories.notes}
+                    />
+                  </View>
+                )}
+
+                {/* Packaging version */}
+                {(industrial.spec.packaging.version ||
+                  industrial.spec.packaging.notes) && (
+                  <>
+                    <BiSub title={S.packaging} />
+                    <View style={s.kvGrid}>
+                      <KV
+                        zh="包装版本"
+                        en="Packaging version"
+                        value={
+                          industrial.spec.packaging.version
+                            ? `${PACKAGING_VERSION_TITLES[industrial.spec.packaging.version].zh} · ${PACKAGING_VERSION_TITLES[industrial.spec.packaging.version].en}`
+                            : "—"
+                        }
+                        wide
+                      />
+                    </View>
+                    {industrial.spec.packaging.version === "custom_client" && (
+                      <Text style={[s.emptyNote, { marginBottom: 6 }]}>
+                        客户包装图稿见附录 · Customer packaging artwork, if
+                        uploaded, is included in the Appendix.
+                      </Text>
+                    )}
+                    {industrial.spec.packaging.notes && (
+                      <NotesBlock
+                        zh="包装备注"
+                        en="Packaging notes"
+                        text={industrial.spec.packaging.notes}
+                      />
+                    )}
+                  </>
+                )}
+
+                {/* User manual */}
+                {(industrial.spec.user_manual.brand ||
+                  industrial.spec.user_manual.languages.length > 0 ||
+                  industrial.spec.user_manual.notes) && (
+                  <>
+                    <BiSub title={S.user_manual} />
+                    <View style={s.kvGrid}>
+                      <KV
+                        zh="手册版本"
+                        en="Manual version"
+                        value={
+                          industrial.spec.user_manual.brand
+                            ? `${MANUAL_BRAND_TITLES[industrial.spec.user_manual.brand].zh} · ${MANUAL_BRAND_TITLES[industrial.spec.user_manual.brand].en}`
+                            : "—"
+                        }
+                        wide
+                      />
+                      <KV
+                        zh="语言"
+                        en="Languages"
+                        value={
+                          industrial.spec.user_manual.languages.length > 0
+                            ? industrial.spec.user_manual.languages
+                                .map(
+                                  (l) =>
+                                    `${MANUAL_LANGUAGE_TITLES[l].zh} ${MANUAL_LANGUAGE_TITLES[l].en}`
+                                )
+                                .join(", ")
+                            : "—"
+                        }
+                      />
+                    </View>
+                    {industrial.spec.user_manual.brand === "custom" && (
+                      <Text style={[s.emptyNote, { marginBottom: 6 }]}>
+                        客户手册图稿见附录 · Customer manual artwork, if
+                        uploaded, is included in the Appendix.
+                      </Text>
+                    )}
+                    {industrial.spec.user_manual.notes && (
+                      <NotesBlock
+                        zh="手册备注"
+                        en="Manual notes"
+                        text={industrial.spec.user_manual.notes}
+                      />
+                    )}
+                  </>
+                )}
+
+                {/* Spare parts — structured table incl. factory naming
+                    (factories name identical parts differently). */}
+                {industrial.spec.spare_parts.length > 0 && (
+                  <>
+                    <BiSub title={S.spare_parts} />
+                    <View style={s.table}>
+                      <View style={s.tHead} fixed>
+                        <Text style={[s.tHeadCell, { flex: 2 }]}>
+                          部件 · Part
+                        </Text>
+                        <Text style={[s.tHeadCell, { flex: 2 }]}>
+                          型号 · Model
+                        </Text>
+                        <Text
+                          style={[s.tHeadCell, { width: 44, textAlign: "right" }]}
+                        >
+                          数量 · Qty
+                        </Text>
+                        <Text style={[s.tHeadCell, { flex: 2, paddingLeft: 8 }]}>
+                          工厂命名 · Factory name
+                        </Text>
+                        <Text style={[s.tHeadCell, { flex: 2.4 }]}>
+                          备注 · Notes
+                        </Text>
+                      </View>
+                      {industrial.spec.spare_parts.map((p, i) => (
+                        <View
+                          key={i}
+                          style={i % 2 === 1 ? [s.tRow, s.tRowAlt] : s.tRow}
+                          wrap={false}
+                        >
+                          <View style={{ flex: 2, paddingRight: 6 }}>
+                            <Text style={s.tCellStrong}>{p.part || "—"}</Text>
+                            {p.customer_name && (
+                              <Text
+                                style={[s.tCell, { fontSize: 7, color: COLORS.muted }]}
+                              >
+                                客户命名 Customer: {p.customer_name}
+                              </Text>
+                            )}
+                          </View>
+                          <Text style={[s.tCell, { flex: 2, paddingRight: 6 }]}>
+                            {p.model ?? "—"}
+                          </Text>
+                          <Text
+                            style={[
+                              s.tCellStrong,
+                              { width: 44, textAlign: "right" },
+                            ]}
+                          >
+                            × {p.quantity}
+                          </Text>
+                          <View style={{ flex: 2, paddingLeft: 8 }}>
+                            <Text style={s.tCell}>{p.factory_name ?? "—"}</Text>
+                            {p.factory_notes && (
+                              <Text
+                                style={[s.tCell, { fontSize: 7, color: COLORS.muted }]}
+                              >
+                                {p.factory_notes}
+                              </Text>
+                            )}
+                          </View>
+                          <Text style={[s.tCell, { flex: 2.4 }]}>
+                            {p.notes ?? "—"}
+                          </Text>
+                        </View>
+                      ))}
+                    </View>
+                  </>
+                )}
+              </>
+            )}
+          </View>
+        )}
 
         {/* ---------- LIGHTING PROGRAM + ENERGY ---------- */}
         {showLighting && data.lighting && (

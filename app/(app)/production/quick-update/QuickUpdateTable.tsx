@@ -17,6 +17,8 @@ import {
   getSmartFilter,
   matchesSearch,
   facetValues,
+  fmtShortDate,
+  daysBetweenISO,
   type QuickUpdateRow,
   type ColumnDef,
   type FilterContext,
@@ -40,6 +42,7 @@ import {
   type CommitInput,
   type PopoverKind,
 } from "./QuickUpdatePopovers";
+import { AddOrderModal } from "./AddOrderModal";
 import styles from "./quick-update.module.css";
 
 type Caps = {
@@ -47,6 +50,8 @@ type Caps = {
   shipment: boolean;
   payments: boolean;
   deadline: boolean;
+  /** May register manual (Excel-transition) orders — m155. */
+  createManual: boolean;
 };
 
 /* ---------- colour tones (deterministic inline styles) ---------- */
@@ -114,8 +119,10 @@ function Pill({ tone, children }: { tone: string; children: React.ReactNode }) {
 
 /* ---------- misc helpers ---------- */
 
-function money(currency: string, n: number): string {
-  return `${currency} ${Math.round(n).toLocaleString()}`;
+// Bare amounts in cells — the column header + currency tooltip carry the
+// context, so "32,128 / 32,128" reads faster than "USD 32,128 / USD 32,128".
+function money(n: number): string {
+  return Math.round(n).toLocaleString("en-US");
 }
 function sVal(v: unknown): string {
   return v == null ? "" : String(v);
@@ -125,8 +132,58 @@ function dateShort(v: string | null): string {
   return v.slice(0, 10);
 }
 
+/* ---------- keyboard grid navigation (Excel-like) ----------
+   Every focusable cell control carries data-qrow / data-qcol; vertical moves
+   stay in the column, horizontal moves stay in the row (DOM order = visual
+   order). Focus change blurs the current input, which commits it. */
+
+function navProps(rowId: string, colKey: string) {
+  return { "data-qrow": rowId, "data-qcol": colKey } as const;
+}
+
+/** Returns true when focus actually moved (false at the grid edge). */
+function moveFocus(el: HTMLElement, dRow: number, dCol: number): boolean {
+  const col = el.getAttribute("data-qcol");
+  const rowId = el.getAttribute("data-qrow");
+  if (!col || !rowId) return false;
+  const list =
+    dRow !== 0
+      ? Array.from(
+          document.querySelectorAll<HTMLElement>(
+            `[data-qcol="${CSS.escape(col)}"]`
+          )
+        )
+      : Array.from(
+          document.querySelectorAll<HTMLElement>(
+            `[data-qrow="${CSS.escape(rowId)}"]`
+          )
+        );
+  const i = list.indexOf(el);
+  if (i === -1) return false;
+  const next = list[i + (dRow !== 0 ? dRow : dCol)];
+  if (!next) return false;
+  next.focus();
+  if (next instanceof HTMLInputElement && next.type === "text") next.select();
+  return true;
+}
+
+/** Arrow-key navigation for button cells (popover triggers). */
+function triggerKeyNav(e: React.KeyboardEvent<HTMLElement>): void {
+  const map: Record<string, [number, number]> = {
+    ArrowDown: [1, 0],
+    ArrowUp: [-1, 0],
+    ArrowLeft: [0, -1],
+    ArrowRight: [0, 1],
+  };
+  const d = map[e.key];
+  if (!d) return;
+  e.preventDefault();
+  moveFocus(e.currentTarget, d[0], d[1]);
+}
+
 /** DB/row property each editable text/date column maps to. */
 const CELL_ROWKEY: Record<string, keyof QuickUpdateRow> = {
+  incoterm: "incoterm",
   carrier: "carrier",
   booking: "bookingNumber",
   container: "containerNumber",
@@ -145,14 +202,19 @@ export function QuickUpdateTable({
   today,
   currentUserId,
   caps,
+  clientOptions,
 }: {
   rows: QuickUpdateRow[];
   today: string;
   currentUserId: string | null;
   caps: Caps;
+  clientOptions: { id: string; label: string }[];
 }) {
   const [rows, setRows] = useState<QuickUpdateRow[]>(initialRows);
   const [, startTransition] = useTransition();
+  const [addOpen, setAddOpen] = useState(false);
+  // server refetch after a create lands here via the page re-render
+  useEffect(() => setRows(initialRows), [initialRows]);
 
   // toolbar state
   const [search, setSearch] = useState("");
@@ -182,15 +244,23 @@ export function QuickUpdateTable({
   const undoTimer = useRef<number | undefined>(undefined);
   const [recent, setRecent] = useState<Set<string>>(new Set());
 
-  /* ---- persistence ---- */
+  // save-status indicator: number of in-flight saves + a short "✓ Saved" flash
+  const [inflight, setInflight] = useState(0);
+  const [savedFlash, setSavedFlash] = useState(false);
+  const flashTimer = useRef<number | undefined>(undefined);
+
+  /* ---- persistence ----
+     v2 keys: the v1 layout (pre column-reorder / Production Due rename) used
+     "qu:cols"/"qu:widths" with now-renamed keys — starting fresh once is
+     cheaper than migrating stale orderings everyone wants to replace. */
   useEffect(() => {
     try {
-      const v = localStorage.getItem("qu:cols");
+      const v = localStorage.getItem("qu2:cols");
       if (v) {
         const parsed = JSON.parse(v);
         if (Array.isArray(parsed) && parsed.length) setVisible(parsed);
       }
-      const w = localStorage.getItem("qu:widths");
+      const w = localStorage.getItem("qu2:widths");
       if (w) setWidths((prev) => ({ ...prev, ...JSON.parse(w) }));
     } catch {
       /* ignore corrupt storage */
@@ -199,7 +269,7 @@ export function QuickUpdateTable({
   const persistCols = (next: string[]) => {
     setVisible(next);
     try {
-      localStorage.setItem("qu:cols", JSON.stringify(next));
+      localStorage.setItem("qu2:cols", JSON.stringify(next));
     } catch {
       /* ignore */
     }
@@ -207,7 +277,7 @@ export function QuickUpdateTable({
   const persistWidths = (next: Record<string, number>) => {
     setWidths(next);
     try {
-      localStorage.setItem("qu:widths", JSON.stringify(next));
+      localStorage.setItem("qu2:widths", JSON.stringify(next));
     } catch {
       /* ignore */
     }
@@ -239,10 +309,30 @@ export function QuickUpdateTable({
     }, 2400);
   }, []);
 
+  // Track in-flight saves so the header indicator can show
+  // "Saving…" → "✓ Saved" — trust in the auto-save is the whole game.
+  const saveStarted = useCallback(() => {
+    window.clearTimeout(flashTimer.current);
+    setSavedFlash(false);
+    setInflight((n) => n + 1);
+  }, []);
+  const saveSettled = useCallback(() => {
+    setInflight((n) => {
+      const next = Math.max(0, n - 1);
+      if (next === 0) {
+        setSavedFlash(true);
+        window.clearTimeout(flashTimer.current);
+        flashTimer.current = window.setTimeout(() => setSavedFlash(false), 1600);
+      }
+      return next;
+    });
+  }, []);
+
   const commit: CommitFn = useCallback(
     ({ id, patch, prev, run, undoRun, label, touched }: CommitInput) => {
       applyPatch(id, patch);
       markRecent(id, touched);
+      saveStarted();
       startTransition(async () => {
         try {
           await run();
@@ -252,11 +342,14 @@ export function QuickUpdateTable({
               applyPatch(id, prev);
               markRecent(id, touched);
               setUndo(null);
+              saveStarted();
               startTransition(async () => {
                 try {
                   await undoRun();
                 } catch (e: any) {
                   toast.error(e?.message ?? "Undo failed");
+                } finally {
+                  saveSettled();
                 }
               });
             };
@@ -266,10 +359,12 @@ export function QuickUpdateTable({
         } catch (e: any) {
           applyPatch(id, prev);
           toast.error(e?.message ?? "Save failed");
+        } finally {
+          saveSettled();
         }
       });
     },
-    [applyPatch, markRecent]
+    [applyPatch, markRecent, saveStarted, saveSettled]
   );
 
   /* ---- filtering ---- */
@@ -304,11 +399,55 @@ export function QuickUpdateTable({
 
   const visibleCols = useMemo(
     () =>
-      visible
-        .map((k) => QUICK_UPDATE_COLUMNS.find((c) => c.key === k))
-        .filter((c): c is ColumnDef => !!c),
+      // catalogue order is the display order — the workflow scan
+      // (identity → production → payment → transport → docs) stays intact
+      // whatever order columns were toggled in.
+      QUICK_UPDATE_COLUMNS.filter((c) => visible.includes(c.key)),
     [visible]
   );
+
+  // Sticky columns: the leading run of `sticky` columns pins to the left with
+  // cumulative offsets so PO / Client / Sales / Status stay visible while the
+  // transport columns scroll. `stickyLefts` maps key → left px; the last one
+  // gets the edge shadow.
+  const { stickyLefts, lastStickyKey } = useMemo(() => {
+    const lefts: Record<string, number> = {};
+    let left = 0;
+    let last: string | null = null;
+    for (const c of visibleCols) {
+      if (!c.sticky) break;
+      lefts[c.key] = left;
+      left += widths[c.key] ?? c.width;
+      last = c.key;
+    }
+    return { stickyLefts: lefts, lastStickyKey: last };
+  }, [visibleCols, widths]);
+
+  // Column-group boundaries get a slightly stronger separator to help the eye
+  // jump between Production / Payment / Transport / Docs blocks.
+  const groupStartKeys = useMemo(() => {
+    const set = new Set<string>();
+    for (let i = 1; i < visibleCols.length; i++) {
+      if (visibleCols[i].group !== visibleCols[i - 1].group)
+        set.add(visibleCols[i].key);
+    }
+    return set;
+  }, [visibleCols]);
+
+  const cellClass = (col: ColumnDef): string | undefined => {
+    const cls: string[] = [];
+    if (col.key in stickyLefts) cls.push(styles.stickyCol);
+    if (col.key === lastStickyKey) cls.push(styles.stickyLast);
+    if (groupStartKeys.has(col.key)) cls.push(styles.groupStart);
+    if (col.numeric) cls.push(styles.numCol);
+    return cls.length ? cls.join(" ") : undefined;
+  };
+  const cellStyle = (col: ColumnDef): React.CSSProperties => ({
+    width: widths[col.key],
+    minWidth: widths[col.key],
+    maxWidth: widths[col.key],
+    ...(col.key in stickyLefts ? { left: stickyLefts[col.key] } : null),
+  });
 
   /* ---- column resize ---- */
   const resizeRef = useRef<{ key: string; startX: number; startW: number } | null>(
@@ -365,8 +504,23 @@ export function QuickUpdateTable({
             .
           </p>
         </div>
-        <div className="text-sm text-neutral-500">
-          {filtered.length} / {rows.length} orders
+        <div className="flex items-center gap-3">
+          {/* auto-save trust indicator — always in the same spot */}
+          <span
+            className={`${styles.saveState} ${
+              inflight > 0
+                ? styles.saveStateSaving
+                : savedFlash
+                ? styles.saveStateSaved
+                : ""
+            }`}
+            aria-live="polite"
+          >
+            {inflight > 0 ? "Saving…" : savedFlash ? "✓ Saved" : ""}
+          </span>
+          <div className="text-sm text-neutral-500">
+            {filtered.length} / {rows.length} orders
+          </div>
         </div>
       </div>
 
@@ -461,7 +615,25 @@ export function QuickUpdateTable({
             </div>
           )}
         </div>
+        {caps.createManual && (
+          <button
+            type="button"
+            className={`${styles.chip} ${styles.chipActive}`}
+            onClick={() => setAddOpen(true)}
+            title="Register an order by hand (Excel transition) — no quotation needed"
+          >
+            + Add order
+          </button>
+        )}
       </div>
+
+      {/* manual-order entry (m155) */}
+      {addOpen && (
+        <AddOrderModal
+          clientOptions={clientOptions}
+          onClose={() => setAddOpen(false)}
+        />
+      )}
 
       {/* table */}
       <div className={styles.wrap}>
@@ -471,12 +643,8 @@ export function QuickUpdateTable({
               {visibleCols.map((col) => (
                 <th
                   key={col.key}
-                  className={col.sticky ? styles.stickyCol : undefined}
-                  style={{
-                    width: widths[col.key],
-                    minWidth: widths[col.key],
-                    maxWidth: widths[col.key],
-                  }}
+                  className={cellClass(col)}
+                  style={cellStyle(col)}
                 >
                   <span className={styles.headLabel}>{col.label}</span>
                   <span
@@ -493,12 +661,8 @@ export function QuickUpdateTable({
                 {visibleCols.map((col) => (
                   <td
                     key={col.key}
-                    className={col.sticky ? styles.stickyCol : undefined}
-                    style={{
-                      width: widths[col.key],
-                      minWidth: widths[col.key],
-                      maxWidth: widths[col.key],
-                    }}
+                    className={cellClass(col)}
+                    style={cellStyle(col)}
                   >
                     <CellRenderer
                       col={col}
@@ -555,6 +719,7 @@ export function QuickUpdateTable({
           {popover.kind === "documents" && (
             <DocumentsPopoverBody
               row={popRow}
+              canEdit={caps.shipment}
               onClose={() => setPopover(null)}
             />
           )}
@@ -600,8 +765,16 @@ function CellRenderer({
           href={row.detailHref}
           className={styles.cell}
           style={{ fontWeight: 600, color: "#1d4ed8" }}
+          title={
+            row.source === "manual"
+              ? "Manual order (Excel transition) — not linked to a quotation"
+              : undefined
+          }
         >
-          {row.number}
+          <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>
+            {row.number}
+          </span>
+          {row.source === "manual" && <Pill tone="grey">M</Pill>}
         </Link>
       );
     case "client":
@@ -627,8 +800,10 @@ function CellRenderer({
       return (
         <PaymentTrigger
           row={row}
+          colKey={col.key}
           amount={row.depositReceived}
           expected={row.expectedDeposit}
+          receivedAt={row.depositReceivedAt}
           canEdit={caps.payments}
           recent={recent}
           onOpen={(e) => openPop("payment", row.id, e)}
@@ -638,8 +813,10 @@ function CellRenderer({
       return (
         <PaymentTrigger
           row={row}
+          colKey={col.key}
           amount={row.balanceReceived}
           expected={row.expectedBalance}
+          receivedAt={row.balanceReceivedAt}
           canEdit={caps.payments}
           recent={recent}
           onOpen={(e) => openPop("payment", row.id, e)}
@@ -654,15 +831,19 @@ function CellRenderer({
         </div>
       );
 
-    case "current_eta":
-      return <div className={styles.cell}>{dateShort(row.currentEta) || "—"}</div>;
+    case "production_due":
+      return <ProductionDueCell row={row} />;
     case "production_deadline":
       return (
-        <div className={styles.cell}>{dateShort(row.initialDeadline) || "—"}</div>
+        <div className={styles.cell}>
+          {fmtShortDate(row.initialDeadline) || "—"}
+        </div>
       );
     case "factory_delay":
       return (
         <DelayTrigger
+          row={row}
+          colKey={col.key}
           value={row.factoryDelayDays}
           tone={row.factoryDelayDays > 0 ? "rose" : "grey"}
           canEdit={caps.deadline}
@@ -673,12 +854,41 @@ function CellRenderer({
     case "external_delay":
       return (
         <DelayTrigger
+          row={row}
+          colKey={col.key}
           value={row.externalDelayDays}
           tone={row.externalDelayDays > 0 ? "amber" : "grey"}
           canEdit={caps.deadline}
           recent={recent}
           onOpen={(e) => openPop("timeline", row.id, e)}
         />
+      );
+
+    case "incoterm":
+      // Workflow orders: read-only (the quotation is the source of truth).
+      // Manual orders: editable (shipping_details.incoterm).
+      if (row.source === "manual") {
+        return (
+          <TextCell
+            row={row}
+            col={col}
+            canEdit={caps.shipment}
+            commit={commit}
+            recent={recent}
+          />
+        );
+      }
+      return (
+        <div
+          className={styles.cell}
+          title="Incoterm from the quotation — tells you whether shipping is Solux's responsibility (CIF/CFR/DDP) or the client's (EXW/FOB)"
+        >
+          {row.incoterm ? (
+            <span style={{ fontWeight: 600 }}>{row.incoterm}</span>
+          ) : (
+            <span style={{ color: "#c4c7cc" }}>—</span>
+          )}
+        </div>
       );
 
     case "carrier":
@@ -714,6 +924,8 @@ function CellRenderer({
           type="button"
           className={`${styles.trigger} ${recent ? styles.recent : ""}`}
           onClick={(e) => openPop("bl", row.id, e)}
+          onKeyDown={triggerKeyNav}
+          {...navProps(row.id, col.key)}
         >
           <span
             className={styles.dot}
@@ -742,6 +954,8 @@ function CellRenderer({
           type="button"
           className={styles.trigger}
           onClick={(e) => openPop("documents", row.id, e)}
+          onKeyDown={triggerKeyNav}
+          {...navProps(row.id, col.key)}
         >
           <Pill
             tone={
@@ -776,18 +990,59 @@ function CellRenderer({
   }
 }
 
-/* ---------- editable cells ---------- */
+/* ---------- production due: planned vs actual dates ---------- */
 
-function focusSibling(el: HTMLElement, dir: number) {
-  const col = el.getAttribute("data-qcol");
-  if (!col) return;
-  const all = Array.from(
-    document.querySelectorAll<HTMLElement>(`[data-qcol="${col}"]`)
+function ProductionDueCell({ row }: { row: QuickUpdateRow }) {
+  const planned = row.initialDeadline;
+  // Actual finish once production completed; else the current expectation.
+  const effective = row.actualCompletion ?? row.productionDue;
+  const finished = !!row.actualCompletion;
+  const delta =
+    planned && effective ? daysBetweenISO(planned, effective) ?? 0 : 0;
+
+  if (!planned && !effective) {
+    return (
+      <div className={styles.cell}>
+        <span style={{ color: "#c4c7cc" }}>—</span>
+      </div>
+    );
+  }
+
+  const tip = [
+    planned ? `Planned finish ${planned}` : null,
+    finished
+      ? `Actual finish ${row.actualCompletion}`
+      : effective
+      ? `Expected finish ${effective}`
+      : null,
+    delta !== 0 ? `${delta > 0 ? "+" : ""}${delta} days vs plan` : "on plan",
+  ]
+    .filter(Boolean)
+    .join(" · ");
+
+  return (
+    <div className={`${styles.cell} ${styles.stack}`} title={tip}>
+      <span>
+        {finished && <span style={{ color: "#16a34a" }}>✓ </span>}
+        {fmtShortDate(effective) || "—"}
+      </span>
+      {planned && delta !== 0 && (
+        <span className={styles.sub}>
+          plan {fmtShortDate(planned)} ·{" "}
+          <span style={{ color: delta > 0 ? "#b91c1c" : "#166534" }}>
+            {delta > 0 ? "+" : ""}
+            {delta}d
+          </span>
+        </span>
+      )}
+      {planned && delta === 0 && effective !== null && (
+        <span className={styles.sub}>on plan</span>
+      )}
+    </div>
   );
-  const i = all.indexOf(el);
-  const next = all[i + dir];
-  if (next) next.focus();
 }
+
+/* ---------- editable cells ---------- */
 
 function TextCell({
   row,
@@ -808,6 +1063,9 @@ function TextCell({
   const field = col.field!;
   const initial = sVal(row[rowKey]);
   const [val, setVal] = useState(initial);
+  // Escape must revert WITHOUT saving — the blur handler still sees the edited
+  // value in its closure, so it needs an explicit "cancelled" flag.
+  const cancelled = useRef(false);
   useEffect(() => setVal(initial), [initial]);
 
   if (!canEdit) {
@@ -819,6 +1077,10 @@ function TextCell({
   }
 
   const save = () => {
+    if (cancelled.current) {
+      cancelled.current = false;
+      return;
+    }
     const next = val.trim();
     if (next === sVal(row[rowKey])) return; // no-op
     const fd = new FormData();
@@ -840,23 +1102,49 @@ function TextCell({
     });
   };
 
+  // Excel-like keys. Focus moves blur the input, which commits it:
+  //   Enter / Shift+Enter   → save + down / up
+  //   ↑ / ↓                 → save + up / down
+  //   ← / → (text, at edge) → previous / next cell in the row
+  //   Escape                → revert, stay put
+  // Date inputs keep native ←/→ (they move between date segments).
+  const onKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    const input = e.currentTarget;
+    if (e.key === "Enter") {
+      e.preventDefault();
+      // At the grid edge (first/last row) there is no sibling to move to —
+      // Enter must still COMMIT, like Excel: blur saves in place.
+      if (!moveFocus(input, e.shiftKey ? -1 : 1, 0)) input.blur();
+    } else if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      moveFocus(input, e.key === "ArrowDown" ? 1 : -1, 0);
+    } else if (e.key === "ArrowLeft" && type === "text") {
+      if (input.selectionStart === 0 && input.selectionEnd === 0) {
+        e.preventDefault();
+        moveFocus(input, 0, -1);
+      }
+    } else if (e.key === "ArrowRight" && type === "text") {
+      const len = input.value.length;
+      if (input.selectionStart === len && input.selectionEnd === len) {
+        e.preventDefault();
+        moveFocus(input, 0, 1);
+      }
+    } else if (e.key === "Escape") {
+      cancelled.current = true;
+      setVal(initial);
+      input.blur();
+    }
+  };
+
   return (
     <input
       className={`${styles.input} ${recent ? styles.recent : ""}`}
       type={type}
       value={val}
-      data-qcol={col.key}
       onChange={(e) => setVal(e.target.value)}
       onBlur={save}
-      onKeyDown={(e) => {
-        if (e.key === "Enter") {
-          e.preventDefault();
-          focusSibling(e.currentTarget, 1); // commits current (blur) + moves down
-        } else if (e.key === "Escape") {
-          setVal(initial);
-          e.currentTarget.blur();
-        }
-      }}
+      onKeyDown={onKeyDown}
+      {...navProps(row.id, col.key)}
     />
   );
 }
@@ -904,7 +1192,12 @@ function StatusCell({
         className={styles.dot}
         style={{ background: DOT[STATUS_TONE[row.status]], marginLeft: 10 }}
       />
-      <select className={styles.select} value={row.status} onChange={onChange}>
+      <select
+        className={styles.select}
+        value={row.status}
+        onChange={onChange}
+        {...navProps(row.id, "status")}
+      >
         {PRODUCTION_ORDER_STATUSES.map((st) => (
           <option key={st} value={st}>
             {PRODUCTION_ORDER_STATUS_LABEL[st]}
@@ -917,38 +1210,59 @@ function StatusCell({
 
 function PaymentTrigger({
   row,
+  colKey,
   amount,
   expected,
+  receivedAt,
   canEdit,
   recent,
   onOpen,
 }: {
   row: QuickUpdateRow;
+  colKey: string;
   amount: number;
   expected: number;
+  receivedAt: string | null;
   canEdit: boolean;
   recent: boolean;
   onOpen: (e: React.MouseEvent) => void;
 }) {
+  // Dot = deposit health at a glance (green complete / amber partial /
+  // rose none) — but the exact amounts always stay visible, and the
+  // receipt date shows underneath (Ops + Finance need the WHEN).
   const tone =
     expected <= 0 ? "grey" : amount + 0.01 >= expected ? "green" : amount > 0 ? "amber" : "rose";
+  const tip =
+    `${row.currency} ${money(amount)} received / ${money(expected)} expected` +
+    (receivedAt ? ` · received ${receivedAt}` : "");
   const body = (
-    <>
-      <span className={styles.dot} style={{ background: DOT[tone] }} />
-      <span>{money(row.currency, amount)}</span>
-      {expected > 0 && (
-        <span style={{ color: "#9ca3af", fontSize: 11 }}>
-          / {money(row.currency, expected)}
-        </span>
+    <div className={styles.stack} style={{ alignItems: "flex-end" }}>
+      <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+        <span className={styles.dot} style={{ background: DOT[tone] }} />
+        <span className={styles.amount}>{money(amount)}</span>
+        {expected > 0 && (
+          <span className={styles.amountExpected}>/ {money(expected)}</span>
+        )}
+      </span>
+      {receivedAt && amount > 0 && (
+        <span className={styles.sub}>recd {fmtShortDate(receivedAt)}</span>
       )}
-    </>
+    </div>
   );
-  if (!canEdit) return <div className={styles.cell}>{body}</div>;
+  if (!canEdit)
+    return (
+      <div className={styles.cell} title={tip}>
+        {body}
+      </div>
+    );
   return (
     <button
       type="button"
       className={`${styles.trigger} ${recent ? styles.recent : ""}`}
+      title={tip}
       onClick={onOpen}
+      onKeyDown={triggerKeyNav}
+      {...navProps(row.id, colKey)}
     >
       {body}
     </button>
@@ -956,12 +1270,16 @@ function PaymentTrigger({
 }
 
 function DelayTrigger({
+  row,
+  colKey,
   value,
   tone,
   canEdit,
   recent,
   onOpen,
 }: {
+  row: QuickUpdateRow;
+  colKey: string;
   value: number;
   tone: string;
   canEdit: boolean;
@@ -981,6 +1299,8 @@ function DelayTrigger({
       type="button"
       className={`${styles.trigger} ${recent ? styles.recent : ""}`}
       onClick={onOpen}
+      onKeyDown={triggerKeyNav}
+      {...navProps(row.id, colKey)}
     >
       {body}
     </button>

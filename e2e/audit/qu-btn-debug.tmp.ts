@@ -1,0 +1,10 @@
+import { chromium } from "@playwright/test";
+const browser = await chromium.launch();
+const ctx = await browser.newContext({ storageState: "e2e/.auth/operation.json" });
+const page = await ctx.newPage();
+const resp = await page.goto("http://localhost:3000/production/quick-update", { waitUntil: "networkidle" });
+console.log("HTTP", resp?.status(), page.url());
+console.log("buttons:", await page.locator("text=+ Add order").count());
+console.log("chips:", (await page.locator("button").allInnerTexts()).slice(0, 20).join(" | "));
+await page.screenshot({ path: "e2e/.runs/qu-btn-debug.png" });
+await browser.close();
