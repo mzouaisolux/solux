@@ -126,16 +126,21 @@ try {
     await ctx.close();
   }
 
-  // ================= B. Task list DRAFT — éditeur live =================
+  // ================= B. Task list — éditeur live =================
+  // Cible : une TL de TEST (les rounds E2E précédents ont laissé QCK/QKP/QOC/
+  // AFR), statut pré-terminal (technical édite à tout stade pré-terminal).
+  // Tout est REVERTÉ en fin de script.
   const { data: tls } = await sb
     .from("production_task_lists")
     .select("id, number, status, affair_id, solar_panel_tilt_angle, pole_drawing_tilt_verified, pole_drawing_tilt_verified_by, pole_drawing_tilt_verified_at, industrial_spec")
-    .eq("status", "draft")
+    .in("status", ["draft", "needs_revision", "under_validation", "validated"])
     .order("date", { ascending: false })
-    .limit(1);
-  const tl = (tls ?? [])[0] as any;
+    .limit(10);
+  const candidates = (tls ?? []) as any[];
+  const tl =
+    candidates.find((t) => /-(QCK|QKP|QOC|AFR)-/.test(t.number ?? "")) ?? candidates[0];
   if (!tl) {
-    skip("B. aucune task list en draft — éditeur live non testé (créer un draft puis relancer)");
+    skip("B. aucune task list pré-terminale — éditeur live non testé");
   } else {
     tlId = tl.id;
     tlPre = tl; // état d'origine pour le REVERT
@@ -151,11 +156,20 @@ try {
       (await page.locator("text=migration m159").count()) === 0 &&
         (await page.locator('[data-testid="save-industrial-file"]').count()) === 1
     );
+    // Settle anti-hydration avant TOUTE interaction (les clics pré-hydration
+    // sont des no-ops silencieux — cause des flakes des runs précédents).
+    await page.waitForTimeout(2000);
 
     // Save tilt 30° + packaging custom + spare part, en un seul Save.
+    // add-spare-part en boucle : on reclique tant que la ligne n'apparaît pas.
     await page.locator('button:has-text("30°")').first().click();
     await page.locator('label:has-text("Customized Client version")').click();
-    await page.locator('[data-testid="add-spare-part"]').click();
+    const addBtn = page.locator('[data-testid="add-spare-part"]');
+    for (let i = 0; i < 4; i++) {
+      await addBtn.click().catch(() => {});
+      await page.waitForTimeout(700);
+      if ((await page.locator('input[placeholder="e.g. Battery"]').count()) > 0) break;
+    }
     await page.locator('input[placeholder="e.g. Battery"]').fill("Battery");
     await page.locator('input[placeholder="Model / reference"]').fill("LFP-60-BENCH");
     await page.locator('[data-testid="save-industrial-file"]').click();
@@ -200,23 +214,62 @@ try {
     check("B. re-save = PAS de doublon d'event (transition-only)", n2 === n1, `avant=${n1} après=${n2}`);
 
     // Checkpoint : cocher, puis CHANGER le tilt → doit se RESET.
+    // Retry anti-course-d'hydration : le clic ne fait rien tant que React n'a
+    // pas attaché le onChange (même piège que le formulaire SR) — on reclique
+    // jusqu'à ce que la valeur PERSISTE après reload.
     const checkpoint = page.locator('[data-testid="tilt-checkpoint"]');
     await goto();
+    await page.waitForTimeout(1500);
     if (await checkpoint.isEnabled()) {
-      await checkpoint.check();
-      await page.waitForTimeout(2000);
-      await goto();
-      check("B. checkpoint cochable et persisté", await checkpoint.isChecked());
+      let persisted = false;
+      for (let i = 0; i < 4 && !persisted; i++) {
+        await checkpoint.click({ force: true }).catch(() => {});
+        await page.waitForTimeout(2500);
+        await goto();
+        await page.waitForTimeout(1500);
+        persisted = await checkpoint.isChecked();
+      }
+      check("B. checkpoint cochable et persisté", persisted);
       await page.locator('button:has-text("45°")').first().click();
       await page.locator('[data-testid="save-industrial-file"]').click();
       await page.waitForTimeout(2500);
       await goto();
+      await page.waitForTimeout(1500);
+      // N'a de sens que si le coche avait persisté — sinon faux positif.
       check(
         "B. ⚠ CHANGEMENT de tilt (30→45) → checkpoint RESET",
-        !(await checkpoint.isChecked())
+        persisted && !(await checkpoint.isChecked())
       );
     } else {
       skip("B. checkpoint non activable (capability TLM ?) — vérifier task_list.validate");
+    }
+
+    // ---- ATTAQUE DU GATE SERVEUR (le test roi) ----
+    // Ici : tilt 45° posé, checkpoint PENDING (reset ci-dessus). Sur une TL
+    // 'validated', « Mark production ready » passe par evaluateRelease côté
+    // serveur → il DOIT refuser et le statut ne DOIT PAS bouger. On juge sur
+    // la DB (l'UI peut afficher l'erreur de plusieurs façons).
+    if (tl.status === "validated" || tl.status === "under_validation") {
+      await goto();
+      const readyBtn = page
+        .locator('button:has-text("Mark production ready"), button:has-text("production ready")')
+        .first();
+      if ((await readyBtn.count()) > 0) {
+        await readyBtn.click().catch(() => {});
+        await page.waitForTimeout(3500);
+        const { data: after } = await sb
+          .from("production_task_lists")
+          .select("status")
+          .eq("id", tl.id)
+          .maybeSingle();
+        check(
+          "B. 🔒 GATE SERVEUR : release REFUSÉE avec checkpoint pending (statut inchangé)",
+          (after as any)?.status === tl.status,
+          `statut ${String((after as any)?.status)}`
+        );
+      } else {
+        skip("B. bouton Mark production ready introuvable — gate serveur non attaqué via UI");
+      }
     }
     await ctx.close();
   }
