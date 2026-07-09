@@ -38,6 +38,7 @@ import {
   AssignDocumentPanel,
   type AssignableDoc,
 } from "@/components/affairs/AssignDocumentPanel";
+import { SendButton } from "@/components/delivery/SendButton";
 
 const ACT = "text-[11px] font-medium text-neutral-500 hover:text-neutral-900";
 
@@ -164,7 +165,15 @@ function PreviewButton({ d }: { d: ProjectDocument }) {
   );
 }
 
-function DocRow({ d, canSetDocStatus }: { d: ProjectDocument; canSetDocStatus: boolean }) {
+function DocRow({
+  d,
+  canSetDocStatus,
+  affairId,
+}: {
+  d: ProjectDocument;
+  canSetDocStatus: boolean;
+  affairId: string;
+}) {
   const isExternal = d.source !== "record" && d.source !== "quotation";
   const meta = [
     d.kindLabel,
@@ -219,6 +228,15 @@ function DocRow({ d, canSetDocStatus }: { d: ProjectDocument; canSetDocStatus: b
           <a href={d.downloadHref} download={d.name} className={ACT}>
             Download
           </a>
+        )}
+        {d.downloadHref && (
+          <SendButton
+            projectDocuments={[d]}
+            affairId={affairId}
+            label="📧 Send"
+            className={ACT}
+            title="Prepare an email with this document attached"
+          />
         )}
         <ShareButton d={d} />
         {d.attachmentId && d.documentId && (
@@ -297,15 +315,30 @@ export function AffairDocumentsCard({
           Documents
           <span className="ml-1.5 font-normal text-neutral-400">{count}</span>
         </h3>
-        {documentId && (
-          <button
-            type="button"
-            onClick={() => setAdding((v) => !v)}
-            className="text-[11px] font-medium text-neutral-600 hover:text-neutral-900"
-          >
-            {adding ? "Close" : "+ Add file"}
-          </button>
-        )}
+        <div className="flex items-center gap-3">
+          {/* Send Documents — the generic assistant: pick any of the project's
+              documents + a recipient, one email. Only when something is
+              actually attachable. */}
+          {repo && repo.some((d) => d.downloadHref) && (
+            <SendButton
+              projectDocuments={repo}
+              affairId={affairId}
+              preselectedIds={[]}
+              label="📧 Send documents"
+              className="text-[11px] font-medium text-neutral-600 hover:text-neutral-900"
+              title="Prepare an email with any of this project's documents"
+            />
+          )}
+          {documentId && (
+            <button
+              type="button"
+              onClick={() => setAdding((v) => !v)}
+              className="text-[11px] font-medium text-neutral-600 hover:text-neutral-900"
+            >
+              {adding ? "Close" : "+ Add file"}
+            </button>
+          )}
+        </div>
       </div>
 
       {/* ------------------- SSoT repository rendering ------------------- */}
@@ -411,7 +444,12 @@ export function AffairDocumentsCard({
                       {!closed[f.key] && (
                         <ul className="divide-y divide-neutral-50 pb-1 pl-5">
                           {docs.map((d) => (
-                            <DocRow key={d.key} d={d} canSetDocStatus={canSetDocStatus} />
+                            <DocRow
+                            key={d.key}
+                            d={d}
+                            canSetDocStatus={canSetDocStatus}
+                            affairId={affairId}
+                          />
                           ))}
                         </ul>
                       )}

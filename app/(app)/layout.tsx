@@ -5,6 +5,8 @@ import { getEffectiveRole } from "@/lib/auth";
 import { Nav } from "@/components/Nav";
 import NoRoleNotice from "@/components/NoRoleNotice";
 import { Toaster } from "@/components/feedback/Toaster";
+import { DocumentTray } from "@/components/delivery/DocumentTray";
+import { SendModalHost } from "@/components/delivery/SendModalHost";
 import { redirect } from "next/navigation";
 import { getLocale } from "@/lib/i18n/server";
 import { I18nProvider } from "@/components/i18n/I18nProvider";
@@ -65,6 +67,11 @@ export default async function AppLayout({
       <Suspense fallback={null}>
         <Toaster />
       </Suspense>
+      {/* Document Delivery System — the ONE generic send modal (opened from
+          anywhere via openSendModal) + the floating tray of documents prepared
+          for email (downloaded, ready to attach). Both persist across nav. */}
+      <SendModalHost />
+      <DocumentTray />
     </div>
     </I18nProvider>
   );

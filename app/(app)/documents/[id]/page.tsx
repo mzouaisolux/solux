@@ -2,6 +2,9 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import GeneratePdfButton from "./GeneratePdfButton";
+import { SendButton } from "@/components/delivery/SendButton";
+import { QuotationSendMenuActions } from "@/components/delivery/QuotationSendMenuActions";
+import { buildPdfFilename } from "@/lib/pdf-filename";
 import { StatusBadge } from "@/components/StatusBadge";
 import { loadDocumentProfitability } from "@/lib/profitability-server";
 import { ProfitabilityChip } from "@/components/profitability/ProfitabilityChip";
@@ -506,6 +509,16 @@ export default async function DocumentViewPage({
       .createSignedUrl(doc.pdf_url, 60 * 60);
     signedPdfUrl = signed?.signedUrl ?? null;
   }
+
+  // Canonical PDF filename — shared by the Send action (header + "…" menu).
+  const pdfFilename = buildPdfFilename({
+    kind: pdfData.type,
+    number: doc.number,
+    client: (client as any)?.company_name ?? null,
+    affair: (doc as any).affair_name ?? null,
+    version: Number((doc as any).version ?? 1),
+  });
+  const quotationKindLabel = doc.type === "proforma" ? "Proforma" : "Quotation";
 
   // Current user — needed to drive the reminders UI (the panel + badge
   // are scoped to "my" reminders since reminders are personal per
@@ -1252,32 +1265,51 @@ export default async function DocumentViewPage({
           >
             ← Back to clients
           </Link>
-          {signedPdfUrl ? (
-            <div className="flex items-center gap-3">
-              <a
-                href={signedPdfUrl}
-                target="_blank"
-                rel="noreferrer"
-                className="rounded border border-neutral-200 px-4 py-2 text-sm text-neutral-700 hover:bg-neutral-50"
-              >
-                Download PDF
-              </a>
+          <div className="flex flex-wrap items-center justify-end gap-3">
+            {signedPdfUrl ? (
+              <>
+                <a
+                  href={signedPdfUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="rounded border border-neutral-200 px-4 py-2 text-sm text-neutral-700 hover:bg-neutral-50"
+                >
+                  Download PDF
+                </a>
+                <GeneratePdfButton
+                  documentId={doc.id}
+                  data={pdfData}
+                  label="Regenerate"
+                  affair={(doc as any).affair_name ?? null}
+                  version={Number((doc as any).version ?? 1)}
+                />
+              </>
+            ) : (
               <GeneratePdfButton
                 documentId={doc.id}
                 data={pdfData}
-                label="Regenerate"
                 affair={(doc as any).affair_name ?? null}
                 version={Number((doc as any).version ?? 1)}
               />
-            </div>
-          ) : (
-            <GeneratePdfButton
-              documentId={doc.id}
-              data={pdfData}
-              affair={(doc as any).affair_name ?? null}
-              version={Number((doc as any).version ?? 1)}
-            />
-          )}
+            )}
+            {/* Send by email — the normal step after generating a quotation.
+                Opens a compose modal (CRM recipient + PDF attached). Hidden for
+                a cancelled quote, which must never be sent. */}
+            {doc.status !== "cancelled" && (
+              <SendButton
+                quotation={{
+                  pdfData,
+                  filename: pdfFilename,
+                  quotationId: doc.id,
+                  status: doc.status,
+                  kindLabel: quotationKindLabel,
+                }}
+                clientId={(doc as any).client_id ?? null}
+                clientEmail={(client as any)?.email ?? null}
+                affairName={(doc as any).affair_name ?? null}
+              />
+            )}
+          </div>
 
           {/* Destructive actions — discreet 3-dot menu. Archive is the
               safe fallback (reversible); Delete is permanent and only
@@ -1292,6 +1324,21 @@ export default async function DocumentViewPage({
             >
               Edit → new version (revise)
             </Link>
+            {/* Document delivery actions — grouped with the rest. Send opens
+                the global modal (survives this menu closing). */}
+            {doc.status !== "cancelled" && (
+              <QuotationSendMenuActions
+                pdfData={pdfData}
+                filename={pdfFilename}
+                quotationId={doc.id}
+                status={doc.status}
+                kindLabel={quotationKindLabel}
+                clientId={(doc as any).client_id ?? null}
+                clientEmail={(client as any)?.email ?? null}
+                affairName={(doc as any).affair_name ?? null}
+                downloadUrl={signedPdfUrl}
+              />
+            )}
             {canArchiveQuotation &&
                 (isArchived ? (
                   <ContextMenuActionItem
