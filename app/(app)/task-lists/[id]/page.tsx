@@ -12,11 +12,12 @@ import { ProductSummaryCard } from "@/components/documents/ProductSummaryCard";
 import { AttachmentsPanel } from "@/components/attachments/AttachmentsPanel";
 import { StickerRequirementsEditor } from "@/components/documents/StickerRequirementsEditor";
 import { RiskFlagsEditor } from "@/components/documents/RiskFlagsEditor";
+import { IndustrialFileEditor } from "@/components/documents/IndustrialFileEditor";
 import {
-  IndustrialFileEditor,
-  SparePartModelDatalist,
-  type ProductOption,
-} from "@/components/documents/IndustrialFileEditor";
+  deriveOrderedFamilies,
+  normalizeDictionaryItem,
+  type DictionaryItem,
+} from "@/lib/industrial-dictionary";
 import ProductLightingSetupForm from "@/components/lighting/ProductLightingSetupForm";
 import {
   normalizeFactoryExtras,
@@ -181,19 +182,34 @@ export default async function TaskListDetailPage({
   const tiltCheckpointPending =
     industrial != null && industrial.tilt != null && !industrial.verified;
 
-  // Catalog models for the spare-parts picker (name + sku datalist). Small,
-  // ordered, only fetched when the industrial file is live.
-  let productOptions: ProductOption[] = [];
+  // m160 — PRODUCT DICTIONARY for the product-aware spare parts. Try the
+  // full m160 shape first; pre-migration (42703) fall back to the m012 base
+  // columns — the dictionary still assists, just without compatibility
+  // scoping (every item counts as generic until m160 lands).
+  let dictionary: DictionaryItem[] = [];
   if (industrial) {
-    const { data: prods } = await supabase
-      .from("products")
-      .select("id, name, sku")
-      .order("name");
-    productOptions = ((prods ?? []) as any[]).map((p) => ({
-      id: p.id,
-      name: p.name,
-      sku: p.sku ?? null,
-    }));
+    const M160_COLS =
+      "id, commercial_name, commercial_name_fr, internal_reference, factory_name_cn, erp_code, category, notes, active, compatible_category_ids, compatible_product_ids";
+    const BASE_COLS = "id, commercial_name, internal_reference, category, notes, active";
+    let dict: any[] | null = null;
+    const full = await supabase
+      .from("component_mappings")
+      .select(M160_COLS)
+      .eq("active", true)
+      .order("commercial_name");
+    if (!full.error) {
+      dict = full.data as any[] | null;
+    } else {
+      const base = await supabase
+        .from("component_mappings")
+        .select(BASE_COLS)
+        .eq("active", true)
+        .order("commercial_name");
+      dict = base.data as any[] | null;
+    }
+    dictionary = ((dict ?? []) as any[])
+      .map(normalizeDictionaryItem)
+      .filter((d): d is DictionaryItem => d != null);
   }
 
   // ---- Config fetch MUST be scoped to this task list's categories ----------
@@ -225,6 +241,19 @@ export default async function TaskListDetailPage({
       .in("id", lineCategoryIds);
     for (const c of (cats ?? []) as any[]) categoryNameById.set(c.id, c.name);
   }
+
+  // m160 — product families present on THIS order (drive the product-aware
+  // spare-parts selector: only compatible dictionary items are offered).
+  const orderedFamilies = deriveOrderedFamilies(
+    ((lines ?? []) as any[]).map((l) => {
+      const catId = l.category_id ?? l.products?.category_id ?? null;
+      return {
+        categoryId: catId,
+        productId: l.product_id ?? null,
+        familyLabel: catId ? categoryNameById.get(catId) ?? null : null,
+      };
+    })
+  );
 
   let fields: any[] | null = [];
   let opts: any[] | null = [];
@@ -1096,7 +1125,6 @@ export default async function TaskListDetailPage({
       </div>
       {industrial ? (
         <div className="prod-shell">
-          <SparePartModelDatalist products={productOptions} />
           <IndustrialFileEditor
             taskListId={task.id}
             documentId={task.quotation_id ?? null}
@@ -1106,7 +1134,8 @@ export default async function TaskListDetailPage({
             initialSpec={industrial.spec}
             editable={salesCanEdit}
             canVerify={technical && canValidateTaskList}
-            products={productOptions}
+            families={orderedFamilies}
+            dictionary={dictionary}
           />
         </div>
       ) : (

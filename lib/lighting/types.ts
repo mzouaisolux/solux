@@ -116,6 +116,8 @@ export type LightingExtraction = {
    * field is still empty — manual override always wins).
    */
   tilt_angle: number | null;
+  /** m160 — page of the study where the tilt was read (1-based), when known. */
+  tilt_source_page: number | null;
   confidence: Record<string, number>;
   model: string;
 };

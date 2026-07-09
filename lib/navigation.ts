@@ -332,10 +332,10 @@ export const NAVIGATION: NavCategory[] = [
             description: "Structure & config fields",
           },
           {
-            label: "Component mappings",
+            label: "Industrial dictionary",
             href: "/admin/components",
             visibility: { kind: "technical" },
-            description: "Commercial → internal references",
+            description: "Commercial ↔ factory references, ERP codes",
           },
           {
             label: "Templates",

@@ -1,5 +1,5 @@
 import { getEffectiveRole } from "@/lib/auth";
-import { isAdminLike } from "@/lib/types";
+import { isAdminLike, isTechnicalRole } from "@/lib/types";
 import AdminTabs, { type AdminTab } from "@/components/AdminTabs";
 import { hasUiCapability } from "@/lib/permissions";
 import AccessDenied from "@/components/AccessDenied";
@@ -29,7 +29,16 @@ export default async function AdminLayout({
   const canManageUsers = await hasUiCapability("admin.manage_users");
   const canSeeDiagnostics = await hasUiCapability("admin.diagnostics");
 
-  const mayEnter = adminLike || canManageUsers || canSeeDiagnostics;
+  // m160 — technical roles (TLM / Operations) maintain the Industrial
+  // dictionary (/admin/components, self-gated on isTechnicalRole); the nav
+  // already shows it to them. Letting them INTO the section is safe: every
+  // other master-data page self-gates on isAdminLike / capability and shows
+  // its own <AccessDenied/> (the design rule above).
+  const mayEnter =
+    adminLike ||
+    isTechnicalRole(effectiveRole) ||
+    canManageUsers ||
+    canSeeDiagnostics;
   if (!mayEnter) {
     // Backstop only — every /admin page also self-gates. This fires when a
     // user has no admin-section access at all; capability-grantable pages
@@ -47,7 +56,7 @@ export default async function AdminLayout({
     // Catalog master data grouped first: Products, Categories, Components.
     { href: "/admin/products", label: "Products" },
     { href: "/admin/categories", label: "Categories" },
-    { href: "/admin/components", label: "Components" },
+    { href: "/admin/components", label: "Industrial dictionary" },
     { href: "/admin/pricing", label: "Pricing" },
     { href: "/admin/sales-conditions", label: "Sales conditions" },
     { href: "/admin/banks", label: "Bank accounts" },

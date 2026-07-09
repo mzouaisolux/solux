@@ -79,6 +79,11 @@ const LIGHTING_TOOL = {
         description:
           "Solar panel TILT ANGLE in degrees, if the study states it (usually labelled 'Tilt Angle', 'Panel Tilt', 'PV Tilt', 'Tilt', 'inclinaison' or equivalent — e.g. 0, 10, 15, 20, 30, 45). Plain number of degrees, no unit. null when not stated.",
       },
+      tilt_source_page: {
+        type: ["number", "null"],
+        description:
+          "The 1-based PAGE NUMBER of the document where the tilt angle is printed, when you can tell (page breaks, printed page numbers). null when unknown.",
+      },
       confidence: {
         type: "object",
         description:
@@ -208,6 +213,7 @@ export async function extractLightingFromEnergyStudy(
     operating_hours: nullableNum(out.operating_hours),
     lighting_program: normalizeLightingProgram(out.lighting_program),
     tilt_angle: nullableNum(out.tilt_angle),
+    tilt_source_page: nullableNum(out.tilt_source_page),
     confidence,
     model,
   };

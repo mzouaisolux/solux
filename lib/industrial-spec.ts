@@ -164,6 +164,19 @@ export type SparePartRow = {
   factory_name: string | null;
   customer_name: string | null;
   factory_notes: string | null;
+  // -- m160 Product Dictionary (product-aware spare parts) — all optional so
+  //    m159 blobs normalize unchanged. Values are SNAPSHOTS of the dictionary
+  //    pick (auditable even if the dictionary later changes), overridable.
+  /** Ordered product family this part belongs to (product_categories id). */
+  family_category_id?: string | null;
+  /** Display label of that family at pick time. */
+  family_label?: string | null;
+  /** The dictionary row picked (component_mappings id) — null = free text. */
+  dictionary_item_id?: string | null;
+  /** Official Chinese factory terminology snapshot. */
+  factory_name_cn?: string | null;
+  /** ERP code snapshot. */
+  erp_code?: string | null;
 };
 
 // ---------------------------------------------------------------------------
@@ -286,6 +299,12 @@ export function normalizeIndustrialSpec(raw: unknown): IndustrialSpec {
       factory_name: cleanStr(r.factory_name),
       customer_name: cleanStr(r.customer_name),
       factory_notes: cleanStr(r.factory_notes),
+      // m160 — dictionary snapshot fields (absent on m159 blobs → null).
+      family_category_id: cleanStr(r.family_category_id),
+      family_label: cleanStr(r.family_label),
+      dictionary_item_id: cleanStr(r.dictionary_item_id),
+      factory_name_cn: cleanStr(r.factory_name_cn),
+      erp_code: cleanStr(r.erp_code),
     }))
     // A row with neither a part name nor a model is noise — drop it.
     .filter((r) => r.part !== "" || r.model != null);

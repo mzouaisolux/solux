@@ -133,15 +133,16 @@ test("Task List Manager with factory_mapping.access sees Factory mapping", () =>
   // Component mappings moved to the Catalog category (still technical-gated):
   // it must NOT remain under Factory configuration, and it MUST appear in Catalog.
   assert.ok(
-    !labels.includes("Component mappings"),
-    "Component mappings no longer lives under Factory configuration"
+    !labels.includes("Industrial dictionary"),
+    "Industrial dictionary no longer lives under Factory configuration"
   );
   const catalog = cats.find((c) => c.id === "catalog");
-  assert.ok(catalog, "Catalog category shows for a technical TLM (Component mappings)");
+  assert.ok(catalog, "Catalog category shows for a technical TLM (Industrial dictionary)");
   const catalogLabels = catalog!.groups.flatMap((g) => g.items.map((i) => i.label));
+  // m160 — the entry was renamed "Industrial dictionary" (Product Dictionary).
   assert.ok(
-    catalogLabels.includes("Component mappings"),
-    "Component mappings now lives under Catalog"
+    catalogLabels.includes("Industrial dictionary"),
+    "Industrial dictionary now lives under Catalog"
   );
 });
 

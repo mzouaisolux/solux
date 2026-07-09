@@ -1297,6 +1297,19 @@ export default function ProductionDossierPDF({
                           </Text>
                           <View style={{ flex: 2, paddingLeft: 8 }}>
                             <Text style={s.tCell}>{p.factory_name ?? "—"}</Text>
+                            {/* m160 — official Chinese factory terminology +
+                                ERP code from the Product Dictionary snapshot:
+                                what the factory actually reads. */}
+                            {p.factory_name_cn && (
+                              <Text style={s.tCell}>{p.factory_name_cn}</Text>
+                            )}
+                            {p.erp_code && (
+                              <Text
+                                style={[s.tCell, { fontSize: 7, color: COLORS.muted }]}
+                              >
+                                ERP: {p.erp_code}
+                              </Text>
+                            )}
                             {p.factory_notes && (
                               <Text
                                 style={[s.tCell, { fontSize: 7, color: COLORS.muted }]}

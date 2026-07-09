@@ -1,11 +1,12 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import {
   updateIndustrialFile,
   setPoleDrawingTiltVerified,
 } from "@/app/(app)/task-lists/[id]/actions";
+import { aiFindTiltAction } from "@/app/(app)/lighting/actions";
 import { InlineLogoUpload } from "@/components/attachments/InlineLogoUpload";
 import {
   TILT_ANGLE_PRESETS,
@@ -17,15 +18,23 @@ import {
   type IndustrialSpec,
   type SparePartRow,
 } from "@/lib/industrial-spec";
-
-export type ProductOption = { id: string; name: string; sku: string | null };
+import {
+  itemsForFamily,
+  groupItemsByType,
+  factoryFillFromItem,
+  type DictionaryItem,
+  type OrderedFamily,
+} from "@/lib/industrial-dictionary";
 
 /**
- * IndustrialFileEditor (m159) — the "Industrial production file" section of a
- * task list: solar-panel tilt angle (+ pole-drawing checkpoint), pole
- * accessories, packaging version, user manuals and the structured spare-parts
- * table. One Save persists the whole file (tilt + spec) through
- * updateIndustrialFile; the TLM checkpoint saves instantly on toggle.
+ * IndustrialFileEditor (m159/m160) — the "Industrial production file" of a
+ * task list: solar-panel tilt angle (+ AI Find from the Energy Study + the
+ * pole-drawing checkpoint), pole accessories, packaging version, user
+ * manuals and PRODUCT-AWARE free spare parts driven by the Product
+ * Dictionary (component_mappings): the selector only offers items
+ * compatible with the ordered families and auto-fills the official factory
+ * terminology (reference + Chinese + ERP code) — everything overridable.
+ * One Save persists the whole file; the TLM checkpoint saves on toggle.
  */
 export function IndustrialFileEditor({
   taskListId,
@@ -36,7 +45,8 @@ export function IndustrialFileEditor({
   initialSpec,
   editable,
   canVerify,
-  products,
+  families,
+  dictionary,
 }: {
   taskListId: string;
   /** Proforma id of the command — anchors inline logo/artwork uploads. */
@@ -49,8 +59,10 @@ export function IndustrialFileEditor({
   editable: boolean;
   /** task_list.validate holders — may confirm the pole-drawing checkpoint. */
   canVerify: boolean;
-  /** Catalog products for the spare-part model picker (datalist). */
-  products: ProductOption[];
+  /** Product families present on THIS order (derived from the lines). */
+  families: OrderedFamily[];
+  /** Product Dictionary rows (component_mappings, active only). */
+  dictionary: DictionaryItem[];
 }) {
   const router = useRouter();
   const [spec, setSpec] = useState<IndustrialSpec>(() =>
@@ -68,8 +80,57 @@ export function IndustrialFileEditor({
 
   const [saving, startTransition] = useTransition();
   const [verifying, startVerify] = useTransition();
+  const [aiFinding, startAiFind] = useTransition();
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [aiResult, setAiResult] = useState<
+    | { kind: "found"; text: string }
+    | { kind: "empty"; text: string }
+    | { kind: "error"; text: string }
+    | null
+  >(null);
+
+  const setTiltFromNumber = (n: number) => {
+    if (TILT_ANGLE_PRESETS.some((p) => p === n)) {
+      setTiltChoice(String(n));
+      setTiltCustom("");
+    } else {
+      setTiltChoice("custom");
+      setTiltCustom(String(n));
+    }
+  };
+
+  const runAiFind = () => {
+    setError(null);
+    setAiResult(null);
+    const fd = new FormData();
+    fd.set("task_list_id", taskListId);
+    startAiFind(async () => {
+      const res = await aiFindTiltAction(fd);
+      if (!res.ok) {
+        setAiResult({ kind: "error", text: res.error });
+        return;
+      }
+      if (!res.found) {
+        setAiResult({
+          kind: "empty",
+          text: `No tilt angle found${res.sourceName ? ` in ${res.sourceName}` : ""}. Please enter it manually.`,
+        });
+        return;
+      }
+      setTiltFromNumber(res.tilt);
+      const bits = [
+        `✓ AI found: ${res.tilt}°`,
+        res.sourceName ? `Source: ${res.sourceName}${res.sourcePage ? ` — page ${res.sourcePage}` : ""}` : null,
+        res.confidence != null ? `Confidence: ${Math.round(res.confidence * 100)}%` : null,
+      ].filter(Boolean);
+      setAiResult({
+        kind: "found",
+        text: `${bits.join(" · ")} — applied to the task list (override anytime).`,
+      });
+      router.refresh();
+    });
+  };
 
   const save = () => {
     setError(null);
@@ -107,7 +168,10 @@ export function IndustrialFileEditor({
     });
   };
 
-  const setAccessory = (idx: number, patch: Partial<IndustrialSpec["pole_accessories"]["items"][number]>) =>
+  const setAccessory = (
+    idx: number,
+    patch: Partial<IndustrialSpec["pole_accessories"]["items"][number]>
+  ) =>
     setSpec((s) => ({
       ...s,
       pole_accessories: {
@@ -138,6 +202,11 @@ export function IndustrialFileEditor({
           factory_name: null,
           customer_name: null,
           factory_notes: null,
+          family_category_id: families[0]?.categoryId ?? null,
+          family_label: families[0]?.label ?? null,
+          dictionary_item_id: null,
+          factory_name_cn: null,
+          erp_code: null,
         },
       ],
     }));
@@ -174,8 +243,8 @@ export function IndustrialFileEditor({
             <div className="eyebrow">Solar panel tilt angle</div>
             <p className="text-xs text-neutral-500 mt-0.5 max-w-2xl">
               Determines the pole drawing and the factory production
-              instructions. Seeded from the Service Request, auto-filled from
-              the Energy Study by the AI assist — a manual value always wins.
+              instructions. Seeded from the Service Request — or let the AI
+              read it straight from the uploaded Energy Study.
             </p>
           </div>
           <span
@@ -185,6 +254,37 @@ export function IndustrialFileEditor({
             {tiltNumber != null ? `${tiltNumber}°` : "—"}
           </span>
         </div>
+
+        {/* AI Find — explicit assist; the found value is applied and stays
+            fully overridable via the presets / custom input below. */}
+        {editable && (
+          <div className="mt-2">
+            <button
+              type="button"
+              onClick={runAiFind}
+              disabled={aiFinding}
+              data-testid="ai-find-tilt"
+              className="inline-flex items-center gap-1.5 rounded-md border border-solux/40 bg-solux/5 px-3 py-1.5 text-xs font-medium text-solux hover:bg-solux/10 disabled:opacity-60"
+            >
+              {aiFinding ? "Reading the Energy Study…" : "✨ AI Find from Energy Study"}
+            </button>
+          </div>
+        )}
+        {aiResult && (
+          <div
+            data-testid="ai-find-result"
+            className={`mt-2 rounded-md border px-3 py-2 text-xs ${
+              aiResult.kind === "found"
+                ? "border-emerald-200 bg-emerald-50 text-emerald-900"
+                : aiResult.kind === "empty"
+                  ? "border-amber-300 bg-amber-50 text-amber-900"
+                  : "border-rose-200 bg-rose-50 text-rose-700"
+            }`}
+          >
+            {aiResult.text}
+          </div>
+        )}
+
         <div className="mt-2 flex flex-wrap items-center gap-1.5">
           {TILT_ANGLE_PRESETS.map((a) => {
             const active = tiltChoice === String(a);
@@ -513,57 +613,52 @@ export function IndustrialFileEditor({
         />
       </div>
 
-      {/* ---------------- E. Free spare parts ---------------- */}
+      {/* ---------------- E. Free spare parts (product-aware, m160) -------- */}
       <div>
         <div className="flex items-start justify-between gap-3 flex-wrap">
           <div>
             <div className="eyebrow">Free spare parts</div>
             <p className="text-xs text-neutral-500 mt-0.5 max-w-2xl">
-              Structured list — production packs it, After-Sales tracks it. Use
-              the factory naming fields when a factory calls the same part
-              differently.
+              Product-aware: pick the ordered family, then a part from the
+              Product Dictionary — the official factory reference, Chinese
+              terminology and ERP code fill in automatically (override
+              anytime). Production packs it, After-Sales tracks it.
             </p>
           </div>
           <span className="text-[11px] text-neutral-400 tabular-nums shrink-0">
             {spec.spare_parts.length} part{spec.spare_parts.length === 1 ? "" : "s"}
           </span>
         </div>
-        {spec.spare_parts.length > 0 && (
-          <div className="mt-2 overflow-x-auto rounded-md border border-neutral-200">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="bg-neutral-50 text-left text-[11px] uppercase tracking-wider text-neutral-500">
-                  <th className="px-2 py-1.5 font-semibold">Spare part</th>
-                  <th className="px-2 py-1.5 font-semibold">Model</th>
-                  <th className="px-2 py-1.5 font-semibold w-20">Qty</th>
-                  <th className="px-2 py-1.5 font-semibold">Notes</th>
-                  {editable && <th className="w-8" />}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-neutral-100">
-                {spec.spare_parts.map((r, idx) => (
-                  <SparePartRowEditor
-                    key={idx}
-                    row={r}
-                    editable={editable}
-                    products={products}
-                    onChange={(patch) => setPart(idx, patch)}
-                    onRemove={() => removePart(idx)}
-                  />
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
+
+        <div className="mt-2 space-y-2">
+          {spec.spare_parts.map((r, idx) => (
+            <SparePartCard
+              key={idx}
+              row={r}
+              families={families}
+              dictionary={dictionary}
+              editable={editable}
+              onChange={(patch) => setPart(idx, patch)}
+              onRemove={() => removePart(idx)}
+            />
+          ))}
+        </div>
+
         {editable && (
           <button
             type="button"
             onClick={addPart}
-            className="mt-2 text-[11px] text-neutral-600 hover:text-neutral-900 underline underline-offset-2"
             data-testid="add-spare-part"
+            className="mt-2 inline-flex items-center gap-1.5 rounded-md border border-neutral-300 bg-white px-3 py-1.5 text-xs font-medium text-neutral-700 hover:bg-neutral-50"
           >
             + Add spare part
           </button>
+        )}
+        {dictionary.length === 0 && editable && (
+          <p className="mt-1 text-[11px] text-neutral-400">
+            The Product Dictionary is empty — fill it in Admin → Industrial
+            dictionary to get compatible-part suggestions here.
+          </p>
         )}
       </div>
 
@@ -587,31 +682,148 @@ export function IndustrialFileEditor({
   );
 }
 
-/** One spare-part row + its expandable factory-naming sub-row. */
-function SparePartRowEditor({
+const CUSTOM_PART = "__custom__";
+
+/**
+ * One spare part as a full card: family → dictionary part → auto-filled
+ * factory naming, with quantity/notes. The dictionary pick is a SNAPSHOT
+ * (kept even if the dictionary changes later) and every field stays
+ * editable — the dictionary assists, never dictates.
+ */
+function SparePartCard({
   row,
+  families,
+  dictionary,
   editable,
-  products,
   onChange,
   onRemove,
 }: {
   row: SparePartRow;
+  families: OrderedFamily[];
+  dictionary: DictionaryItem[];
   editable: boolean;
-  products: ProductOption[];
   onChange: (patch: Partial<SparePartRow>) => void;
   onRemove: () => void;
 }) {
-  const [namingOpen, setNamingOpen] = useState(
-    !!(row.factory_name || row.customer_name || row.factory_notes)
+  const family: OrderedFamily = useMemo(() => {
+    const found = families.find((f) => f.categoryId === (row.family_category_id ?? null));
+    return (
+      found ?? {
+        categoryId: row.family_category_id ?? null,
+        label: row.family_label ?? "Other / general",
+        productIds: [],
+      }
+    );
+  }, [families, row.family_category_id, row.family_label]);
+
+  const familyItems = useMemo(
+    () => groupItemsByType(itemsForFamily(dictionary, family)),
+    [dictionary, family]
   );
+
   const cellInput =
     "w-full rounded border border-neutral-200 px-2 py-1 text-sm disabled:bg-neutral-50";
-  const hasNaming = !!(row.factory_name || row.customer_name || row.factory_notes);
+  const lbl = "text-[10px] uppercase tracking-wider text-neutral-500";
+
+  const pickItem = (id: string) => {
+    if (id === CUSTOM_PART || id === "") {
+      onChange({ dictionary_item_id: null });
+      return;
+    }
+    const it = dictionary.find((d) => d.id === id);
+    if (!it) return;
+    const fill = factoryFillFromItem(it);
+    onChange({
+      dictionary_item_id: it.id,
+      part: fill.part,
+      model: fill.model,
+      factory_name: fill.factory_name,
+      factory_name_cn: fill.factory_name_cn,
+      erp_code: fill.erp_code,
+    });
+  };
 
   return (
-    <>
-      <tr>
-        <td className="px-2 py-1.5 min-w-[140px]">
+    <div className="rounded-md border border-neutral-200 bg-white p-3" data-testid="spare-part-card">
+      <div className="grid grid-cols-1 sm:grid-cols-12 gap-2">
+        <label className="block sm:col-span-4">
+          <span className={lbl}>Product family</span>
+          <select
+            value={row.family_category_id ?? ""}
+            disabled={!editable}
+            onChange={(e) => {
+              const fam =
+                families.find((f) => (f.categoryId ?? "") === e.target.value) ?? null;
+              onChange({
+                family_category_id: fam?.categoryId ?? null,
+                family_label: fam?.label ?? null,
+                // Family changed → the previous dictionary pick may no longer
+                // be compatible; drop the anchor, keep the typed values.
+                dictionary_item_id: null,
+              });
+            }}
+            className={cellInput}
+          >
+            {families.map((f) => (
+              <option key={f.categoryId ?? "other"} value={f.categoryId ?? ""}>
+                {f.label}
+              </option>
+            ))}
+            {!families.some((f) => f.categoryId == null) && (
+              <option value="">Other / general</option>
+            )}
+          </select>
+        </label>
+        <label className="block sm:col-span-5">
+          <span className={lbl}>Part (from dictionary)</span>
+          <select
+            value={row.dictionary_item_id ?? CUSTOM_PART}
+            disabled={!editable}
+            onChange={(e) => pickItem(e.target.value)}
+            className={cellInput}
+            data-testid="spare-part-pick"
+          >
+            <option value={CUSTOM_PART}>Custom part…</option>
+            {familyItems.map((g) => (
+              <optgroup key={g.type} label={g.type}>
+                {g.items.map((it) => (
+                  <option key={it.id} value={it.id}>
+                    {it.commercial_name}
+                    {it.internal_reference ? ` — ${it.internal_reference}` : ""}
+                  </option>
+                ))}
+              </optgroup>
+            ))}
+          </select>
+        </label>
+        <label className="block sm:col-span-2">
+          <span className={lbl}>Quantity</span>
+          <input
+            type="number"
+            min={0}
+            value={row.quantity}
+            disabled={!editable}
+            onChange={(e) =>
+              onChange({ quantity: Math.max(0, Math.round(Number(e.target.value) || 0)) })
+            }
+            className={`${cellInput} text-right tabular-nums`}
+          />
+        </label>
+        {editable && (
+          <div className="sm:col-span-1 flex items-end justify-end">
+            <button
+              type="button"
+              onClick={onRemove}
+              className="text-neutral-400 hover:text-rose-600 text-xs px-1 pb-1.5"
+              aria-label="Remove spare part"
+            >
+              ✕
+            </button>
+          </div>
+        )}
+
+        <label className="block sm:col-span-4">
+          <span className={lbl}>Part name</span>
           <input
             value={row.part}
             disabled={!editable}
@@ -619,121 +831,80 @@ function SparePartRowEditor({
             onChange={(e) => onChange({ part: e.target.value })}
             className={cellInput}
           />
-        </td>
-        <td className="px-2 py-1.5 min-w-[160px]">
-          {/* datalist = free text OR a catalog model pick */}
+        </label>
+        <label className="block sm:col-span-4">
+          <span className={lbl}>Model / reference</span>
           <input
             value={row.model ?? ""}
             disabled={!editable}
-            placeholder="Model / reference"
-            list="industrial-spare-part-models"
-            onChange={(e) => {
-              const v = e.target.value;
-              const match = products.find(
-                (pr) => pr.name === v || (pr.sku != null && pr.sku === v)
-              );
-              onChange({ model: v || null, product_id: match?.id ?? null });
-            }}
+            placeholder="e.g. LFP25-65AH-V6"
+            onChange={(e) => onChange({ model: e.target.value || null })}
+            className={`${cellInput} font-mono text-[13px]`}
+          />
+        </label>
+        <label className="block sm:col-span-4">
+          <span className={lbl}>ERP code</span>
+          <input
+            value={row.erp_code ?? ""}
+            disabled={!editable}
+            placeholder="ERP code"
+            onChange={(e) => onChange({ erp_code: e.target.value || null })}
+            className={`${cellInput} font-mono text-[13px]`}
+          />
+        </label>
+
+        <label className="block sm:col-span-4">
+          <span className={lbl}>Factory name</span>
+          <input
+            value={row.factory_name ?? ""}
+            disabled={!editable}
+            placeholder="Official factory reference"
+            onChange={(e) => onChange({ factory_name: e.target.value || null })}
             className={cellInput}
           />
-        </td>
-        <td className="px-2 py-1.5">
+        </label>
+        <label className="block sm:col-span-4">
+          <span className={lbl}>Factory name (中文)</span>
           <input
-            type="number"
-            min={0}
-            value={row.quantity}
+            value={row.factory_name_cn ?? ""}
             disabled={!editable}
-            onChange={(e) => onChange({ quantity: Math.max(0, Math.round(Number(e.target.value) || 0)) })}
-            className={`${cellInput} text-right tabular-nums`}
+            placeholder="e.g. 25.6V 65Ah 磷酸铁锂电池"
+            onChange={(e) => onChange({ factory_name_cn: e.target.value || null })}
+            className={cellInput}
           />
-        </td>
-        <td className="px-2 py-1.5 min-w-[160px]">
-          <div className="flex items-center gap-1.5">
-            <input
-              value={row.notes ?? ""}
-              disabled={!editable}
-              placeholder="Notes"
-              onChange={(e) => onChange({ notes: e.target.value || null })}
-              className={cellInput}
-            />
-            <button
-              type="button"
-              onClick={() => setNamingOpen((o) => !o)}
-              className={`shrink-0 rounded border px-1.5 py-0.5 text-[10px] ${
-                hasNaming
-                  ? "border-solux/40 bg-solux/10 text-solux"
-                  : "border-neutral-200 text-neutral-500 hover:text-neutral-800"
-              }`}
-              title="Internal naming / factory notes"
-            >
-              Factory naming {namingOpen ? "▴" : "▾"}
-            </button>
-          </div>
-        </td>
-        {editable && (
-          <td className="px-1 py-1.5 text-center">
-            <button
-              type="button"
-              onClick={onRemove}
-              className="text-neutral-400 hover:text-rose-600 text-xs"
-              aria-label="Remove spare part"
-            >
-              ✕
-            </button>
-          </td>
-        )}
-      </tr>
-      {namingOpen && (
-        <tr className="bg-neutral-50/60">
-          <td colSpan={editable ? 5 : 4} className="px-2 py-2">
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-              <label className="block">
-                <span className="text-[10px] uppercase tracking-wider text-neutral-500">Factory name</span>
-                <input
-                  value={row.factory_name ?? ""}
-                  disabled={!editable}
-                  placeholder="e.g. MPPT Controller V6"
-                  onChange={(e) => onChange({ factory_name: e.target.value || null })}
-                  className={cellInput}
-                />
-              </label>
-              <label className="block">
-                <span className="text-[10px] uppercase tracking-wider text-neutral-500">Customer name</span>
-                <input
-                  value={row.customer_name ?? ""}
-                  disabled={!editable}
-                  placeholder="e.g. Solar Controller"
-                  onChange={(e) => onChange({ customer_name: e.target.value || null })}
-                  className={cellInput}
-                />
-              </label>
-              <label className="block">
-                <span className="text-[10px] uppercase tracking-wider text-neutral-500">Factory notes</span>
-                <input
-                  value={row.factory_notes ?? ""}
-                  disabled={!editable}
-                  placeholder="e.g. use this factory's exact wording"
-                  onChange={(e) => onChange({ factory_notes: e.target.value || null })}
-                  className={cellInput}
-                />
-              </label>
-            </div>
-          </td>
-        </tr>
-      )}
-    </>
-  );
-}
+        </label>
+        <label className="block sm:col-span-4">
+          <span className={lbl}>Customer name</span>
+          <input
+            value={row.customer_name ?? ""}
+            disabled={!editable}
+            placeholder="e.g. Solar Controller"
+            onChange={(e) => onChange({ customer_name: e.target.value || null })}
+            className={cellInput}
+          />
+        </label>
 
-/** Shared datalist for the spare-part model pickers (render once per page). */
-export function SparePartModelDatalist({ products }: { products: ProductOption[] }) {
-  return (
-    <datalist id="industrial-spare-part-models">
-      {products.map((p) => (
-        <option key={p.id} value={p.name}>
-          {p.sku ?? undefined}
-        </option>
-      ))}
-    </datalist>
+        <label className="block sm:col-span-6">
+          <span className={lbl}>Notes</span>
+          <input
+            value={row.notes ?? ""}
+            disabled={!editable}
+            placeholder="Packing / after-sales notes"
+            onChange={(e) => onChange({ notes: e.target.value || null })}
+            className={cellInput}
+          />
+        </label>
+        <label className="block sm:col-span-6">
+          <span className={lbl}>Factory notes</span>
+          <input
+            value={row.factory_notes ?? ""}
+            disabled={!editable}
+            placeholder="e.g. use this factory's exact wording"
+            onChange={(e) => onChange({ factory_notes: e.target.value || null })}
+            className={cellInput}
+          />
+        </label>
+      </div>
+    </div>
   );
 }

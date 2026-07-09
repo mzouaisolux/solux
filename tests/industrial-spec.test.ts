@@ -119,6 +119,12 @@ test("normalize: spare parts — cleaned rows, empty rows dropped, qty floored a
     factory_name: null,
     customer_name: null,
     factory_notes: null,
+    // m160 dictionary snapshot fields — null on legacy/m159 blobs
+    family_category_id: null,
+    family_label: null,
+    dictionary_item_id: null,
+    factory_name_cn: null,
+    erp_code: null,
   });
   assert.equal(s.spare_parts[1].quantity, 0);
   assert.equal(s.spare_parts[1].factory_name, "MPPT Controller V6");

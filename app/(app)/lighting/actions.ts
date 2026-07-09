@@ -9,9 +9,17 @@
  * the config is written in the same transaction as the production command.
  */
 
+import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { requireCapability } from "@/lib/permissions";
+import { getCurrentUserRole } from "@/lib/auth";
+import {
+  TASK_LIST_LOCKED_FOR_SALES,
+  isTechnicalRole,
+  type ProductionTaskListStatus,
+} from "@/lib/types";
 import { ATTACHMENTS_BUCKET } from "@/lib/attachments";
+import { cleanTiltAngle } from "@/lib/industrial-spec";
 import { extractLightingFromEnergyStudy } from "@/lib/lighting/extract-energy-study";
 import { extractDialux } from "@/lib/lighting/extract-dialux";
 import { normalizeLightingProgram } from "@/lib/lighting/validate";
@@ -147,6 +155,131 @@ export async function extractDialuxAction(
         e?.message ??
         "Dialux analysis failed. Please enter the values manually.",
     };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// m160 — "AI Find from Energy Study" (Industrial production file tilt block).
+// ---------------------------------------------------------------------------
+export type AiFindTiltResult =
+  | {
+      ok: true;
+      found: true;
+      tilt: number;
+      /** 0..1 model confidence for the tilt field, when reported. */
+      confidence: number | null;
+      sourceName: string | null;
+      /** 1-based page in the study, when the model could tell. */
+      sourcePage: number | null;
+    }
+  | { ok: true; found: false; sourceName: string | null }
+  | { ok: false; error: string };
+
+/**
+ * Explicit AI assist on the task list's Solar Panel Tilt Angle: reads the
+ * LATEST uploaded Energy Study of this command (the lighting setup anchored
+ * on the proforma), extracts the tilt and WRITES it on the task list —
+ * user-triggered, so the found value replaces the current one (still fully
+ * overridable afterwards). Changing the value resets the pole-drawing
+ * checkpoint, exactly like a manual edit. Never throws to the client.
+ */
+export async function aiFindTiltAction(
+  formData: FormData
+): Promise<AiFindTiltResult> {
+  try {
+    await requireCapability("quotation.create");
+    const taskListId = str(formData.get("task_list_id"));
+    if (!taskListId) return { ok: false, error: "Missing task list reference." };
+
+    const supabase = createClient();
+    const { data: tl } = await supabase
+      .from("production_task_lists")
+      .select("id, status, quotation_id")
+      .eq("id", taskListId)
+      .maybeSingle();
+    if (!tl) return { ok: false, error: "Task list not found." };
+
+    // Same edit window as the manual field (sales locked post-submission).
+    const { role } = await getCurrentUserRole();
+    if (
+      !isTechnicalRole(role) &&
+      TASK_LIST_LOCKED_FOR_SALES.includes(tl.status as ProductionTaskListStatus)
+    ) {
+      return {
+        ok: false,
+        error: "This task list is in production validation — the tilt angle can no longer be edited by sales.",
+      };
+    }
+
+    const { data: setup } = await supabase
+      .from("product_lighting_setups")
+      .select("energy_study_path, energy_study_name")
+      .eq("document_id", (tl as any).quotation_id)
+      .maybeSingle();
+    const path = (setup as any)?.energy_study_path as string | null;
+    const sourceName = ((setup as any)?.energy_study_name as string | null) ?? null;
+    if (!path) {
+      return {
+        ok: false,
+        error:
+          "No Energy Study uploaded for this command — add it in the Product Lighting Setup section, then retry.",
+      };
+    }
+
+    const { data: file, error: dlErr } = await supabase.storage
+      .from(ATTACHMENTS_BUCKET)
+      .download(path);
+    if (dlErr || !file) {
+      return { ok: false, error: dlErr?.message ?? "Could not read the Energy Study." };
+    }
+
+    const extraction = await extractLightingFromEnergyStudy({
+      pdf: new Uint8Array(await file.arrayBuffer()),
+    });
+    const tilt = cleanTiltAngle(extraction.tilt_angle);
+    if (tilt == null) return { ok: true, found: false, sourceName };
+
+    // Read-modify-write: reset the pole-drawing checkpoint ONLY when the
+    // value actually changes (same contract as updateIndustrialFile).
+    const { data: pre, error: preErr } = await supabase
+      .from("production_task_lists")
+      .select("solar_panel_tilt_angle")
+      .eq("id", taskListId)
+      .maybeSingle();
+    if (preErr) {
+      return {
+        ok: false,
+        error: "Tilt column missing — apply migration m159 (159_task_list_industrial_file.sql) first.",
+      };
+    }
+    const oldTilt = (pre as any)?.solar_panel_tilt_angle ?? null;
+    const patch: Record<string, any> = { solar_panel_tilt_angle: tilt };
+    if ((oldTilt ?? null) !== tilt) {
+      patch.pole_drawing_tilt_verified = false;
+      patch.pole_drawing_tilt_verified_by = null;
+      patch.pole_drawing_tilt_verified_at = null;
+    }
+    const { error: upErr } = await supabase
+      .from("production_task_lists")
+      .update(patch)
+      .eq("id", taskListId);
+    if (upErr) return { ok: false, error: upErr.message };
+
+    revalidatePath(`/task-lists/${taskListId}`);
+    const conf = extraction.confidence?.tilt_angle;
+    return {
+      ok: true,
+      found: true,
+      tilt,
+      confidence: Number.isFinite(conf) ? Math.max(0, Math.min(1, conf)) : null,
+      sourceName,
+      sourcePage:
+        extraction.tilt_source_page != null && extraction.tilt_source_page >= 1
+          ? Math.round(extraction.tilt_source_page)
+          : null,
+    };
+  } catch (e: any) {
+    return { ok: false, error: e?.message ?? "AI Find failed — enter the tilt angle manually." };
   }
 }
 
