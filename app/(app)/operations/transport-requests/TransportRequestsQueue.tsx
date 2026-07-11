@@ -14,6 +14,7 @@ import {
   startTransportRequest,
   completeTransportRequest,
   cancelTransportRequest,
+  reopenTransportRequest,
 } from "./actions";
 
 export type TransportQueueItem = {
@@ -287,6 +288,34 @@ function QueueCard({ it }: { it: TransportQueueItem }) {
             {it.opsComments && (
               <p className="mt-1 text-neutral-500">{it.opsComments}</p>
             )}
+            {/* REOPEN (owner 2026-07-11) — controlled correction path. Only
+                renders in this Operations queue (capability-gated page);
+                the server action re-checks shipping.process_update, demands
+                a reason and snapshots every previous value into the
+                immutable event log before the status moves. */}
+            <div className="mt-2">
+              <button
+                type="button"
+                disabled={pending}
+                onClick={() => {
+                  const reason = window.prompt(
+                    "Reopen this completed request — why? (required, kept in the audit history)"
+                  );
+                  if (reason === null) return;
+                  if (!reason.trim()) {
+                    pushToast("A reason is required to reopen.", "error");
+                    return;
+                  }
+                  run(
+                    () => reopenTransportRequest(it.id, reason.trim()),
+                    "↩ Request reopened — previous answer kept in the history"
+                  );
+                }}
+                className="rounded-md border border-neutral-300 bg-white px-3 py-1.5 text-[12px] font-medium text-neutral-600 hover:bg-neutral-50 disabled:opacity-50"
+              >
+                ↩ Reopen to correct
+              </button>
+            </div>
           </div>
         )
       ) : (

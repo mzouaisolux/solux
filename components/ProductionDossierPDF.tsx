@@ -1,5 +1,6 @@
 "use client";
 
+import { Fragment } from "react";
 import { Document, Page, StyleSheet, Text, View } from "@react-pdf/renderer";
 import type {
   ExportData,
@@ -481,13 +482,15 @@ function BiSection({
   n,
   title,
   children,
+  break: pageBreak = false,
 }: {
   n: number;
   title: BiTitle;
   children?: React.ReactNode;
+  break?: boolean;
 }) {
   return (
-    <View style={s.secWrap} wrap={false}>
+    <View style={s.secWrap} wrap={false} break={pageBreak}>
       <Text style={s.secZh}>
         {n}. {title.zh}
       </Text>
@@ -986,10 +989,14 @@ export default function ProductionDossierPDF({
           </View>
         )}
 
-        {/* ---------- PER-PRODUCT SECTIONS ---------- */}
+        {/* ---------- PER-PRODUCT SECTIONS ----------
+            No wrapping <View>: a section that fills its page exactly would
+            spill its trailing child margin onto a blank continuation page
+            (empty page artefact). The break lives on the BiSection instead. */}
         {data.lines.map((l, i) => (
-          <View key={i} break>
+          <Fragment key={i}>
             <BiSection
+              break
               n={lineNumbers[i]}
               title={{
                 zh: `${S.product_configuration.zh}（${i + 1}/${data.lines.length}）`,
@@ -1075,7 +1082,7 @@ export default function ProductionDossierPDF({
                 text={l.internal_notes}
               />
             )}
-          </View>
+          </Fragment>
         ))}
 
         {/* ---------- INDUSTRIAL PRODUCTION FILE (m159) ---------- */}

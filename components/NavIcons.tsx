@@ -116,6 +116,79 @@ const GLYPHS: Record<string, ReactNode> = {
     </>
   ),
   dot: <circle cx="12" cy="12" r="3" />,
+  /* --- Solux DNA skin (client hub) — document folders & inline actions.
+     Paths mirror the validated client-hub mockup exactly. --- */
+  briefcase: (
+    <>
+      <rect x="3" y="7" width="18" height="13" rx="0" />
+      {P("M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M3 12h18")}
+    </>
+  ),
+  flask: P(
+    "M9 3h6M10 3v5.2L4.6 18a2 2 0 0 0 1.8 3h11.2a2 2 0 0 0 1.8-3L14 8.2V3M7.5 15h9"
+  ),
+  dividers: (
+    <>
+      <circle cx="12" cy="5" r="2" />
+      {P("M11 6.7 5 21M13 6.7 19 21M7.6 15h8.8")}
+    </>
+  ),
+  factory: P("M2 21h20M4 21V8.5l5 3.5V8.5l5 3.5V8.5l5 3.5V21M8 17h2M14 17h2"),
+  ship: (
+    <>
+      {P("M3 14h18l-2 5H5Z")}
+      {P("M6 14V9h12v5M12 9V5")}
+    </>
+  ),
+  paperclip: P(
+    "M21.44 11.05 12.25 20.24a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"
+  ),
+  envelope: (
+    <>
+      <rect x="3" y="5" width="18" height="14" />
+      {P("m3 7 9 6 9-6")}
+    </>
+  ),
+  doc: (
+    <>
+      {P("M14 3H7a1 1 0 0 0-1 1v16a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1V7Z")}
+      {P("M14 3v4h4M9.5 12h5M9.5 16h5")}
+    </>
+  ),
+  time: (
+    <>
+      <circle cx="12" cy="12" r="9" />
+      {P("M12 7v5l3.2 1.9")}
+    </>
+  ),
+  arrow: P("M5 12h14M13 6l6 6-6 6"),
+  /* --- Requests mega menu (validated mockup 2026-07-10) --- */
+  bolt: P("M13 2 3 14h8l-1 8 11-12h-8l1-8Z"),
+  truck: (
+    <>
+      {P("M1 5h14v11H1zM15 9h4l3.2 3.4V16H15z")}
+      <circle cx="5.5" cy="18" r="1.8" />
+      <circle cx="18" cy="18" r="1.8" />
+    </>
+  ),
+  bulb: P(
+    "M9 18h6M10.5 21h3M12 3a6 6 0 0 0-3.9 10.6c.7.6 1.1 1.5 1.1 2.4h5.6c0-.9.4-1.8 1.1-2.4A6 6 0 0 0 12 3Z"
+  ),
+  "check-circle": (
+    <>
+      <circle cx="12" cy="12" r="9.2" />
+      {P("m8.2 12.4 2.6 2.6 5-5.4")}
+    </>
+  ),
+  /* --- Incoming Requests mega menu (Ops/TLM processing side) --- */
+  inbox: (
+    <>
+      {P("M22 12h-6l-2 3h-4l-2-3H2")}
+      {P(
+        "M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11Z"
+      )}
+    </>
+  ),
 };
 
 /** Pick the glyph name that best fits a nav label. */
@@ -154,6 +227,28 @@ export function NavGlyph({ name }: { name: string }) {
       strokeLinecap="round"
       strokeLinejoin="round"
       aria-hidden
+    >
+      {GLYPHS[name] ?? GLYPHS.dot}
+    </svg>
+  );
+}
+
+/**
+ * Small inline icon for button/label text (Solux DNA skin). Renders at
+ * 13px via the `.sx-inline-ic` rule in premium.css, aligned to the text
+ * baseline — replaces the old emoji glyphs (📧 ⏳ 🚀).
+ */
+export function InlineIcon({ name }: { name: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.7}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+      className="sx-inline-ic"
     >
       {GLYPHS[name] ?? GLYPHS.dot}
     </svg>

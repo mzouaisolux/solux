@@ -39,6 +39,7 @@ import {
   type AssignableDoc,
 } from "@/components/affairs/AssignDocumentPanel";
 import { SendButton } from "@/components/delivery/SendButton";
+import { NavGlyph, InlineIcon } from "@/components/NavIcons";
 
 const ACT = "text-[11px] font-medium text-neutral-500 hover:text-neutral-900";
 
@@ -185,8 +186,8 @@ function DocRow({
     .join(" · ");
   return (
     <li className={`flex items-center gap-2.5 py-2 ${d.isCurrent ? "" : "opacity-60"}`}>
-      <span className="text-[13px] leading-none" aria-hidden>
-        📄
+      <span className="sx-doc-ic" aria-hidden>
+        <NavGlyph name="doc" />
       </span>
       <div className="min-w-0 flex-1">
         <a
@@ -233,7 +234,7 @@ function DocRow({
           <SendButton
             projectDocuments={[d]}
             affairId={affairId}
-            label="📧 Send"
+            label={<><InlineIcon name="envelope" /> Send</>}
             className={ACT}
             title="Prepare an email with this document attached"
           />
@@ -324,8 +325,8 @@ export function AffairDocumentsCard({
               projectDocuments={repo}
               affairId={affairId}
               preselectedIds={[]}
-              label="📧 Send documents"
-              className="text-[11px] font-medium text-neutral-600 hover:text-neutral-900"
+              label={<><InlineIcon name="envelope" /> Send documents</>}
+              className="sx-send-btn"
               title="Prepare an email with any of this project's documents"
             />
           )}
@@ -428,8 +429,8 @@ export function AffairDocumentsCard({
                         }
                         className="flex w-full items-center gap-1.5 py-2 text-left"
                       >
-                        <span className="text-[12px]" aria-hidden>
-                          {f.emoji}
+                        <span className="sx-cat-ic" aria-hidden>
+                          <NavGlyph name={f.icon} />
                         </span>
                         <span className="text-[11px] font-semibold uppercase tracking-wide text-neutral-600">
                           {f.label}
@@ -465,14 +466,14 @@ export function AffairDocumentsCard({
         <ul className="mt-1 divide-y divide-neutral-100 border-t border-neutral-100">
           {taskListId && (
             <li className="flex items-center gap-2.5 py-2">
-              <span className="text-[13px] leading-none" aria-hidden>📄</span>
+              <span className="sx-doc-ic" aria-hidden><NavGlyph name="doc" /></span>
               <span className="min-w-0 flex-1 truncate text-[12.5px] font-medium text-neutral-800">Task List</span>
               <Link href={`/task-lists/${taskListId}`} className={ACT}>Open</Link>
             </li>
           )}
           {productionOrderId && (
             <li className="flex items-center gap-2.5 py-2">
-              <span className="text-[13px] leading-none" aria-hidden>📄</span>
+              <span className="sx-doc-ic" aria-hidden><NavGlyph name="doc" /></span>
               <span className="min-w-0 flex-1 truncate text-[12.5px] font-medium text-neutral-800">Production Order</span>
               <Link href={`/production/orders/${productionOrderId}`} className={ACT}>Open</Link>
             </li>
@@ -481,7 +482,7 @@ export function AffairDocumentsCard({
             .filter((f) => f.kind === "attachment")
             .map((f) => (
               <li key={f.key} className="flex items-center gap-2.5 py-2">
-                <span className="text-[13px] leading-none" aria-hidden>📄</span>
+                <span className="sx-doc-ic" aria-hidden><NavGlyph name="doc" /></span>
                 <a href={f.href} target="_blank" rel="noreferrer" className="min-w-0 flex-1 truncate text-[12.5px] font-medium text-neutral-800 hover:underline" title={f.name}>
                   {f.name}
                 </a>

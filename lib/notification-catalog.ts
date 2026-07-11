@@ -92,6 +92,7 @@ export const NOTIFICATION_CATALOG: Record<EventType, NotificationCatalogEntry> =
   "transport.requested": { entity: "affair", category: "shipping", severity: "medium", label: "Transport request submitted" },
   "transport.completed": { entity: "affair", category: "shipping", severity: "medium", label: "Transport request completed" },
   "transport.cancelled": { entity: "affair", category: "shipping", severity: "low", label: "Transport request cancelled" },
+  "transport.reopened": { entity: "affair", category: "shipping", severity: "medium", label: "Transport request reopened" },
   "doc.newer_costing_available": { entity: "document", category: "money", severity: "medium", label: "Newer costing available" },
   "doc.costing_applied": { entity: "document", category: "money", severity: "low", label: "Latest costing applied" },
   "doc.costing_kept": { entity: "document", category: "money", severity: "low", label: "Existing costing kept" },

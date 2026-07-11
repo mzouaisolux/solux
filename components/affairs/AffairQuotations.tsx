@@ -15,7 +15,7 @@ import { freshnessLevel, type ShippingSnapshot, type FreshnessThresholds } from 
 import { fmtDate } from "@/components/affairs/badges";
 import InlineStatusSwitcher from "@/components/InlineStatusSwitcher";
 import { DuplicateQuotationButton } from "@/components/affairs/DuplicateQuotationButton";
-import { ShippingFreshnessBadge } from "@/components/shipping/ShippingFreshnessBadge";
+import { ShippingFreshnessBadge, FreshnessDot } from "@/components/shipping/ShippingFreshnessBadge";
 import { RequestShippingUpdateButton } from "@/components/shipping/RequestShippingUpdateButton";
 
 const ACT = "text-[11px] font-medium text-neutral-500 hover:text-neutral-900";
@@ -163,7 +163,17 @@ export function AffairQuotations({
                       hasOpenRequest={ship.hasOpenRequest}
                       variant="chip"
                       tone={shipTone}
-                      label={`↻ Shipping${fresh ? ` · ${fresh.emoji}` : ""}`}
+                      label={
+                        <>
+                          ↻ Shipping
+                          {fresh && (
+                            <>
+                              {" · "}
+                              <FreshnessDot level={fresh.level} />
+                            </>
+                          )}
+                        </>
+                      }
                     />
                   )}
                 </div>

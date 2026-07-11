@@ -661,3 +661,163 @@
     animation: none;
   }
 }
+
+/* =====================================================================
+   SOLUX DNA COMPAT SKIN — Client Hub (validated mockup 2026-07-09)
+   Aligns remaining Tailwind-utility styling on the Solux Design DNA
+   without touching business logic.
+   - Radius 0 on remaining rounded utilities + text pills (dots stay round)
+   - Off-charte hues remapped: sky (info) -> neutral ink, rose (alert) ->
+     amber, emerald/green -> Flash Green tokens, amber shades -> charte amber
+   ===================================================================== */
+.po-premium .rounded,
+.po-premium .rounded-sm { border-radius: 0; }
+/* text pills carry horizontal padding; pure dots don't — keep dots round */
+.po-premium .rounded-full[class*="px-"] { border-radius: 0; }
+.po-premium .shadow-sm { box-shadow: var(--shadow); }
+
+/* sky = informational -> neutral (white pill, hairline border, ink text, ink dot) */
+.po-premium .bg-sky-50 { background-color: #ffffff !important; }
+.po-premium .bg-sky-100 { background-color: #fafafa !important; }
+.po-premium .hover\:bg-sky-100:hover { background-color: #fafafa !important; }
+.po-premium .bg-sky-400,
+.po-premium .bg-sky-500,
+.po-premium .bg-sky-600,
+.po-premium .bg-sky-700 { background-color: var(--ink) !important; }
+.po-premium .text-sky-700,
+.po-premium .text-sky-800 { color: var(--ink-soft) !important; }
+.po-premium .border-sky-200,
+.po-premium .border-sky-300 { border-color: var(--line-2) !important; }
+
+/* rose / red = attention -> charte amber */
+.po-premium .bg-rose-50,
+.po-premium .bg-red-50 { background-color: rgba(232, 135, 14, 0.10) !important; }
+.po-premium .bg-rose-100,
+.po-premium .bg-red-100 { background-color: rgba(232, 135, 14, 0.14) !important; }
+.po-premium .bg-rose-400,
+.po-premium .bg-rose-500,
+.po-premium .bg-rose-600,
+.po-premium .bg-red-500,
+.po-premium .bg-red-600 { background-color: #e8870e !important; }
+.po-premium .text-rose-700,
+.po-premium .text-red-600,
+.po-premium .text-red-700 { color: #9a5a00 !important; }
+.po-premium .ring-rose-200 { --tw-ring-color: rgba(232, 135, 14, 0.42) !important; }
+.po-premium .border-rose-200,
+.po-premium .border-red-200 { border-color: rgba(232, 135, 14, 0.42) !important; }
+
+/* emerald / green -> Flash Green tokens */
+.po-premium .bg-emerald-50,
+.po-premium .bg-green-50 { background-color: var(--green-tint) !important; }
+.po-premium .bg-emerald-400,
+.po-premium .bg-emerald-500 { background-color: var(--green) !important; }
+.po-premium .bg-emerald-600 { background-color: var(--green-deep) !important; }
+.po-premium .text-emerald-700,
+.po-premium .text-green-700,
+.po-premium .text-green-800 { color: var(--green-deep) !important; }
+.po-premium .border-emerald-200,
+.po-premium .border-emerald-500,
+.po-premium .border-green-300 { border-color: rgba(85, 255, 126, 0.5) !important; }
+
+/* amber shades -> charte amber tokens */
+.po-premium .bg-amber-50 { background-color: rgba(232, 135, 14, 0.10) !important; }
+.po-premium .bg-amber-100 { background-color: rgba(232, 135, 14, 0.14) !important; }
+.po-premium .bg-amber-400,
+.po-premium .bg-amber-500 { background-color: #e8870e !important; }
+.po-premium .text-amber-700,
+.po-premium .text-amber-800 { color: #9a5a00 !important; }
+.po-premium .border-amber-200,
+.po-premium .border-amber-300 { border-color: rgba(232, 135, 14, 0.42) !important; }
+
+/* Primary action -> DNA ink button (square, flat, no press-scale) */
+.po-premium .btn-primary {
+  border-radius: 0;
+  background: var(--ink) !important;
+  border: 1px solid var(--ink);
+  color: #fff !important;
+  box-shadow: none;
+  font-weight: 600;
+}
+.po-premium .btn-primary:hover { background: #000 !important; }
+.po-premium .btn-primary:active { transform: none; }
+
+/* Secondary -> white, hairline, hover ink border */
+.po-premium .btn-secondary {
+  border-radius: 0;
+  background: #fff !important;
+  border: 1px solid var(--line-2) !important;
+  color: var(--ink) !important;
+  box-shadow: none;
+  font-weight: 600;
+}
+.po-premium .btn-secondary:hover { border-color: var(--ink) !important; background: #fff !important; }
+.po-premium .btn-secondary:active { transform: none; }
+
+/* brand accent utilities: green-500 -> Flash Green / green-deep tokens */
+.po-premium .border-solux { border-color: var(--green) !important; }
+.po-premium .border-solux\/20 { border-color: rgba(85, 255, 126, 0.25) !important; }
+.po-premium .border-solux\/30 { border-color: rgba(85, 255, 126, 0.35) !important; }
+.po-premium .border-solux\/40 { border-color: rgba(85, 255, 126, 0.45) !important; }
+.po-premium .border-solux\/50 { border-color: rgba(85, 255, 126, 0.5) !important; }
+.po-premium .hover\:border-solux:hover { border-color: var(--green) !important; }
+.po-premium .focus\:border-solux:focus { border-color: var(--ink) !important; }
+.po-premium .text-solux,
+.po-premium .text-solux-dark,
+.po-premium .hover\:text-solux:hover,
+.po-premium .hover\:text-solux-dark:hover,
+.po-premium .group:hover .group-hover\:text-solux { color: var(--green-deep) !important; }
+.po-premium .bg-solux { background-color: var(--green) !important; color: var(--ink) !important; }
+.po-premium .bg-green-500,
+.po-premium .bg-green-600 { background-color: var(--green) !important; }
+
+/* panels: kill the SaaS radius+shadow (flat DNA card) */
+.po-premium .panel { border-radius: 0; box-shadow: var(--shadow); border-color: var(--line); }
+/* drawer content (affair accordion) */
+.po-premium .hover\:bg-emerald-600:hover { background-color: #46e96d !important; }
+.po-premium .bg-emerald-500.text-white,
+.po-premium select.bg-emerald-500 { color: var(--ink) !important; }
+.po-premium .border-emerald-500 { border-color: rgba(85, 255, 126, 0.6) !important; }
+.po-premium .hover\:shadow:hover { box-shadow: var(--shadow) !important; }
+
+/* pictos — mega-menu style tiles + inline line-icons (replaces emoji) */
+.po-premium .sx-cat-ic { flex: none; width: 26px; height: 26px; border: 1px solid var(--line-2); background: #fff; display: inline-flex; align-items: center; justify-content: center; color: var(--ink); transition: background .18s, color .18s, border-color .18s; }
+.po-premium .sx-cat-ic svg { width: 14px; height: 14px; }
+.po-premium button:hover > .sx-cat-ic { background: var(--ink); color: #fff; border-color: var(--ink); }
+.po-premium .sx-doc-ic { flex: none; width: 16px; height: 16px; color: var(--mute-2); display: inline-flex; }
+.po-premium .sx-doc-ic svg { width: 16px; height: 16px; }
+.po-premium li:hover .sx-doc-ic { color: var(--ink); }
+.po-premium svg.sx-inline-ic { width: 13px; height: 13px; display: inline-block; vertical-align: -2px; margin-right: 3px; }
+
+/* status dots — replace traffic-light emoji (🟢🟡🔴⚪); charte tones only:
+   fresh = Flash Green, warn = charte amber, stale = ink (strongest), unknown = mute */
+.po-premium .sx-dot-green { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--green); box-shadow: 0 0 0 1px rgba(11,122,57,.3) inset; vertical-align: 0; }
+.po-premium .sx-dot-amber { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: #e8870e; vertical-align: 0; }
+.po-premium .sx-dot-ink { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--ink); vertical-align: 0; }
+.po-premium .sx-dot-mute { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--mute-2); vertical-align: 0; }
+
+/* Send documents — main feature: primary ink button */
+.po-premium .sx-send-btn { display: inline-flex; align-items: center; gap: 7px; font-family: inherit; font-size: 12px; font-weight: 600; padding: 7px 13px; background: var(--ink); color: #fff; border: 1px solid var(--ink); cursor: pointer; white-space: nowrap; }
+.po-premium .sx-send-btn:hover { background: #000; }
+.po-premium .sx-send-btn svg.sx-inline-ic { width: 13px; height: 13px; margin-right: 0; vertical-align: 0; }
+
+/* ---- section distinction (drawer: Quotations / Conversation / Documents) ----
+   Each block gets a #fafafa header band framed by hairlines (same vocabulary
+   as table theads) instead of a lone faint line. */
+.po-premium section:has(> div:first-child > h3.uppercase) {
+  border: 1px solid var(--line);
+  background: #fff;
+  margin-top: 14px;
+}
+.po-premium section:has(> div:first-child > h3.uppercase) > div:first-child {
+  background: #fafafa;
+  border-bottom: 1px solid var(--line);
+  padding: 8px 12px;
+  margin: 0;
+}
+.po-premium section:has(> div:first-child > h3.uppercase) > div:first-child h3 { color: var(--ink); letter-spacing: 0.05em; }
+.po-premium section:has(> div:first-child > h3.uppercase) > *:not(:first-child) { margin-left: 12px; margin-right: 12px; }
+.po-premium section:has(> div:first-child > h3.uppercase) > *:last-child { margin-bottom: 12px; }
+
+/* document category groups: clearer group breaks */
+.po-premium button:has(> .sx-cat-ic) { border-top: 1px solid var(--line-2); padding-top: 9px; padding-bottom: 9px; }
+.po-premium button:has(> .sx-cat-ic) span.uppercase { color: var(--ink); }

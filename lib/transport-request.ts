@@ -100,6 +100,31 @@ export function isSolarPanelField(fieldName: string): boolean {
   return /solar\s*panel/i.test(fieldName);
 }
 
+/**
+ * MANDATORY PANEL SIZE (owner 2026-07-11): a request line without its solar
+ * panel size is useless to Operations (no carton / pallet / CBM math), so
+ * submission is blocked — client-side (submit gate + message) AND
+ * server-side (createTransportRequest throws) through THIS one shared rule.
+ * Sentinel/custom-key literals mirror lib/types (CUSTOM_OPTION_SENTINEL /
+ * customValueKey) — duplicated here so the module stays dependency-free
+ * and node-testable.
+ */
+export function lineHasPanelSize(
+  config: Record<string, string | null | undefined> | null | undefined
+): boolean {
+  if (!config) return false;
+  for (const [key, value] of Object.entries(config)) {
+    if (!isSolarPanelField(key)) continue;
+    if (value === "__custom__") {
+      const custom = config[`${key}__custom`];
+      if (typeof custom === "string" && custom.trim() !== "") return true;
+      continue;
+    }
+    if (typeof value === "string" && value.trim() !== "") return true;
+  }
+  return false;
+}
+
 /** A transport request line — mirrors document_lines' shape (m161). */
 export type TransportRequestLineDraft = {
   product_id: string | null;

@@ -394,7 +394,7 @@ export default async function AffairDetailPage({ params }: { params: { id: strin
     const { data: tq, error: tqErr } = await supabase
       .from("transport_requests")
       .select(
-        "id, kind, status, freight_cost, insurance_cost, cbm, gross_weight_kg, cartons_count, pallets_count, incoterm, destination_country, destination_port, valid_until, ops_comments, requested_at, requested_by, completed_at, completed_by"
+        "id, kind, status, reason, freight_cost, insurance_cost, additional_charges, transit_time_days, transport_mode, cbm, gross_weight_kg, net_weight_kg, cartons_count, pallets_count, incoterm, destination_country, destination_port, delivery_address, valid_until, ops_comments, requested_at, requested_by, completed_at, completed_by"
       )
       .eq("affair_id", id)
       .order("requested_at", { ascending: false });

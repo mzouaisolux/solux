@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   isSolarPanelField,
+  lineHasPanelSize,
   mapDocumentLineToRequestLine,
   versionedHistory,
   isTransportTablesMissing,
@@ -105,4 +106,30 @@ test("kind catalog is complete and labelled", () => {
   assert.equal(TRANSPORT_KINDS.length, 3);
   assert.equal(transportKindLabel("packing_list"), "New Packing List Request");
   assert.equal(transportKindLabel("unknown"), "unknown");
+});
+
+// ---- Mandatory panel size (owner 2026-07-11, QA round 1 fix #5) ----------
+test("lineHasPanelSize: plain value on a solar panel key passes", () => {
+  assert.equal(lineHasPanelSize({ "SOLAR PANEL": "430W" }), true);
+  assert.equal(lineHasPanelSize({ "Solar Panel Size": "18V/105W" }), true);
+});
+
+test("lineHasPanelSize: missing / empty / whitespace panel fails", () => {
+  assert.equal(lineHasPanelSize({}), false);
+  assert.equal(lineHasPanelSize(null), false);
+  assert.equal(lineHasPanelSize({ "SOLAR PANEL": "" }), false);
+  assert.equal(lineHasPanelSize({ "SOLAR PANEL": "   " }), false);
+  assert.equal(lineHasPanelSize({ BATTERY: "60Ah" }), false);
+});
+
+test("lineHasPanelSize: custom sentinel resolves through the __custom key", () => {
+  assert.equal(
+    lineHasPanelSize({ "SOLAR PANEL": "__custom__", "SOLAR PANEL__custom": "612W" }),
+    true
+  );
+  assert.equal(
+    lineHasPanelSize({ "SOLAR PANEL": "__custom__", "SOLAR PANEL__custom": " " }),
+    false
+  );
+  assert.equal(lineHasPanelSize({ "SOLAR PANEL": "__custom__" }), false);
 });

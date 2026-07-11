@@ -19,6 +19,8 @@
 // This layer is ADDITIVE: it replaces no menu and changes no existing flow.
 // =====================================================================
 
+import type { Capability } from "@/lib/permissions";
+
 export type RequestContext = {
   clientId?: string | null;
   affairId?: string | null;
@@ -102,6 +104,88 @@ export const REQUEST_TYPES = [
 export const ACTIVE_REQUEST_TYPES = REQUEST_TYPES.filter(
   (r) => r.status === "active"
 );
+
+// =====================================================================
+// INCOMING REQUEST QUEUES — the PROCESSING side of the request layer.
+//
+// REQUEST_TYPES above is the Sales side (create a request). This registry
+// is the Operations / Task List Manager side: the queues where submitted
+// requests are received, processed and completed. It feeds the second
+// "Requests" mega-menu section (lib/navigation.ts) — one line here = one
+// queue entry there. Same additive philosophy: adding a queue changes no
+// existing flow.
+//
+// Reference queue: /operations/transport-requests (m161) — every future
+// queue page follows its design (capability guard + sx header + queue).
+// Queues whose module hasn't shipped yet point to a PLACEHOLDER page
+// (same shell, empty queue) so the structure exists before the module.
+//
+// `capabilities` mirrors the queue page's guard EXACTLY
+// (canAccessOrAdmin(capabilities)) — the permission-nav rule: the menu
+// never invents a new access rule, it renders what the page enforces.
+// =====================================================================
+
+export type IncomingQueueDef = {
+  /** Stable key. */
+  key: string;
+  /** Menu label, e.g. "Transport Requests". */
+  label: string;
+  /** One-line description shown under the label. */
+  description?: string;
+  /** NavIcons glyph. */
+  icon?: string;
+  /** The queue page. */
+  href: string;
+  /** Same list the page guards on — canAccessOrAdmin(capabilities). */
+  capabilities: readonly Capability[];
+};
+
+export const INCOMING_REQUEST_QUEUES = [
+  {
+    key: "transport",
+    label: "Transport Requests",
+    description: "Packing lists & freight quotes from Sales",
+    icon: "truck",
+    href: "/operations/transport-requests",
+    capabilities: ["shipping.process_update"],
+  },
+  {
+    key: "packing_list",
+    label: "Packing List Requests",
+    description: "Packing lists to prepare for Sales",
+    icon: "package",
+    href: "/operations/packing-list-requests",
+    capabilities: ["shipping.process_update"],
+  },
+  // Costing queue: the REAL page (pre-existing) — /projects/cost-requests
+  // lists pending factory_cost_requests. Guard mirrors that page exactly
+  // (project.view_cost). Found during the 2026-07-11 QA campaign: the
+  // placeholder double-counted an existing queue.
+  {
+    key: "product_cost",
+    label: "Product Cost Requests",
+    description: "Factory costs to enter — pending requests",
+    icon: "dollar",
+    href: "/projects/cost-requests",
+    capabilities: ["project.view_cost"],
+  },
+  {
+    key: "custom_product",
+    label: "Custom Product Requests",
+    description: "Non-catalogue products — specs to study & price",
+    icon: "tool",
+    href: "/operations/custom-product-requests",
+    capabilities: ["project.enter_cost", "task_list.validate"],
+  },
+  {
+    key: "price_update",
+    label: "Price Update Requests",
+    description: "Price refresh requests on existing quotations",
+    icon: "trending",
+    href: "/operations/price-update-requests",
+    capabilities: ["shipping.process_update"],
+  },
+] as const satisfies readonly IncomingQueueDef[];
 
 /**
  * Deep-link for a request type. Active types land on the Service Request

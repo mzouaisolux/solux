@@ -21,6 +21,7 @@ import {
   type TransportRequestKind,
   type TransportRequestLineDraft,
   isSolarPanelField,
+  lineHasPanelSize,
   mapDocumentLineToRequestLine,
   versionedHistory,
 } from "@/lib/transport-request";
@@ -440,15 +441,25 @@ export default function TransportRequestForm({
     ? "price"
     : "packing_list";
   const linesRequired = !isUpdate;
+  // MANDATORY PANEL SIZE (owner 2026-07-11): every product line must carry
+  // its solar panel size before the request may reach Operations — the same
+  // shared rule is enforced server-side in createTransportRequest.
+  const missingPanelCount = lines.filter(
+    (l) => !lineHasPanelSize(l.config_values)
+  ).length;
   const canSubmit =
-    !!clientId && !!affairId && (!linesRequired || lines.length > 0) && !pending;
+    !!clientId &&
+    !!affairId &&
+    (!linesRequired || lines.length > 0) &&
+    missingPanelCount === 0 &&
+    !pending;
 
   function submit() {
     if (!canSubmit) return;
     setError(null);
     startTransition(async () => {
       try {
-        await createTransportRequest({
+        const res = await createTransportRequest({
           kind: effectiveKind,
           affairId,
           clientId,
@@ -472,7 +483,13 @@ export default function TransportRequestForm({
             position: i,
           })),
         });
-        pushToast("✅ Transport request submitted — Operations notified");
+        // HONEST feedback (owner 2026-07-11): claim a notification ONLY when
+        // the event registry actually delivered one to Operations.
+        pushToast(
+          res?.notified
+            ? "✅ Transport request submitted — Operations notified"
+            : "✅ Transport request submitted — now in the Operations queue"
+        );
         // Hard navigation on purpose: the action revalidates paths and the
         // triggered client refresh can swallow a router.push issued in the
         // same window (Next 14 race — same fix as RequestHub).
@@ -1151,6 +1168,13 @@ export default function TransportRequestForm({
               : "Operations will calculate cartons, pallets, weights and CBM."}
           </p>
           <div className="flex items-center gap-3">
+            {missingPanelCount > 0 && lines.length > 0 && (
+              <span className="text-xs font-medium text-amber-700">
+                ☀️ Solar panel size is required on every line —{" "}
+                {missingPanelCount} line{missingPanelCount === 1 ? "" : "s"}{" "}
+                missing.
+              </span>
+            )}
             {error && <span className="text-xs text-rose-600">{error}</span>}
             <button
               type="button"

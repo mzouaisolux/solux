@@ -141,6 +141,7 @@ export type EventType =
   | "transport.requested"
   | "transport.completed"
   | "transport.cancelled"
+  | "transport.reopened"
   // costing versions (m140) — newer-costing loop on quotations
   | "doc.newer_costing_available"
   | "doc.costing_applied"
@@ -218,6 +219,7 @@ export const ACTIONABLE_MEDIUM_EVENTS: ReadonlySet<EventType> = new Set<EventTyp
   // Transport Request module (m161) — same handoff, affair-centric
   "transport.requested", // → operations
   "transport.completed", // → sales (requester)
+  "transport.reopened", // → sales (requester) — answer being corrected
   // Costing versions (m140) — a newer approved costing needs the salesperson's
   // explicit Keep/Apply decision on the quotation
   "doc.newer_costing_available", // → sales (doc owner)
@@ -417,6 +419,7 @@ export function eventTypeLabel(t: EventType): string {
     "transport.requested": "Transport request submitted",
     "transport.completed": "Transport request completed",
     "transport.cancelled": "Transport request cancelled",
+    "transport.reopened": "Transport request reopened",
     "doc.newer_costing_available": "Newer costing available",
     "doc.costing_applied": "Latest costing applied",
     "doc.costing_kept": "Existing costing kept",

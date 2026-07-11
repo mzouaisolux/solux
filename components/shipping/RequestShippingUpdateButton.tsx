@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useState, useTransition, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import {
   SNAPSHOT_FIELDS,
@@ -9,6 +9,7 @@ import {
 } from "@/lib/shipping-update";
 import { pushToast } from "@/components/feedback/toast-store";
 import { createShippingUpdateRequest } from "@/app/(app)/operations/shipping-updates/actions";
+import { InlineIcon } from "@/components/NavIcons";
 
 type Variant = "primary" | "secondary" | "link" | "chip";
 /** For the `chip` variant: freight-freshness accent (status is the only color). */
@@ -59,7 +60,7 @@ export function RequestShippingUpdateButton({
   hasOpenRequest: boolean;
   variant?: Variant;
   tone?: Tone;
-  label?: string;
+  label?: ReactNode;
 }) {
   const [open, setOpen] = useState(false);
   const [pending, startTransition] = useTransition();
@@ -69,7 +70,7 @@ export function RequestShippingUpdateButton({
   if (hasOpenRequest) {
     return (
       <span className="text-[11px] font-medium text-amber-700" title="Operations has this in their queue">
-        ⏳ Update requested
+        <InlineIcon name="time" /> Update requested
       </span>
     );
   }

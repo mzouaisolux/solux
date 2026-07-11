@@ -6,6 +6,7 @@ import {
   launchProduction,
   updateDocumentStatus,
 } from "@/app/(app)/documents/[id]/actions";
+import { InlineIcon } from "@/components/NavIcons";
 
 /**
  * Shared quick-actions row for a quotation. Renders the highest-leverage
@@ -117,7 +118,13 @@ export default function DocQuickActions({
         className={`${base} bg-solux text-white hover:bg-solux-dark`}
         title="Create the proforma command and production task list, then open it"
       >
-        {pending ? "Launching…" : "🚀 Launch Production"}
+        {pending ? (
+          "Launching…"
+        ) : (
+          <>
+            <InlineIcon name="arrow" /> Launch Production
+          </>
+        )}
       </button>
     );
   }

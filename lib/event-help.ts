@@ -243,6 +243,11 @@ export const EVENT_HELP: Record<EventType, EventHelp> = {
     why: "Keeps the affair's transport history honest about abandoned requests.",
     recipients: ["Sales"],
   },
+  "transport.reopened": {
+    when: "Operations reopens a completed transport request to correct its answer (reason required).",
+    why: "Controlled correction path — the previous answer is snapshotted in the audit history and the requester knows the numbers are being revised.",
+    recipients: ["Sales"],
+  },
   "doc.newer_costing_available": {
     when: "The Director approves a newer costing for a Service Request that has live quotations.",
     why: "The salesperson must explicitly Keep or Apply — quotations never change silently.",

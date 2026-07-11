@@ -2,7 +2,11 @@ import type { Capability } from "@/lib/permissions";
 // Relative (not "@/lib/…"): this is a VALUE import and tests/permissions-nav
 // runs this file under the native node test runner, which can't resolve the
 // "@/" alias. Type-only imports are erased, so the alias above is fine.
-import { REQUEST_TYPES, requestHref } from "./request-types.ts";
+import {
+  REQUEST_TYPES,
+  INCOMING_REQUEST_QUEUES,
+  requestHref,
+} from "./request-types.ts";
 
 /**
  * CENTRAL NAVIGATION CONFIG — the single source of truth for the top mega
@@ -242,6 +246,41 @@ export const NAVIGATION: NavCategory[] = [
     ],
   },
 
+  // 3c) 📥 Requests (incoming) — the PROCESSING side of the request layer
+  //     (owner 2026-07-11): Operations & Task List Managers receive, process
+  //     and complete the requests Sales submit via 3b. Generated from the
+  //     INCOMING_REQUEST_QUEUES registry (lib/request-types.ts): one line
+  //     there = a new queue entry here. Each item's visibility MIRRORS its
+  //     queue page's guard (canAccessOrAdmin) — Sales create, Ops/TLM process,
+  //     so a user only ever sees the "Requests" menu of their own side. No
+  //     category href: the click target falls back to the user's first
+  //     visible queue (buildVisibleNavigation), always an openable page.
+  {
+    id: "requests-inbox",
+    // "Incoming Requests" (owner 2026-07-11): a role holding BOTH creation
+    // and processing capabilities (e.g. director) sees the two menus side
+    // by side — the label must say which side is which at a glance.
+    // Sales-side "Requests" (3b) = CREATE; this one = RECEIVE & PROCESS.
+    label: "Incoming Requests",
+    icon: "inbox",
+    colWidth: 460,
+    groups: [
+      {
+        title: "Incoming requests",
+        items: INCOMING_REQUEST_QUEUES.map((q) => ({
+          label: q.label,
+          href: q.href,
+          visibility: {
+            kind: "capabilityOrAdmin",
+            capabilities: [...q.capabilities],
+          },
+          description: q.description,
+          icon: q.icon,
+        })),
+      },
+    ],
+  },
+
   // 4) Task Lists — Factory mapping lives here (linked to task-list generation)
   {
     id: "task-lists",
@@ -325,14 +364,9 @@ export const NAVIGATION: NavCategory[] = [
             visibility: { kind: "capabilityOrAdmin", capabilities: ["shipping.process_update"] },
             description: "Freight refresh requests from Sales",
           },
-          {
-            // Transport Request module (m161) — packing lists, freight quotes
-            // and price updates requested from an affair.
-            label: "Transport Requests",
-            href: "/operations/transport-requests",
-            visibility: { kind: "capabilityOrAdmin", capabilities: ["shipping.process_update"] },
-            description: "Packing lists & freight quotes from Sales",
-          },
+          // Transport Requests (m161) moved OUT of Orders on 2026-07-11 —
+          // it now lives in the incoming "Requests" menu (requests-inbox,
+          // built from INCOMING_REQUEST_QUEUES) with the other queues.
           {
             label: "In Production",
             href: "/operations?status=in_production",

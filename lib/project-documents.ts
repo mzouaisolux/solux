@@ -25,13 +25,15 @@ export type ProjectFolder =
   | "logistics"
   | "customer";
 
-export const PROJECT_FOLDERS: { key: ProjectFolder; label: string; emoji: string }[] = [
-  { key: "commercial", label: "Commercial", emoji: "💼" },
-  { key: "study_lab", label: "Study Lab", emoji: "🔬" },
-  { key: "technical", label: "Technical", emoji: "📐" },
-  { key: "production", label: "Production", emoji: "🏭" },
-  { key: "logistics", label: "Logistics", emoji: "🚢" },
-  { key: "customer", label: "Customer Files", emoji: "📎" },
+// `icon` = NavIcons glyph name (Solux DNA line pictos); `emoji` kept for
+// plain-text surfaces (email bodies, PDF, logs) that can't render SVG.
+export const PROJECT_FOLDERS: { key: ProjectFolder; label: string; emoji: string; icon: string }[] = [
+  { key: "commercial", label: "Commercial", emoji: "💼", icon: "briefcase" },
+  { key: "study_lab", label: "Study Lab", emoji: "🔬", icon: "flask" },
+  { key: "technical", label: "Technical", emoji: "📐", icon: "dividers" },
+  { key: "production", label: "Production", emoji: "🏭", icon: "factory" },
+  { key: "logistics", label: "Logistics", emoji: "🚢", icon: "ship" },
+  { key: "customer", label: "Customer Files", emoji: "📎", icon: "paperclip" },
 ];
 
 export function folderLabel(f: ProjectFolder): string {

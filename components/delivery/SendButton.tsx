@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { openSendModal } from "./send-modal-store";
 import {
@@ -47,7 +47,7 @@ export function SendButton({
   clientEmail?: string | null;
   affairName?: string | null;
   preselectedIds?: string[];
-  label?: string;
+  label?: ReactNode;
   className?: string;
   title?: string;
 }) {

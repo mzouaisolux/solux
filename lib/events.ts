@@ -131,6 +131,8 @@ const DEFAULT_SEVERITY: Record<EventType, EventSeverity> = {
   "transport.requested": "medium",
   "transport.completed": "medium",
   "transport.cancelled": "low",
+  // Reopening a completed request is a correction — worth surfacing.
+  "transport.reopened": "medium",
   "doc.newer_costing_available": "medium",
   "doc.costing_applied": "low",
   "doc.costing_kept": "low",

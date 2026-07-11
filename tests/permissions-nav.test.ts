@@ -76,8 +76,15 @@ test("navigation config is well-formed: unique hrefs, real labels, ids", () => {
       assert.ok(g.title.trim().length > 0, "group needs a title");
       for (const i of g.items) {
         assert.ok(i.label.trim().length > 0, `empty label at ${i.href}`);
+        // Disabled rows (coming-soon request types) are inert by design:
+        // they render without navigation, so "#" is their only honest href.
+        if (i.disabled) continue;
         assert.ok(i.href.startsWith("/"), `href must be a route: ${i.href}`);
-        hrefs.push(i.href);
+        // Uniqueness applies to plain routes. Parameterized deep-links (the
+        // "?services=" request-type presets into the shared SR wizard) may
+        // legitimately collide — two request types can preset the same
+        // services today and diverge later.
+        if (!i.href.includes("?")) hrefs.push(i.href);
       }
     }
   }
@@ -89,6 +96,8 @@ test("super-admin (all caps, admin-like) sees every category", () => {
   assert.deepEqual(categoryIds(cats), [
     "dashboard",
     "clients-projects",
+    "requests",
+    "requests-inbox",
     "task-lists",
     "orders",
     "sales",
@@ -108,6 +117,80 @@ test("sales with no caps: Pricing and Admin categories are hidden (empty)", () =
   assert.ok(ids.includes("clients-projects"));
   assert.ok(ids.includes("task-lists"));
   assert.ok(ids.includes("orders"));
+});
+
+/* ------------------------------------------------------------------ */
+/*  Incoming "Requests" menu (requests-inbox) — the processing side.    */
+/*  Sales CREATE requests (id "requests"); Operations / TLM PROCESS     */
+/*  them here. Each queue entry mirrors its page guard.                 */
+/* ------------------------------------------------------------------ */
+
+test("incoming Requests menu is hidden from a capability-less sales user", () => {
+  const ids = categoryIds(buildVisibleNavigation(asSales));
+  assert.ok(
+    !ids.includes("requests-inbox"),
+    "requests-inbox must hide when the user processes no request queue"
+  );
+});
+
+test("ops with shipping.process_update sees the shipping queues (incl. Transport Requests)", () => {
+  const ops = {
+    granted: grant("shipping.process_update"),
+    adminLike: false,
+    technical: false,
+    finance: false,
+  };
+  const cats = buildVisibleNavigation(ops);
+  const inbox = cats.find((c) => c.id === "requests-inbox");
+  assert.ok(inbox, "requests-inbox should show for an ops processor");
+  const labels = inbox!.groups.flatMap((g) => g.items.map((i) => i.label));
+  assert.ok(labels.includes("Transport Requests"));
+  assert.ok(labels.includes("Packing List Requests"));
+  assert.ok(labels.includes("Price Update Requests"));
+  assert.ok(
+    !labels.includes("Product Cost Requests"),
+    "cost queues need project.enter_cost — must be pruned for shipping-only ops"
+  );
+  // No category href in the config: the click target must fall back to the
+  // first VISIBLE queue, always a page this user can open.
+  assert.equal(inbox!.href, "/operations/transport-requests");
+});
+
+test("TLM with task_list.validate sees the custom-product queue", () => {
+  const cats = buildVisibleNavigation(asTLM("task_list.validate"));
+  const inbox = cats.find((c) => c.id === "requests-inbox");
+  assert.ok(inbox, "requests-inbox should show for a TLM processor");
+  const labels = inbox!.groups.flatMap((g) => g.items.map((i) => i.label));
+  assert.deepEqual(labels, ["Custom Product Requests"]);
+});
+
+test("cost viewer sees Product Cost Requests → the real /projects/cost-requests page", () => {
+  const viewer = {
+    granted: grant("project.view_cost"),
+    adminLike: false,
+    technical: false,
+    finance: false,
+  };
+  const cats = buildVisibleNavigation(viewer);
+  const inbox = cats.find((c) => c.id === "requests-inbox");
+  assert.ok(inbox, "requests-inbox should show for a cost viewer");
+  const items = inbox!.groups.flatMap((g) => g.items);
+  const pc = items.find((i) => i.label === "Product Cost Requests");
+  assert.ok(pc, "Product Cost Requests entry missing");
+  assert.equal(pc!.href, "/projects/cost-requests", "must point to the real queue page");
+});
+
+test("Transport Requests moved OUT of Orders into the incoming Requests menu", () => {
+  const cats = buildVisibleNavigation(asSuperAdmin);
+  const orders = cats.find((c) => c.id === "orders")!;
+  const orderLabels = orders.groups.flatMap((g) => g.items.map((i) => i.label));
+  assert.ok(
+    !orderLabels.includes("Transport Requests"),
+    "Transport Requests must no longer live under Orders"
+  );
+  const inbox = cats.find((c) => c.id === "requests-inbox")!;
+  const inboxHrefs = inbox.groups.flatMap((g) => g.items.map((i) => i.href));
+  assert.ok(inboxHrefs.includes("/operations/transport-requests"));
 });
 
 test("sales: Task Lists shows, but the Factory configuration group is pruned", () => {

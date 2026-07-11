@@ -6,10 +6,12 @@ import { requireCapability } from "@/lib/permissions";
 import { emitEvent } from "@/lib/events";
 import {
   isTransportTablesMissing,
+  lineHasPanelSize,
   transportKindLabel,
   TRANSPORT_MIGRATION_HINT,
   type TransportRequestKind,
 } from "@/lib/transport-request";
+import { isEventNotificationEnabled } from "@/lib/notification-routing";
 
 export type TransportRequestInput = {
   kind: TransportRequestKind;
@@ -44,7 +46,7 @@ export type TransportRequestInput = {
  */
 export async function createTransportRequest(
   input: TransportRequestInput
-): Promise<{ id: string }> {
+): Promise<{ id: string; notified: boolean }> {
   await requireCapability("shipping.request_update");
   const supabase = createClient();
   const {
@@ -57,6 +59,19 @@ export async function createTransportRequest(
   if (linesRequired && input.lines.length === 0) {
     throw new Error(
       "Add at least one product line — Operations can't quote an empty shipment."
+    );
+  }
+  // MANDATORY PANEL SIZE (owner 2026-07-11): the panel drives every packing
+  // number — an incomplete request must never reach the Operations queue.
+  // Same shared rule as the form's submit gate (lib/transport-request).
+  const missingPanels = input.lines.filter(
+    (l) => !lineHasPanelSize(l.config_values)
+  ).length;
+  if (missingPanels > 0) {
+    throw new Error(
+      `Solar panel size is required on every product line — ${missingPanels} line${
+        missingPanels === 1 ? "" : "s"
+      } missing it.`
     );
   }
 
@@ -145,5 +160,8 @@ export async function createTransportRequest(
 
   revalidatePath(`/affairs/${input.affairId}`);
   revalidatePath("/operations/transport-requests");
-  return { id: inserted!.id };
+  // Honest toast (owner 2026-07-11): tell the caller whether the event
+  // registry actually delivers a notification for this submission.
+  const notified = await isEventNotificationEnabled("transport.requested");
+  return { id: inserted!.id, notified };
 }

@@ -452,7 +452,7 @@ export default async function ProjectDetailPage({ params }: { params: { id: stri
                 >
                   <ActionForm
                     action={requestCostingRevisionForm}
-                    success="✓ Cost revision requested — the Director has been notified"
+                    success="✓ Cost revision requested — back in the costing queue"
                   >
                     <input type="hidden" name="project_id" value={p.id} />
                     <div className="flex flex-wrap items-center gap-2">

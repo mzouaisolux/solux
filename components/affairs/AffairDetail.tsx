@@ -268,6 +268,8 @@ export function AffairDetail({
           affairId={affairId}
           assignableDocs={assignableDocs}
           requests={requests}
+          transportRequests={transportQuotes as any}
+          transportUserLabels={transportUserLabels}
           canCreateRequest={canCreateRequest}
           clientName={clientName}
           shippingStatuses={shippingStatuses}
