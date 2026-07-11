@@ -20,7 +20,15 @@ export const dynamic = "force-dynamic";
 export default async function NewProjectPage({
   searchParams,
 }: {
-  searchParams?: { tender?: string; affair?: string; client?: string; edit?: string };
+  searchParams?: {
+    tender?: string;
+    affair?: string;
+    client?: string;
+    edit?: string;
+    /** Request Hub deep-link: comma-separated service-type keys to pre-check
+     *  (e.g. "freight,packing_list" for a Transport Request). */
+    services?: string;
+  };
 }) {
   await getEffectiveRole();
   const canCreate = await hasUiCapability("project.create");
@@ -181,6 +189,34 @@ export default async function NewProjectPage({
         affairName,
       };
     }
+  }
+
+  // Request Hub deep-link (?services=freight,packing_list): pre-check the
+  // matching service types so "Transport Request" ≠ "Product Cost Request"
+  // from the first screen. Additive — never applied in edit mode (the saved
+  // request's real services win), unknown keys (future types) are ignored.
+  if (searchParams?.services && !editId) {
+    const wanted = new Set(
+      searchParams.services.split(",").map((s) => s.trim()).filter(Boolean)
+    );
+    const base: ProjectFormInitial =
+      initial ?? {
+        name: "",
+        clientId: "",
+        affairId: "",
+        country: "",
+        quantity: "",
+        opportunityValue: "",
+        additionalNotes: "",
+        sourceTenderId: null,
+        sourceLabel: "",
+      };
+    initial = {
+      ...base,
+      reqProduct: wanted.has("product_pricing"),
+      reqPacking: wanted.has("packing_list"),
+      reqFreight: wanted.has("freight"),
+    };
   }
 
   return (

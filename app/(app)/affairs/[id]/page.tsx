@@ -78,14 +78,16 @@ export default async function AffairDetailPage({ params }: { params: { id: strin
   if (!affairRec) notFound();
   const affair = affairRec as AffairRecord & { source?: string | null };
 
-  // CRM step 4 (m103): the deal's planned actions. Defensive pre-migration:
-  // an error (table missing) → null → the card simply doesn't render.
-  const { data: paRows, error: paError } = await supabase
-    .from("planned_actions")
-    .select("id, affair_id, action_type, title, due_date, done_at, notes, created_at")
+  // The project's Service Requests (Requests section — the operational
+  // engine). CRM planned_actions are deliberately NOT loaded anymore (owner
+  // 2026-07-10: the project page is an ERP starting point, not a CRM; the
+  // CRM module will be redesigned later). Defensive: error → null → hidden.
+  const { data: srRows, error: srError } = await supabase
+    .from("project_requests")
+    .select("id, name, status, created_at")
     .eq("affair_id", id)
-    .order("due_date", { ascending: true });
-  const plannedActions = paError ? null : ((paRows ?? []) as any[]);
+    .order("created_at", { ascending: false });
+  const requests = srError ? null : ((srRows ?? []) as any[]);
 
   const sourceTenderId = (affair as any).source_tender_id as string | null;
   const [{ role }, ownerOptionsRaw, documentsRes, clientRes, tenderRes] = await Promise.all([
@@ -354,13 +356,19 @@ export default async function AffairDetailPage({ params }: { params: { id: strin
   // Shipping status per quotation — one batch load for the whole affair, so
   // the freight-freshness badge + Request Shipping Update action sit right on
   // each version in the deal workspace.
-  const [shippingWarn, shippingCritical, canRequestShipping, canSetDocStatus] =
-    await Promise.all([
-      getNumberSetting(supabase, FRESHNESS_WARN_DAYS_KEY, FRESHNESS_DEFAULTS.warnDays),
-      getNumberSetting(supabase, FRESHNESS_CRITICAL_DAYS_KEY, FRESHNESS_DEFAULTS.criticalDays),
-      hasUiCapability("shipping.request_update"),
-      hasUiCapability("document.set_status"),
-    ]);
+  const [
+    shippingWarn,
+    shippingCritical,
+    canRequestShipping,
+    canSetDocStatus,
+    canCreateRequest,
+  ] = await Promise.all([
+    getNumberSetting(supabase, FRESHNESS_WARN_DAYS_KEY, FRESHNESS_DEFAULTS.warnDays),
+    getNumberSetting(supabase, FRESHNESS_CRITICAL_DAYS_KEY, FRESHNESS_DEFAULTS.criticalDays),
+    hasUiCapability("shipping.request_update"),
+    hasUiCapability("document.set_status"),
+    hasUiCapability("project.create"),
+  ]);
   const shippingStatusMap = await loadShippingStatuses(
     supabase,
     group.documents.map((d) => d.id)
@@ -377,6 +385,40 @@ export default async function AffairDetailPage({ params }: { params: { id: strin
   const profitability =
     (await loadAffairProfitability(supabase, [id])).get(id) ?? null;
 
+  // m161 — Transport Request module: the affair's transport quotes (versioned
+  // price history + packing results + open requests). Dormant-safe: pre-m161
+  // the select errors and the card simply never renders.
+  let transportQuotes: any[] = [];
+  let transportUserLabels: Record<string, string> = {};
+  {
+    const { data: tq, error: tqErr } = await supabase
+      .from("transport_requests")
+      .select(
+        "id, kind, status, freight_cost, insurance_cost, cbm, gross_weight_kg, cartons_count, pallets_count, incoterm, destination_country, destination_port, valid_until, ops_comments, requested_at, requested_by, completed_at, completed_by"
+      )
+      .eq("affair_id", id)
+      .order("requested_at", { ascending: false });
+    if (!tqErr && tq && tq.length > 0) {
+      transportQuotes = tq as any[];
+      const byIds = [
+        ...new Set(
+          transportQuotes
+            .flatMap((t) => [t.completed_by, t.requested_by])
+            .filter(Boolean)
+        ),
+      ] as string[];
+      if (byIds.length > 0) {
+        try {
+          transportUserLabels = Object.fromEntries(
+            await resolveUserLabelStrings(byIds)
+          );
+        } catch {
+          transportUserLabels = {};
+        }
+      }
+    }
+  }
+
   return (
     <AffairDetail
       affair={group}
@@ -387,12 +429,15 @@ export default async function AffairDetailPage({ params }: { params: { id: strin
       canRequestShipping={canRequestShipping}
       freshnessThresholds={{ warnDays: shippingWarn, criticalDays: shippingCritical }}
       canSetDocStatus={canSetDocStatus}
+      canCreateRequest={canCreateRequest}
+      transportQuotes={transportQuotes}
+      transportUserLabels={transportUserLabels}
       owners={owners}
       canAssignOwner={canAssignOwner}
       assignableDocs={assignableDocs}
       invoiceFamilies={invoiceFamilies}
       source={affair.source ?? null}
-      plannedActions={plannedActions}
+      requests={requests}
       tenderOrigin={
         tenderRes.data
           ? {

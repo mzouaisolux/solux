@@ -109,6 +109,11 @@ export default function MegaMenu({
                 active ? "text-white is-open" : "text-[#DFDEE4] hover:text-white"
               }`}
             >
+              {cat.icon && (
+                <span className="sx-navic" aria-hidden>
+                  <NavGlyph name={cat.icon} />
+                </span>
+              )}
               {cat.label}
               {catBadge > 0 && (
                 <span className="sx-navcount">{catBadge > 99 ? "99+" : catBadge}</span>
@@ -150,6 +155,11 @@ export default function MegaMenu({
                 active || open ? "text-white" : "text-[#DFDEE4] hover:text-white"
               } ${open ? "is-open" : ""}`}
             >
+              {cat.icon && (
+                <span className="sx-navic" aria-hidden>
+                  <NavGlyph name={cat.icon} />
+                </span>
+              )}
               {cat.label}
               {catBadge > 0 && (
                 <span className="sx-navcount">{catBadge > 99 ? "99+" : catBadge}</span>
@@ -203,7 +213,7 @@ export default function MegaMenu({
                     <div
                       className="sx-mega-cols"
                       style={{
-                        gridTemplateColumns: `repeat(${cols}, 290px)`,
+                        gridTemplateColumns: `repeat(${cols}, ${cat.colWidth ?? 290}px)`,
                       }}
                     >
                       {cat.groups.map((group, gi) => (
@@ -217,15 +227,10 @@ export default function MegaMenu({
                           {group.items.map((item) => {
                             const itemActive = isActiveHref(item.href);
                             const cnt = itemBadges?.[base(item.href)] ?? 0;
-                            return (
-                              <Link
-                                key={item.href}
-                                href={item.href}
-                                onClick={() => setOpenId(null)}
-                                className={`sx-item ${itemActive ? "is-active" : ""}`}
-                              >
+                            const inner = (
+                              <>
                                 <span className="sx-ic">
-                                  <NavGlyph name={pickGlyph(item.label)} />
+                                  <NavGlyph name={item.icon ?? pickGlyph(item.label)} />
                                 </span>
                                 <span className="sx-body">
                                   <span className="sx-title">
@@ -236,14 +241,47 @@ export default function MegaMenu({
                                         {cnt > 99 ? "99+" : cnt}
                                       </span>
                                     )}
+                                    {item.badge && (
+                                      <span className="ml-1.5 inline-flex items-center rounded-full border border-neutral-200 bg-neutral-100 px-1.5 py-px text-[9px] font-semibold uppercase tracking-wide text-neutral-500">
+                                        {item.badge}
+                                      </span>
+                                    )}
                                   </span>
                                   {item.description && (
                                     <span className="sx-sub">{item.description}</span>
                                   )}
                                 </span>
-                                <span className="sx-arrow">
-                                  <NavArrow />
+                                {!item.disabled && (
+                                  <span className="sx-arrow">
+                                    <NavArrow />
+                                  </span>
+                                )}
+                              </>
+                            );
+                            // Coming-soon items render as inert rows — same
+                            // look, no navigation (trains users to the future
+                            // architecture without a dead link).
+                            if (item.disabled) {
+                              return (
+                                <span
+                                  key={`${item.href}-${item.label}`}
+                                  className="sx-item cursor-default opacity-55"
+                                  aria-disabled="true"
+                                >
+                                  {inner}
                                 </span>
+                              );
+                            }
+                            return (
+                              <Link
+                                // Label-scoped key — two request items may share
+                                // one target href (both land on the SR wizard).
+                                key={`${item.href}-${item.label}`}
+                                href={item.href}
+                                onClick={() => setOpenId(null)}
+                                className={`sx-item ${itemActive ? "is-active" : ""}`}
+                              >
+                                {inner}
                               </Link>
                             );
                           })}

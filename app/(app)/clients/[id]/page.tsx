@@ -65,6 +65,7 @@ import {
   STATUS_CHIP,
 } from "@/components/prospects/tender-status";
 import { NewProjectPanel } from "@/components/affairs/NewProjectPanel";
+import { RequestHub } from "@/components/requests/RequestHub";
 import { listAssignableOwners } from "@/lib/owner";
 import type { AssignableDoc } from "@/components/affairs/AssignDocumentPanel";
 import type { AffairGroup } from "@/lib/affairs-prototype";
@@ -460,6 +461,15 @@ export default async function ClientWorkspacePage({
               + New service request
             </Link>
           )}
+          {/* Request Hub — workflow-first layer (ADDITIVE, replaces nothing):
+              pick a request type, then the affair to attach it to (or create
+              one inline and continue). */}
+          <RequestHub
+            clientId={client.id}
+            canCreate={canCreateProjectRequest}
+            variant="primary"
+            label="⚡ New Request"
+          />
           {canCreateQuotation && (
             <Link
               href={`/clients/${client.id}/import-invoices`}

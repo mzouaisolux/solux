@@ -137,6 +137,10 @@ export type EventType =
   | "doc.shipping_update_requested"
   | "doc.shipping_update_completed"
   | "doc.shipping_update_cancelled"
+  // transport request module (m161) — affair-centric logistics loop
+  | "transport.requested"
+  | "transport.completed"
+  | "transport.cancelled"
   // costing versions (m140) — newer-costing loop on quotations
   | "doc.newer_costing_available"
   | "doc.costing_applied"
@@ -211,6 +215,9 @@ export const ACTIONABLE_MEDIUM_EVENTS: ReadonlySet<EventType> = new Set<EventTyp
   // Shipping rate refresh (m149) — same handoff logic, doc-centric
   "doc.shipping_update_requested", // → operations
   "doc.shipping_update_completed", // → sales (requester)
+  // Transport Request module (m161) — same handoff, affair-centric
+  "transport.requested", // → operations
+  "transport.completed", // → sales (requester)
   // Costing versions (m140) — a newer approved costing needs the salesperson's
   // explicit Keep/Apply decision on the quotation
   "doc.newer_costing_available", // → sales (doc owner)
@@ -407,6 +414,9 @@ export function eventTypeLabel(t: EventType): string {
     "doc.shipping_update_requested": "Shipping update requested",
     "doc.shipping_update_completed": "Shipping quotation updated",
     "doc.shipping_update_cancelled": "Shipping update cancelled",
+    "transport.requested": "Transport request submitted",
+    "transport.completed": "Transport request completed",
+    "transport.cancelled": "Transport request cancelled",
     "doc.newer_costing_available": "Newer costing available",
     "doc.costing_applied": "Latest costing applied",
     "doc.costing_kept": "Existing costing kept",

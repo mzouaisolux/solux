@@ -88,6 +88,10 @@ export const NOTIFICATION_CATALOG: Record<EventType, NotificationCatalogEntry> =
   "doc.shipping_update_requested": { entity: "document", category: "shipping", severity: "medium", label: "Shipping update requested" },
   "doc.shipping_update_completed": { entity: "document", category: "shipping", severity: "medium", label: "Shipping quotation updated" },
   "doc.shipping_update_cancelled": { entity: "document", category: "shipping", severity: "low", label: "Shipping update cancelled" },
+  // ---- transport request module (m161) ----
+  "transport.requested": { entity: "affair", category: "shipping", severity: "medium", label: "Transport request submitted" },
+  "transport.completed": { entity: "affair", category: "shipping", severity: "medium", label: "Transport request completed" },
+  "transport.cancelled": { entity: "affair", category: "shipping", severity: "low", label: "Transport request cancelled" },
   "doc.newer_costing_available": { entity: "document", category: "money", severity: "medium", label: "Newer costing available" },
   "doc.costing_applied": { entity: "document", category: "money", severity: "low", label: "Latest costing applied" },
   "doc.costing_kept": { entity: "document", category: "money", severity: "low", label: "Existing costing kept" },

@@ -14,15 +14,20 @@ import {
   affairAccent,
   affairPhaseLabel,
 } from "@/components/affairs/AffairProgressStrip";
-import { AffairWorkspace, type ShippingWorkspaceProps } from "@/components/affairs/AffairWorkspace";
+import {
+  AffairWorkspace,
+  type AffairRequestLite,
+  type ShippingWorkspaceProps,
+} from "@/components/affairs/AffairWorkspace";
 import {
   AffairInvoicesCard,
   type AffairInvoiceFamily,
 } from "@/components/affairs/AffairInvoicesCard";
 import { ProjectActionsMenu } from "@/components/affairs/ProjectActionsMenu";
+import { RequestHub } from "@/components/requests/RequestHub";
+import { TransportQuotesCard } from "@/components/affairs/TransportQuotesCard";
 import { AssignableDoc } from "@/components/affairs/AssignDocumentPanel";
 import type { Option } from "@/components/affairs/NewProjectPanel";
-import type { PlannedActionRow } from "@/components/affairs/AffairActionsCard";
 import { AFFAIR_SOURCE_OPTIONS } from "@/components/affairs/affair-sources";
 import { setAffairSource } from "@/app/(app)/affairs/actions";
 
@@ -64,26 +69,34 @@ export function AffairDetail({
   assignableDocs,
   invoiceFamilies = [],
   source,
-  plannedActions,
+  requests,
   tenderOrigin,
   shippingStatuses,
   canRequestShipping,
   freshnessThresholds,
   canSetDocStatus,
   profitability,
+  canCreateRequest = false,
+  transportQuotes = [],
+  transportUserLabels = {},
 }: {
   affair: AffairGroup;
   affairId: string;
   clientName: string;
   owners: Option[];
   canAssignOwner: boolean;
+  /** hasUiCapability("project.create") — shows the ➕ New Request hub. */
+  canCreateRequest?: boolean;
+  /** m161 — the affair's transport requests (versioned price history card). */
+  transportQuotes?: any[];
+  transportUserLabels?: Record<string, string>;
   assignableDocs: AssignableDoc[];
   /** m141 — the deal's commercial invoices + legal invoices. */
   invoiceFamilies?: AffairInvoiceFamily[];
   /** CRM step 3 (m102): where the deal came from. */
   source?: string | null;
-  /** CRM step 4 (m103): the deal's planned actions (null pre-migration). */
-  plannedActions?: PlannedActionRow[] | null;
+  /** Service Requests linked to this affair (Requests section). */
+  requests?: AffairRequestLite[] | null;
   /** m109 — tender origin (banner + inherited documents). */
   tenderOrigin?: TenderOrigin | null;
   /** hasUiCapability("document.set_status") — Documents status setter. */
@@ -167,6 +180,16 @@ export function AffairDetail({
             )}
           </div>
         </div>
+        {/* The operational CTA: a project starts with its first quotation. */}
+        <Link
+          href={`/documents/new?affair=${affairId}`}
+          className="shrink-0 rounded-md bg-solux px-3 py-1.5 text-[12px] font-semibold text-white hover:bg-solux-dark"
+        >
+          + New Quotation
+        </Link>
+        {/* Request Hub — every request created here is automatically linked
+            to THIS affair (workflow-first layer; additive). */}
+        <RequestHub affairId={affairId} canCreate={canCreateRequest} />
         {/* m109 — Option B of the tender workflow: create the technical
             request from the opportunity. Full form, pre-filled. */}
         <Link
@@ -244,7 +267,8 @@ export function AffairDetail({
           affair={affair}
           affairId={affairId}
           assignableDocs={assignableDocs}
-          plannedActions={plannedActions}
+          requests={requests}
+          canCreateRequest={canCreateRequest}
           clientName={clientName}
           shippingStatuses={shippingStatuses}
           canRequestShipping={canRequestShipping}
@@ -252,6 +276,19 @@ export function AffairDetail({
           canSetDocStatus={canSetDocStatus}
           profitability={profitability}
         />
+
+        {/* m161 — Transport Request module read surface: the versioned price
+            history + packing results + the "Update Transport Price" entry.
+            Above invoices — it belongs to the operational flow. Hidden when
+            the affair has none. */}
+        <div className="mt-8 border-t border-neutral-200 pt-6">
+          <TransportQuotesCard
+            rows={transportQuotes as any}
+            affairId={affairId}
+            userLabels={transportUserLabels}
+            canRequest={canRequestShipping ?? false}
+          />
+        </div>
 
         {invoiceFamilies.length > 0 && (
           <div className="mt-8 border-t border-neutral-200 pt-6">

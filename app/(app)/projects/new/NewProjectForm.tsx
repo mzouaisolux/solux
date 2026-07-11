@@ -7,6 +7,7 @@ import { toast } from "@/components/feedback/toast-store";
 import { SubmitButton } from "@/components/feedback/ActionForm";
 import { TRANSPORT_MODES, TRANSPORT_MODE_LABEL } from "@/lib/types";
 import { ACTIVE_SERVICE_TYPES } from "@/lib/service-types";
+import { SOLAR_PANEL_FALLBACK_OPTIONS } from "@/lib/transport-request";
 import { TILT_ANGLE_PRESETS, cleanTiltAngle } from "@/lib/industrial-spec";
 
 function isNavError(e: any): boolean {
@@ -156,8 +157,8 @@ export default function NewProjectForm({
     if (!tenderMode && !clientId) { toast.error("Select a client first."); return false; }
     const hasExisting = affairId.trim() !== "";
     const hasNew = newAffairName.trim() !== "";
-    if (hasExisting && hasNew) { toast.error("Pick an existing affair OR name a new one — not both."); return false; }
-    if (!hasExisting && !hasNew && !tenderMode) { toast.error("An affair is required — choose one or name a new one."); return false; }
+    if (hasExisting && hasNew) { toast.error("Pick an existing project OR name a new one — not both."); return false; }
+    if (!hasExisting && !hasNew && !tenderMode) { toast.error("A project is required — choose one or name a new one."); return false; }
     return true;
   }
   function canLeaveStep1(): boolean {
@@ -194,11 +195,11 @@ export default function NewProjectForm({
           const hasExisting = affairId.trim() !== "";
           const hasNew = newAffairName.trim() !== "";
           if (hasExisting && hasNew) {
-            const m = "Pick an existing affair OR name a new one — not both.";
+            const m = "Pick an existing project OR name a new one — not both.";
             setFormError(m); toast.error(m); return;
           }
           if (!hasExisting && !hasNew && !tenderMode) {
-            const m = "An affair is required to create a service request.";
+            const m = "A project is required to create a service request.";
             setFormError(m); toast.error(m); return;
           }
         }
@@ -279,7 +280,7 @@ export default function NewProjectForm({
             )}
           </div>
           <div className="fcol span3">
-            <span className="fl">Affair <span className="req">*</span></span>
+            <span className="fl">Project / Opportunity <span className="req">*</span></span>
             {isEdit ? (
               // Editing an existing request — the affaire is fixed (read-only).
               <input value={initial?.affairName ?? affairName ?? "—"} disabled />
@@ -295,7 +296,7 @@ export default function NewProjectForm({
               }}
             >
               <option value="">
-                {clientId ? "— Select an existing affair —" : "— Select a client first —"}
+                {clientId ? "— Select an existing project —" : "— Select a client first —"}
               </option>
               {clientAffairs.map((a) => (
                 <option key={a.id} value={a.id}>{a.name}</option>
@@ -308,7 +309,7 @@ export default function NewProjectForm({
               name="new_affair_name"
               value={newAffairName}
               disabled={!clientId && !tenderMode}
-              placeholder="New affair — e.g. AO SONELGAZ 2027"
+              placeholder="New project — e.g. AO SONELGAZ 2027"
               onChange={(e) => {
                 setNewAffairName(e.target.value);
                 if (e.target.value.trim()) setAffairId("");
@@ -316,7 +317,7 @@ export default function NewProjectForm({
             />
             <p style={{ fontSize: 12, color: "var(--sx-mute-2)", margin: "6px 0 0" }}>
               {!clientId
-                ? "Pick a client first, then choose its affair or name a new one."
+                ? "Pick a client first, then choose its project or name a new one."
                 : "Choose an existing affair for this client, or name a new one — it's created and linked automatically."}
             </p>
               </>
@@ -385,7 +386,7 @@ export default function NewProjectForm({
         <h3>Solar product configuration</h3>
         <div className="fgrid">
           <div className="fcol"><span className="fl">LED power</span><input name="led_power" placeholder="e.g. 60W" defaultValue={initial?.ledPower || undefined} /></div>
-          <div className="fcol"><span className="fl">Solar panel size</span><input name="solar_panel_size" placeholder="e.g. 120W" defaultValue={initial?.solarPanelSize || undefined} /></div>
+          <div className="fcol"><span className="fl">Solar panel size</span><SolarPanelSizeField initial={initial?.solarPanelSize || ""} /></div>
           <div className="fcol">
             <span className="fl">Solar panel tilt angle <span className="req">*</span></span>
             <select
@@ -487,7 +488,7 @@ export default function NewProjectForm({
         <div className="sx-micro">Summary — verify before submitting</div>
         <div className="sg">
           <Summary label="Client" value={clientName ?? "—"} />
-          <Summary label="Affair" value={affairName ?? "—"} />
+          <Summary label="Project" value={affairName ?? "—"} />
           <Summary label="Product category" value={categoryName ?? "—"} />
           <Summary label="Quantity" value={hasQty ? quantity : "—"} />
           <Summary label="Panel tilt angle" value={tiltValue !== "" ? `${tiltValue}°` : "—"} />
@@ -539,5 +540,53 @@ function Summary({ label, value }: { label: string; value: string }) {
       <div className="mk">{label}</div>
       <div className="mv">{value}</div>
     </div>
+  );
+}
+
+/** Solar panel size — standard sizes in a dropdown (same list as the
+ *  Transport wizard: consistent, less typing, no "430w"/"430 W" drift) with
+ *  a Custom… escape for client specs outside the standard range. Keeps the
+ *  same `solar_panel_size` form field, so the server action is untouched. */
+function SolarPanelSizeField({ initial }: { initial: string }) {
+  const std = SOLAR_PANEL_FALLBACK_OPTIONS as readonly string[];
+  const startCustom = initial !== "" && !std.includes(initial);
+  const [custom, setCustom] = useState(startCustom);
+  const [value, setValue] = useState(initial);
+  if (custom) {
+    return (
+      <div style={{ display: "flex", gap: 6 }}>
+        <input
+          name="solar_panel_size"
+          placeholder="e.g. 120W"
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          autoFocus={!startCustom}
+        />
+        <button
+          type="button"
+          className="sx-btn sx-btn-sm"
+          onClick={() => { setCustom(false); setValue(""); }}
+          title="Back to the standard sizes"
+        >
+          List
+        </button>
+      </div>
+    );
+  }
+  return (
+    <select
+      name="solar_panel_size"
+      value={value}
+      onChange={(e) => {
+        if (e.target.value === "__custom__") { setCustom(true); setValue(""); }
+        else setValue(e.target.value);
+      }}
+    >
+      <option value="">— select —</option>
+      {std.map((o) => (
+        <option key={o} value={o}>{o}</option>
+      ))}
+      <option value="__custom__">Custom…</option>
+    </select>
   );
 }

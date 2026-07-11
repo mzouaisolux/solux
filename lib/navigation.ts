@@ -1,4 +1,8 @@
 import type { Capability } from "@/lib/permissions";
+// Relative (not "@/lib/…"): this is a VALUE import and tests/permissions-nav
+// runs this file under the native node test runner, which can't resolve the
+// "@/" alias. Type-only imports are erased, so the alias above is fine.
+import { REQUEST_TYPES, requestHref } from "./request-types.ts";
 
 /**
  * CENTRAL NAVIGATION CONFIG — the single source of truth for the top mega
@@ -55,6 +59,12 @@ export type NavItem = {
   visibility: NavVisibility;
   /** Optional one-line hint shown under the label in the mega panel. */
   description?: string;
+  /** Optional small text chip next to the label (e.g. "Coming Soon"). */
+  badge?: string;
+  /** Render as an inert row (no navigation) — used for coming-soon items. */
+  disabled?: boolean;
+  /** Explicit NavIcons glyph for the item tile (falls back to pickGlyph). */
+  icon?: string;
 };
 
 export type NavGroup = {
@@ -74,6 +84,10 @@ export type NavCategory = {
   href?: string;
   /** Visibility of a DIRECT-link category (ignored when groups decide it). */
   visibility?: NavVisibility;
+  /** Optional NavIcons glyph rendered before the label in the nav bar. */
+  icon?: string;
+  /** Mega-panel column width in px (default 290) — e.g. Requests uses 400. */
+  colWidth?: number;
   groups: NavGroup[];
 };
 
@@ -181,6 +195,53 @@ export const NAVIGATION: NavCategory[] = [
     ],
   },
 
+  // 3b) ⚡ Requests — the workflow-first layer (owner 2026-07-08). Generated
+  //     from the REQUEST_TYPES registry (lib/request-types.ts): one line
+  //     there = a new entry here + on the client & affair pages. ADDITIVE:
+  //     replaces nothing. Active types deep-link to the SR wizard with the
+  //     right services pre-checked; coming-soon types are inert with a badge
+  //     (training users to the architecture before the module ships).
+  {
+    id: "requests",
+    label: "Requests",
+    // Bolt line-icon before the label (DNA mockup 2026-07-10) — replaces the
+    // old ⚡ emoji; item emojis are gone too (each type carries its glyph).
+    icon: "bolt",
+    // Wider single column: request labels + descriptions breathe at 460px.
+    colWidth: 460,
+    // Click target (Option A): the Service Requests list — the natural home
+    // of every request today. Hover opens the panel with the quick types.
+    href: "/projects",
+    groups: [
+      {
+        title: "Quick requests",
+        items: REQUEST_TYPES.map((r) => ({
+          label: `New ${r.label}`,
+          href: r.status === "active" ? requestHref(r, {}) : "#",
+          visibility: { kind: "capability", capability: "project.create" },
+          description: r.description,
+          icon: r.icon,
+          ...(r.status === "coming_soon"
+            ? { badge: "Coming Soon", disabled: true }
+            : {}),
+        })),
+      },
+      {
+        // Follow-up surfaces — where submitted requests are read & refreshed.
+        title: "Follow-up",
+        items: [
+          {
+            label: "Transport Quotations",
+            href: "/transport",
+            visibility: { kind: "capability", capability: "shipping.request_update" },
+            description: "Every transport price, versioned — update from here",
+            icon: "truck",
+          },
+        ],
+      },
+    ],
+  },
+
   // 4) Task Lists — Factory mapping lives here (linked to task-list generation)
   {
     id: "task-lists",
@@ -263,6 +324,14 @@ export const NAVIGATION: NavCategory[] = [
             href: "/operations/shipping-updates",
             visibility: { kind: "capabilityOrAdmin", capabilities: ["shipping.process_update"] },
             description: "Freight refresh requests from Sales",
+          },
+          {
+            // Transport Request module (m161) — packing lists, freight quotes
+            // and price updates requested from an affair.
+            label: "Transport Requests",
+            href: "/operations/transport-requests",
+            visibility: { kind: "capabilityOrAdmin", capabilities: ["shipping.process_update"] },
+            description: "Packing lists & freight quotes from Sales",
           },
           {
             label: "In Production",

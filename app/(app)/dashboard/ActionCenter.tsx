@@ -54,6 +54,23 @@ export async function ActionCenter({
     act.push({ key: "review", title: "Task lists — needs your review", items: ((toReview.data ?? []) as any[]).map((r) => ({ id: r.id, title: r.number ?? "Task list", subtitle: company(r), href: `/task-lists/${r.id}`, cta: "Review →" })) });
   }
 
+  // ---- Operations (capability-gated, not raw role): service requests
+  //      waiting on THEIR numbers. Before this, waiting_factory_cost was
+  //      invisible on the dashboard — ops had to know to open /projects
+  //      (E2E audit 2026-07-10, BUG-3).
+  const [canEnterCost, canEnterLogistics] = await Promise.all([
+    hasUiCapability("project.enter_cost"),
+    hasUiCapability("project.enter_logistics"),
+  ]);
+  if (canEnterCost) {
+    const toCost = await supabase.from("project_requests").select("id, name, clients:client_id(company_name)").eq("status", "waiting_factory_cost").is("archived_at", null).order("updated_at", { ascending: true });
+    act.push({ key: "cost", title: "Factory costs to enter", items: ((toCost.data ?? []) as any[]).map((r) => ({ id: r.id, title: r.name ?? "Service request", subtitle: company(r), href: `/projects/${r.id}`, cta: "Enter cost →" })) });
+  }
+  if (canEnterLogistics) {
+    const toLogistics = await supabase.from("project_requests").select("id, name, clients:client_id(company_name)").eq("status", "waiting_logistics").is("archived_at", null).order("updated_at", { ascending: true });
+    act.push({ key: "logistics", title: "Packing & freight to enter", items: ((toLogistics.data ?? []) as any[]).map((r) => ({ id: r.id, title: r.name ?? "Service request", subtitle: company(r), href: `/projects/${r.id}`, cta: "Enter logistics →" })) });
+  }
+
   // ---- Sales: their workflow moves (generate quote / launch / submit) ----
   if (isSales) {
     const [priced, drafts, wonQuotes, tlAffairs, inProgress, sentQuotes] = await Promise.all([

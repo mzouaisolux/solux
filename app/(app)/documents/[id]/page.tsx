@@ -1309,6 +1309,20 @@ export default async function DocumentViewPage({
                 affairName={(doc as any).affair_name ?? null}
               />
             )}
+            {/* Context-aware transport (owner §8): one click creates a
+                Transport Request with customer/project/products pre-filled
+                from THIS document (?source= auto-imports the lines). */}
+            {canRequestShippingUpdate &&
+              doc.status !== "cancelled" &&
+              (doc as any).affair_id && (
+                <Link
+                  href={`/transport/new?affair=${(doc as any).affair_id}&source=${doc.id}`}
+                  className="rounded border border-neutral-200 px-4 py-2 text-sm text-neutral-700 hover:bg-neutral-50"
+                  title="Create a Transport Request with this document's products pre-filled"
+                >
+                  🚢 Request Transport
+                </Link>
+              )}
           </div>
 
           {/* Destructive actions — discreet 3-dot menu. Archive is the

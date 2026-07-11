@@ -228,6 +228,21 @@ export const EVENT_HELP: Record<EventType, EventHelp> = {
     why: "Keeps the document timeline honest about abandoned refreshes.",
     recipients: ["Sales"],
   },
+  "transport.requested": {
+    when: "Sales submits a Transport Request (packing list, freight price or price update) on an affair.",
+    why: "Operations must prepare the packing list or quote the freight for the shipment.",
+    recipients: ["Operations"],
+  },
+  "transport.completed": {
+    when: "Operations enters the results (freight / weights / CBM) and completes the transport request.",
+    why: "The requester gets the transport answer; completed price requests become the affair's price history.",
+    recipients: ["Sales"],
+  },
+  "transport.cancelled": {
+    when: "A transport request is withdrawn or declined.",
+    why: "Keeps the affair's transport history honest about abandoned requests.",
+    recipients: ["Sales"],
+  },
   "doc.newer_costing_available": {
     when: "The Director approves a newer costing for a Service Request that has live quotations.",
     why: "The salesperson must explicitly Keep or Apply — quotations never change silently.",
