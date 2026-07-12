@@ -7,6 +7,7 @@ import {
   resolveStandardUnitPrice,
 } from "@/lib/pricing";
 import { COST_REVISION_REASONS } from "@/lib/cost-revision";
+import { buildVariantIndex } from "@/lib/product-variants";
 import {
   CUSTOM_OPTION_SENTINEL,
   customValueKey,
@@ -218,9 +219,15 @@ function CategoryLineCard({
       "Service request",
     [products, categoryId]
   );
+  // UX variant collapsing — show only standard models; the IoT choice is an
+  // option on the full card after the model is picked (lib/product-variants).
+  const variantIndex = useMemo(() => buildVariantIndex(products), [products]);
   const models = useMemo(
-    () => products.filter((p) => p.category_id === categoryId),
-    [products, categoryId]
+    () =>
+      products.filter(
+        (p) => p.category_id === categoryId && !variantIndex.hiddenIds.has(p.id)
+      ),
+    [products, categoryId, variantIndex]
   );
   const categoryFields = categoryId
     ? fieldsByCategory?.get(categoryId) ?? []
@@ -375,6 +382,11 @@ function CategoryLineCard({
                     <div className="truncate text-[11px] text-neutral-400">
                       {p.category ?? categoryName}
                     </div>
+                    {variantIndex.groupsByProductId.has(p.id) && (
+                      <span className="mt-1 inline-flex items-center rounded-full bg-sky-50 px-1.5 py-0.5 text-[10px] font-medium text-sky-700">
+                        IoT option available
+                      </span>
+                    )}
                   </div>
                 </button>
               ))}
@@ -503,6 +515,15 @@ export default function ProductConfigurator({
     [options, product]
   );
 
+  // UX variant collapsing (lib/product-variants) — the catalogue grid shows
+  // only standard models; the standard↔IoT choice is the Connectivity panel
+  // on the selected card. Keyed by every member id, so a line that already
+  // carries the IoT product still resolves its group.
+  const variantIndex = useMemo(() => buildVariantIndex(products), [products]);
+  const connectivityGroup = product
+    ? variantIndex.groupsByProductId.get(product.id) ?? null
+    : null;
+
   // ----- picker state -----
   // Closed by default: the no-product case is handled by a dedicated empty-state
   // early return below (which renders the picker directly), so when the FULL card
@@ -566,6 +587,7 @@ export default function ProductConfigurator({
   const filteredProducts = useMemo(() => {
     const q = search.trim().toLowerCase();
     return products.filter((p) => {
+      if (variantIndex.hiddenIds.has(p.id)) return false;
       const cat = p.category?.trim() || UNCATEGORIZED;
       if (categoryFilter && cat !== categoryFilter) return false;
       if (showFavoritesOnly && !favorites.has(p.id)) return false;
@@ -575,7 +597,7 @@ export default function ProductConfigurator({
       }
       return true;
     });
-  }, [products, categoryFilter, showFavoritesOnly, favorites, search]);
+  }, [products, variantIndex, categoryFilter, showFavoritesOnly, favorites, search]);
 
   const groups = useMemo(() => {
     const g: Record<string, Option[]> = {};
@@ -613,6 +635,27 @@ export default function ProductConfigurator({
   function pickProduct(id: string) {
     commit({ product_id: id, selected_options: {} });
     setPickerOpen(false);
+  }
+
+  // Connectivity swap (lib/product-variants) — same line, other twin. Keeps
+  // qty/config/discount; keeps only the selected options the target product
+  // also offers (options are product-scoped rows). commit() re-resolves the
+  // catalogue price for auto lines and preserves a locked price (m139).
+  function swapVariant(targetId: string) {
+    if (!product || targetId === product.id) return;
+    const targetOptions = options.filter((o) => o.product_id === targetId);
+    const kept: Record<string, string> = {};
+    for (const [type, val] of Object.entries(value.selected_options ?? {})) {
+      if (!val) continue;
+      if (
+        targetOptions.some(
+          (o) => o.option_type === type && o.option_value === val
+        )
+      )
+        kept[type] = val;
+    }
+    if (isApproved) setSpecTouched(true);
+    commit({ product_id: targetId, selected_options: kept });
   }
 
   // Shared picker UI (rendered in two places: empty state + "change product").
@@ -723,6 +766,11 @@ export default function ProductConfigurator({
                       )}
                       {p.category ? ` · ${p.category}` : ""}
                     </div>
+                    {variantIndex.groupsByProductId.has(p.id) && (
+                      <span className="mt-1 inline-flex items-center rounded-full bg-sky-50 px-1.5 py-0.5 text-[10px] font-medium text-sky-700">
+                        IoT option available
+                      </span>
+                    )}
                   </button>
                 </div>
               );
@@ -1226,6 +1274,44 @@ export default function ProductConfigurator({
       {pickerOpen && (
         <div className="border-t border-neutral-100 pt-3">
           <Picker />
+        </div>
+      )}
+
+      {/* ---------- CONNECTIVITY (variant option panel) ----------
+          The catalogue shows only the standard model; the IoT twin is a
+          separate Finance-owned product behind this toggle. Switching swaps
+          product_id to the twin — SKU, price and costs follow the real row. */}
+      {connectivityGroup && (
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-lg border border-sky-200 bg-sky-50/50 px-3 py-2">
+          <span className="eyebrow">{connectivityGroup.label}</span>
+          <div
+            role="radiogroup"
+            aria-label={connectivityGroup.label}
+            className="inline-flex rounded-lg border border-neutral-200 bg-white p-0.5"
+          >
+            {connectivityGroup.choices.map((c) => {
+              const active = c.productId === product.id;
+              return (
+                <button
+                  key={c.key}
+                  type="button"
+                  role="radio"
+                  aria-checked={active}
+                  onClick={() => swapVariant(c.productId)}
+                  className={`rounded-md px-3.5 py-1.5 text-sm font-semibold transition-all ${
+                    active
+                      ? "bg-solux text-white shadow-sm"
+                      : "bg-transparent text-neutral-500 hover:text-neutral-900"
+                  }`}
+                >
+                  {c.label}
+                </button>
+              );
+            })}
+          </div>
+          <span className="text-[11px] text-neutral-500">
+            Reference: <b className="font-mono">{product.sku ?? product.name}</b>
+          </span>
         </div>
       )}
 

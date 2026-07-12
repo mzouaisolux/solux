@@ -25,6 +25,7 @@ import {
   mapDocumentLineToRequestLine,
   versionedHistory,
 } from "@/lib/transport-request";
+import { buildVariantIndex } from "@/lib/product-variants";
 import { createTransportRequest } from "./actions";
 
 // lib/incoterm.ts exports helpers, not the list — the canonical array lives
@@ -217,6 +218,11 @@ export default function TransportRequestForm({
     [products]
   );
 
+  // UX variant collapsing (lib/product-variants) — the picker shows only
+  // standard models; each added line gets a Connectivity chip that swaps the
+  // real product row (standard ↔ IoT twin) behind the scenes.
+  const variantIndex = useMemo(() => buildVariantIndex(products), [products]);
+
   // ---- Product lines ----------------------------------------------------
   const [lines, setLines] = useState<LineState[]>([]);
   const [nextLocalId, setNextLocalId] = useState(1);
@@ -231,6 +237,7 @@ export default function TransportRequestForm({
   const pickerProducts = useMemo(() => {
     const q = productSearch.trim().toLowerCase();
     return products.filter((p) => {
+      if (variantIndex.hiddenIds.has(p.id)) return false;
       if (familyFilter && p.category_id !== familyFilter) return false;
       if (!q) return true;
       return (
@@ -238,7 +245,7 @@ export default function TransportRequestForm({
         (p.sku ?? "").toLowerCase().includes(q)
       );
     });
-  }, [products, familyFilter, productSearch]);
+  }, [products, variantIndex, familyFilter, productSearch]);
 
   function addProduct(productId: string) {
     const p = productById.get(productId);
@@ -261,6 +268,15 @@ export default function TransportRequestForm({
     setLines((prev) =>
       prev.map((l) => (l.localId === localId ? { ...l, ...patch } : l))
     );
+  }
+  // Connectivity swap — same line, other twin of the standard↔IoT pair.
+  // The line keeps qty/config; product_id AND the product_name snapshot move
+  // to the real catalogue row of the chosen variant.
+  function setLineVariant(l: LineState, productId: string) {
+    if (productId === l.product_id) return;
+    const target = productById.get(productId);
+    if (!target) return;
+    patchLine(l.localId, { product_id: target.id, product_name: target.name });
   }
   function setLinePanel(l: LineState, value: string) {
     const { fieldName } = solarSpec(l.category_id);
@@ -928,6 +944,28 @@ export default function TransportRequestForm({
                     </div>
                   )}
                 </div>
+                {(() => {
+                  const group = l.product_id
+                    ? variantIndex.groupsByProductId.get(l.product_id)
+                    : undefined;
+                  if (!group) return null;
+                  return (
+                    <label className="flex items-center gap-1.5 text-[11px] font-medium text-neutral-600">
+                      📡 {group.label}
+                      <select
+                        value={l.product_id ?? ""}
+                        onChange={(e) => setLineVariant(l, e.target.value)}
+                        className="rounded-md border border-neutral-300 bg-white px-2 py-1 text-sm"
+                      >
+                        {group.choices.map((c) => (
+                          <option key={c.key} value={c.productId}>
+                            {c.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  );
+                })()}
                 <label className="flex items-center gap-1.5 text-[11px] font-medium text-neutral-600">
                   ☀️ Solar panel
                   <select
@@ -1047,6 +1085,11 @@ export default function TransportRequestForm({
                   <div className="mt-0.5 truncate font-mono text-[10.5px] text-neutral-500">
                     {p.sku ?? "—"}
                   </div>
+                  {variantIndex.groupsByProductId.has(p.id) && (
+                    <span className="mt-1 inline-flex items-center rounded-full bg-sky-50 px-1.5 py-0.5 text-[10px] font-medium text-sky-700">
+                      IoT option
+                    </span>
+                  )}
                 </button>
               ))}
             </div>
