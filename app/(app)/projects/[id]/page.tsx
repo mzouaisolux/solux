@@ -909,7 +909,27 @@ export default async function ProjectDetailPage({
                             </div>
                           )}
                         </div>
-                        <div className="savebar"><SubmitButton className="sx-btn" pendingLabel="Saving…">{cost.status === "completed" ? "Update cost" : "Save cost"}</SubmitButton></div>
+                        {/* QA2 — surface what's required BEFORE the click, and
+                            disable Save until the always-required costing Excel
+                            is attached (the drawing + dimensions stay
+                            server-validated with clear messages). */}
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: 14, fontSize: 12, margin: "12px 0 4px", color: "var(--sx-mute)" }}>
+                          <span>{fileRows.some((f) => f.category === "costing") ? "✓" : "○"} Costing Excel <span className="req">*</span></span>
+                          {p.pole_required !== false && Number(cost?.pole_cost_rmb) > 0 && (
+                            <span>{fileRows.some((f) => f.category === "pole_drawing") ? "✓" : "○"} Pole drawing <span className="req">*</span></span>
+                          )}
+                          <span>Solar panel dimensions <span className="req">*</span> (field above)</span>
+                        </div>
+                        <div className="savebar">
+                          <SubmitButton
+                            className="sx-btn"
+                            pendingLabel="Saving…"
+                            disabled={!fileRows.some((f) => f.category === "costing")}
+                            title={!fileRows.some((f) => f.category === "costing") ? "Attach the costing Excel before saving" : undefined}
+                          >
+                            {cost.status === "completed" ? "Update cost" : "Save cost"}
+                          </SubmitButton>
+                        </div>
                       </ActionForm>
                     </div>
                   )}

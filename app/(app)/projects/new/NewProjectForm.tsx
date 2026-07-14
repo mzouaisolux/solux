@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { CountrySelect } from "@/components/forms/CountrySelect";
 import { createProjectRequest, updateProjectRequest } from "../actions";
 import { toast } from "@/components/feedback/toast-store";
@@ -153,18 +153,20 @@ export default function NewProjectForm({
   const orDash = (s: string) => (s.trim() ? s : "—");
 
   // Per-step validation before advancing (server actions remain the backstop).
+  // QA2: errors are shown INLINE (formError) next to the field, not as a
+  // volatile toast a new user misses.
   function canLeaveStep0(): boolean {
     if (isEdit) return true;
-    if (!tenderMode && !clientId) { toast.error("Select a client first."); return false; }
+    if (!tenderMode && !clientId) { setFormError("Select a client first."); return false; }
     const hasExisting = affairId.trim() !== "";
     const hasNew = newAffairName.trim() !== "";
-    if (hasExisting && hasNew) { toast.error("Pick an existing project OR name a new one — not both."); return false; }
-    if (!hasExisting && !hasNew && !tenderMode) { toast.error("A project is required — choose one or name a new one."); return false; }
+    if (hasExisting && hasNew) { setFormError("Pick an existing project OR name a new one — not both."); return false; }
+    if (!hasExisting && !hasNew && !tenderMode) { setFormError("A project is required — choose one or name a new one."); return false; }
     return true;
   }
   function canLeaveStep1(): boolean {
     if (reqFreight && hasQty && (!transportMode || !freightDestination.trim())) {
-      toast.error("Transport mode and destination are required for a freight estimate.");
+      setFormError("Transport mode and destination are required for a freight estimate.");
       return false;
     }
     return true;
@@ -173,18 +175,33 @@ export default function NewProjectForm({
     // m159 — the tilt angle is mandatory: it drives the pole drawing +
     // production. Validate before Review so the error lands next to the field.
     if (tiltValue === "" || cleanTiltAngle(tiltValue) == null) {
-      toast.error("Solar panel tilt angle is required (0–90°) — pick a preset or enter a custom value.");
+      setFormError("Solar panel tilt angle is required (0–90°) — pick a preset or enter a custom value.");
       return false;
     }
     return true;
   }
   function next() {
+    setFormError(null); // clear a previous step's error when the user retries
     if (step === 0 && !canLeaveStep0()) return;
     if (step === 1 && !canLeaveStep1()) return;
     if (step === 2 && !canLeaveStep2()) return;
     setStep((s) => Math.min(STEPS.length - 1, s + 1));
   }
-  function back() { setStep((s) => Math.max(0, s - 1)); }
+  function back() { setFormError(null); setStep((s) => Math.max(0, s - 1)); }
+
+  // QA2 — guard against accidental data loss: warn before leaving (refresh,
+  // tab close, back) once the user has typed something and not yet submitted.
+  const [dirty, setDirty] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
+  useEffect(() => {
+    if (!dirty || submitted) return;
+    const handler = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = ""; // Chrome requires a returnValue to show the prompt
+    };
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, [dirty, submitted]);
 
   return (
     <form
@@ -210,12 +227,14 @@ export default function NewProjectForm({
           const m = "Solar panel tilt angle is required (0–90°).";
           setFormError(m); toast.error(m); return;
         }
+        setSubmitted(true); // intended navigation — disarm the unload guard
         try {
           // both redirect on success → ?flash confirms on the detail page
           if (isEdit) await updateProjectRequest(fd);
           else await createProjectRequest(fd);
         } catch (e: any) {
           if (isNavError(e)) throw e;
+          setSubmitted(false); // save failed — the guard should protect again
           const m =
             e?.message ??
             (isEdit ? "Could not save the changes." : "Could not create the service request.");
@@ -224,6 +243,7 @@ export default function NewProjectForm({
         }
       }}
       className="card form-card"
+      onInput={() => { if (!dirty) setDirty(true); }}
       onKeyDown={(e) => {
         // In the wizard, Enter on a non-final step must not submit the form.
         if (e.key === "Enter" && step < STEPS.length - 1 && (e.target as HTMLElement).tagName !== "TEXTAREA") e.preventDefault();

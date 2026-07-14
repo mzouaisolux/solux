@@ -57,14 +57,23 @@ export function SubmitButton({
   children,
   pendingLabel,
   className = "btn-primary",
+  disabled = false,
+  title,
 }: {
   children: React.ReactNode;
   pendingLabel?: string;
   className?: string;
+  /** Extra disable condition (e.g. required uploads missing) ORed with pending. */
+  disabled?: boolean;
+  title?: string;
 }) {
   const { pending } = useFormStatus();
   return (
-    <button className={`${className} disabled:opacity-60`} disabled={pending}>
+    <button
+      className={`${className} disabled:opacity-60 disabled:cursor-not-allowed`}
+      disabled={pending || disabled}
+      title={title}
+    >
       {pending ? pendingLabel ?? "Working…" : children}
     </button>
   );
