@@ -422,6 +422,13 @@ export type PriceList = {
   /** v5 (m087): a price list belongs to one product category. */
   category_id?: string | null;
   status?: PriceListStatus;
+  /**
+   * m170 — when true, this published list is offered as a catalogue price
+   * source in the quote builder (auto-fill → pricing_source='catalogue').
+   * When false (default), its prices are never auto-fetched: sales must use
+   * an approved Service Request or manual entry.
+   */
+  use_as_catalogue_pricing?: boolean;
   cost_batch_id?: string | null;
   created_by?: string | null;
   effective_date?: string | null;
@@ -494,7 +501,7 @@ export const CONFIG_FIELD_TYPE_LABEL: Record<ConfigFieldType, string> = {
 export const CONFIG_FIELD_TYPE_HINT: Record<ConfigFieldType, string> = {
   dropdown: "Pick from a list — e.g. Battery type, CCT, Optics",
   text: "One-line text — e.g. Logo wording, Cable colour",
-  number: "Numeric input — e.g. Pole height in meters",
+  number: "Numeric input — e.g. Overall pole height in meters",
   checkbox: "On/off — e.g. Laser logo, Motion sensor",
   textarea: "Multi-line notes — e.g. Packaging instructions",
   checkbox_group: "Multi-select — tick several options e.g. Additional options, Certifications",

@@ -10,6 +10,7 @@ import {
   bulkDeletePriceLists,
   bulkAssignSeller,
   bulkDuplicatePriceLists,
+  setCatalogueUsage,
 } from "../actions";
 
 export type LibraryRow = {
@@ -17,6 +18,8 @@ export type LibraryRow = {
   name: string;
   categoryName: string | null;
   status: PriceListStatus;
+  /** m170 — whether this list feeds catalogue pricing in the quote builder. */
+  useAsCataloguePricing: boolean;
   margins: string;
   effectiveDate: string | null;
   createdDate: string | null;
@@ -28,6 +31,82 @@ export type LibraryRow = {
 
 function StatusBadge({ status }: { status: PriceListStatus }) {
   return <span className={`px-sbadge ${status}`}>{status}</span>;
+}
+
+/**
+ * m170 — "Use as Catalogue Pricing" switch. Optimistic toggle: flips the
+ * server flag then refreshes so the quote builder picks it up immediately.
+ * Only a PUBLISHED list can actually feed catalogue pricing, so the switch is
+ * disabled (with a hint) on draft/archived lists.
+ */
+function CatalogueSwitch({
+  id,
+  on,
+  disabled,
+}: {
+  id: string;
+  on: boolean;
+  disabled: boolean;
+}) {
+  const router = useRouter();
+  const [pending, startTransition] = useTransition();
+  const [optimistic, setOptimistic] = useState(on);
+  const toggle = () => {
+    const next = !optimistic;
+    setOptimistic(next);
+    startTransition(async () => {
+      try {
+        await setCatalogueUsage(id, next);
+        router.refresh();
+      } catch {
+        setOptimistic(!next); // revert on failure
+      }
+    });
+  };
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={optimistic}
+      aria-label="Use as catalogue pricing"
+      onClick={toggle}
+      disabled={disabled || pending}
+      title={
+        disabled
+          ? "Publish this price list first — only published lists can feed catalogue pricing."
+          : optimistic
+          ? "Catalogue pricing ON — products in this category are auto-priced for sales."
+          : "Catalogue pricing OFF — products require an approved Service Request."
+      }
+      className={`px-catswitch ${optimistic ? "on" : "off"}`}
+      style={{
+        width: 40,
+        height: 22,
+        borderRadius: 999,
+        border: "1px solid var(--sx-line)",
+        background: optimistic ? "var(--sx-go, #16a34a)" : "var(--sx-line, #d4d4d4)",
+        position: "relative",
+        cursor: disabled || pending ? "not-allowed" : "pointer",
+        opacity: disabled ? 0.4 : 1,
+        transition: "background 120ms",
+        flexShrink: 0,
+      }}
+    >
+      <span
+        style={{
+          position: "absolute",
+          top: 2,
+          left: optimistic ? 20 : 2,
+          width: 16,
+          height: 16,
+          borderRadius: "50%",
+          background: "#fff",
+          transition: "left 120ms",
+          boxShadow: "0 1px 2px rgba(0,0,0,.25)",
+        }}
+      />
+    </button>
+  );
 }
 
 /**
@@ -164,6 +243,7 @@ export default function LibraryTable({
                 <th>Price list</th>
                 <th>Category</th>
                 <th>Status</th>
+                <th title="When ON, this published list feeds catalogue pricing in the quote builder">Catalogue</th>
                 <th className="num">T1/T2/T3</th>
                 <th>Effective</th>
                 <th>Created</th>
@@ -177,7 +257,7 @@ export default function LibraryTable({
             <tbody>
               {rows.length === 0 ? (
                 <tr>
-                  <td colSpan={12} style={{ textAlign: "center", padding: "28px 12px", color: "var(--sx-mute)" }}>
+                  <td colSpan={13} style={{ textAlign: "center", padding: "28px 12px", color: "var(--sx-mute)" }}>
                     No price lists match the filters.
                   </td>
                 </tr>
@@ -192,6 +272,13 @@ export default function LibraryTable({
                     </td>
                     <td className="px-sub">{l.categoryName ?? "All"}</td>
                     <td><StatusBadge status={l.status} /></td>
+                    <td>
+                      <CatalogueSwitch
+                        id={l.id}
+                        on={l.useAsCataloguePricing}
+                        disabled={l.status !== "published"}
+                      />
+                    </td>
                     <td className="num px-sub">{l.margins}</td>
                     <td className="px-sub">{l.effectiveDate ?? "—"}</td>
                     <td className="px-sub">{l.createdDate ?? "—"}</td>

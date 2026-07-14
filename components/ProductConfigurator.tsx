@@ -470,6 +470,13 @@ type Props = {
    * number the sales rep in front of them can't see.
    */
   showAdminOnlyPriceBadge?: boolean;
+  /**
+   * m170 — category ids whose published price list is NOT flagged "Use as
+   * Catalogue Pricing". A product in one of these families can't be
+   * auto-priced: the card shows a "requires an approved Service Request"
+   * notice instead of the generic "no price" warning.
+   */
+  catalogueBlockedCategoryIds?: string[];
   costs?: CostMap | null; // admin-only; null/undefined = hidden
   isAdmin?: boolean;
   /** Dynamic configuration fields grouped by product category. */
@@ -496,6 +503,7 @@ export default function ProductConfigurator({
   tierPrices,
   hidePrices = false,
   showAdminOnlyPriceBadge = false,
+  catalogueBlockedCategoryIds = [],
   costs,
   isAdmin = false,
   fieldsByCategory,
@@ -833,6 +841,13 @@ export default function ProductConfigurator({
   // A locked line never consults the catalogue, so it's never "missing" —
   // and neither is a hidden-prices line (its price is entered, not resolved).
   const priceMissing = !hidePrices && !isLocked && standardPrice === null;
+  // m170 — this product's family has a published price list, but none is
+  // flagged "Use as Catalogue Pricing": no price is auto-fetched and sales
+  // must go through an approved Service Request. Only relevant when the line
+  // is actually missing a catalogue price (a locked SR/manual price is fine).
+  const lineCategoryId = product?.category_id ?? value.category_id ?? null;
+  const catalogueBlocked =
+    priceMissing && !!lineCategoryId && catalogueBlockedCategoryIds.includes(lineCategoryId);
   const effectiveStandard = standardPrice ?? 0;
 
   // A locked line's displayed price is always its own committed price, never the
@@ -1531,7 +1546,16 @@ export default function ProductConfigurator({
           </div>
         </div>
 
-        {priceMissing && (
+        {priceMissing && catalogueBlocked && (
+          <div className="mt-3 rounded border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+            <b>This product family requires an approved Service Request before
+            pricing can be generated.</b>{" "}
+            Its price list isn&apos;t enabled for catalogue selling — create a
+            Product Cost Request / Pricing Request, or enter the price with{" "}
+            <b>Manual</b> pricing.
+          </div>
+        )}
+        {priceMissing && !catalogueBlocked && (
           <div className="mt-3 rounded border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
             <b>No price found for this product and pricing tier.</b> Pick a
             different tier, add a price row in{" "}

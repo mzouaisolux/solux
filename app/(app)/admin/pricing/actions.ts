@@ -208,6 +208,30 @@ async function setStatus(id: string, status: PriceListStatus) {
   if (error) throw new Error(error.message);
 }
 
+/**
+ * m170 — flip a price list's "Use as Catalogue Pricing" switch. When ON, the
+ * list feeds catalogue prices in the quote builder (pricing_source=catalogue);
+ * when OFF, its prices are never auto-fetched and sales must use an approved
+ * Service Request / manual entry. Pure toggle — never touches margins, status,
+ * the m139 price lock, or any saved document.
+ */
+export async function setCatalogueUsage(id: string, enabled: boolean): Promise<void> {
+  await requireCapabilityOrAdmin("pricing.manage");
+  if (!id) throw new Error("Missing price list id");
+  const supabase = createClient();
+  const { error } = await supabase
+    .from("price_lists")
+    .update({ use_as_catalogue_pricing: enabled, updated_at: new Date().toISOString() })
+    .eq("id", id);
+  if (error) {
+    if (/use_as_catalogue_pricing/.test(error.message ?? "")) {
+      throw new Error("Catalogue-pricing flag isn't available yet — apply migration m170.");
+    }
+    throw new Error(error.message);
+  }
+  revalidatePath("/admin/pricing", "layout");
+}
+
 export async function archivePriceList(formData: FormData) {
   await requireCapabilityOrAdmin("pricing.manage");
   const id = str(formData, "id");

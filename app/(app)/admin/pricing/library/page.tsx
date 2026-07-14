@@ -75,6 +75,7 @@ export default async function PriceListLibraryPage({
     name: l.name,
     categoryName: l.categoryName ?? null,
     status: (l.status ?? "draft") as LibraryRow["status"],
+    useAsCataloguePricing: !!l.use_as_catalogue_pricing,
     margins: `${fmtPct(l.target_margin1, 0)}/${fmtPct(l.target_margin2, 0)}/${fmtPct(l.target_margin3, 0)}`,
     effectiveDate: l.effective_date ?? null,
     createdDate: l.created_at ? l.created_at.slice(0, 10) : null,
