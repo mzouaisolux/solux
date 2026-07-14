@@ -156,6 +156,7 @@ export default function NewDocumentForm({
   bankAccounts,
   configFields,
   configFieldOptions,
+  catalogueBlockedCategoryIds = [],
   initialDoc = null,
   reviseOfId = null,
   editOfId = null,
@@ -183,6 +184,10 @@ export default function NewDocumentForm({
   bankAccounts: BankAccount[];
   configFields: ConfigField[];
   configFieldOptions: ConfigFieldOption[];
+  /** m170 — product categories whose published price list is NOT flagged
+   *  "Use as Catalogue Pricing": their products can't be auto-priced and the
+   *  line shows a "requires an approved Service Request" notice instead. */
+  catalogueBlockedCategoryIds?: string[];
   /** When set (revision mode, m059), pre-fills the whole builder from a
    *  source quotation; saving creates the next version of that affair. */
   initialDoc?: any | null;
@@ -2054,6 +2059,7 @@ export default function NewDocumentForm({
               options={options}
               tierPrices={tierPrices}
               hidePrices={hideCataloguePrices}
+              catalogueBlockedCategoryIds={catalogueBlockedCategoryIds}
               showAdminOnlyPriceBadge={adminPriceOverride}
               costs={costs}
               isAdmin={isAdmin}

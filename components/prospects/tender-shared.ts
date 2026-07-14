@@ -145,7 +145,7 @@ export const ACTION_TYPE_OPTIONS = [
 export const SPEC_LABEL: Record<string, string> = {
   led_power: "LED Power",
   solar_panel_power: "Solar Panel Power",
-  pole_height: "Pole Height",
+  pole_height: "Overall Pole Height",
   ip_rating: "IP Rating",
   autonomy: "Autonomy",
   quantity: "Quantity",
@@ -155,7 +155,7 @@ export const SPEC_LABEL: Record<string, string> = {
   // Solux AO Live (French) keys
   puissance_led_w: "LED Power (W)",
   puissance_panneau_w: "Solar Panel Power (W)",
-  hauteur_poteau_m: "Pole Height (m)",
+  hauteur_poteau_m: "Overall Pole Height (m)",
   ip_protection: "IP Rating",
   autonomie_jours: "Autonomy (days)",
   quantite_totale: "Quantity",
@@ -203,8 +203,8 @@ export const SPEC_CARDS: Record<string, { label: string; unit?: string }> = {
   led_power: { label: "LED Power" },
   puissance_panneau_w: { label: "Solar Panel", unit: "W" },
   solar_panel_power: { label: "Solar Panel" },
-  hauteur_poteau_m: { label: "Pole Height", unit: "m" },
-  pole_height: { label: "Pole Height" },
+  hauteur_poteau_m: { label: "Overall Pole Height", unit: "m" },
+  pole_height: { label: "Overall Pole Height" },
   ip_protection: { label: "Protection" },
   ip_rating: { label: "Protection" },
   autonomie_jours: { label: "Autonomy", unit: " days" },

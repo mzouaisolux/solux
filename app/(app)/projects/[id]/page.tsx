@@ -21,11 +21,13 @@ import { ProjectFilesUploader } from "../ProjectFilesUploader";
 import ProjectPricingCard from "./ProjectPricingCard";
 import PackingEntryForm from "./PackingEntryForm";
 import FreightEntryForm from "./FreightEntryForm";
+import ForwarderEmailButton from "@/components/transport/ForwarderEmailButton";
 import { FreightStatusBadge } from "@/components/projects/FreightStatusBadge";
 import { ActionForm, SubmitButton } from "@/components/feedback/ActionForm";
 import {
   submitProjectRequest,
   approveProjectRequest,
+  adjustProjectSpec,
   rejectProjectRequest,
   requestMoreInfo,
   enterFactoryCost,
@@ -76,6 +78,7 @@ const PR_EVENT_SHORT: Record<string, string> = {
   "pr.approved": "Sent to operations",
   "pr.rejected": "Rejected",
   "pr.info_requested": "Info requested",
+  "pr.spec_adjusted": "Spec adjusted (Director)",
   "pr.cost_entered": "Cost updated",
   "pr.cost_overridden": "Cost overridden",
   "pr.logistics_entered": "Logistics updated",
@@ -289,13 +292,17 @@ export default async function ProjectDetailPage({ params }: { params: { id: stri
     </div>
   );
 
+  // m167 (feature #5) — a Director adjustment shows BOTH values: the Sales
+  // request is never hidden nor overwritten ("Requested … → Approved …").
+  const reqVsApproved = (requested: string | null, approved: string | null | undefined) =>
+    approved ? `${requested ?? "—"} → ${approved} (approved)` : requested;
   const solarRows: Array<[string, string | null]> = [
-    ["LED power", p.led_power],
-    ["Solar panel", p.solar_panel_size],
+    ["LED power", reqVsApproved(p.led_power, (p as any).approved_led_power)],
+    ["Solar panel", reqVsApproved(p.solar_panel_size, (p as any).approved_solar_panel_size)],
     // m159 — the tilt angle Sales requested (mandatory on new SRs): it drives
     // the pole drawing + factory instructions. undefined pre-migration → null.
     ["Panel tilt angle", p.solar_panel_tilt_angle != null ? `${p.solar_panel_tilt_angle}°` : null],
-    ["Battery", p.battery_spec],
+    ["Battery", reqVsApproved(p.battery_spec, (p as any).approved_battery_spec)],
     ["Controller", p.controller],
     ["IoT", p.iot_required ? "Required" : "No"],
   ];
@@ -323,8 +330,9 @@ export default async function ProjectDetailPage({ params }: { params: { id: stri
       solarRows.push(["Panel reference", p.solar_panel_reference]);
   }
   const poleRows: Array<[string, string | null]> = [
+    ["Mounting height (light→ground)", (p as any).light_mounting_height],
     ["Pole quantity", p.pole_quantity != null ? String(p.pole_quantity) : null],
-    ["Pole height", p.pole_height],
+    ["Overall pole height", p.pole_height],
     ["Arm length", p.arm_length],
     ["Pole notes", p.pole_notes],
   ];
@@ -610,7 +618,7 @@ export default async function ProjectDetailPage({ params }: { params: { id: stri
                   <span style={{ fontSize: 12, fontWeight: 600, color: "var(--sx-mute)" }}>Request from Operations:</span>
                   <label className="cta-check"><input type="checkbox" name="req_product_pricing" defaultChecked={p.req_product_pricing} /> Factory Cost</label>
                   <label className="cta-check"><input type="checkbox" name="req_packing_list" defaultChecked={p.req_packing_list} /> Packing List</label>
-                  <label className="cta-check"><input type="checkbox" name="req_freight" defaultChecked={p.req_freight} /> Freight Cost</label>
+                  <label className="cta-check"><input type="checkbox" name="req_freight" defaultChecked={p.req_freight} /> Freight Cost <span style={{ color: "var(--sx-mute-2)", fontWeight: 400 }}>(incl. Packing List)</span></label>
                   <SubmitButton className="sx-btn sx-btn-go" pendingLabel="Sending…">Send to Operations →</SubmitButton>
                 </ActionForm>
                 <div className="cta-row" style={{ marginTop: 12 }}>
@@ -625,6 +633,39 @@ export default async function ProjectDetailPage({ params }: { params: { id: stri
                     <SubmitButton className="sx-btn sx-btn-sm sx-btn-danger" pendingLabel="…">Reject</SubmitButton>
                   </ActionForm>
                 </div>
+                {/* Feature #5 (m167) — adjust the requested technical parameters
+                    before approval, WITHOUT bouncing back to Sales. Requested
+                    values are kept; the decision lives in approved_*. Runtime
+                    gate: the columns exist on the row (select *). */}
+                {"approved_solar_panel_size" in p && (
+                  <div style={{ borderTop: "1px solid var(--sx-line)", marginTop: 14, paddingTop: 12 }}>
+                    <div className="sx-micro" style={{ marginBottom: 6 }}>
+                      Adjust technical parameters before approval (optional) — the Sales request is kept for traceability
+                    </div>
+                    <ActionForm action={adjustProjectSpec} success="✓ Spec adjusted (requested values kept)">
+                      <input type="hidden" name="id" value={p.id} />
+                      <div className="fgrid two">
+                        <div className="fcol">
+                          <span className="fl">Solar panel power — requested: {p.solar_panel_size ?? "—"}</span>
+                          <input name="approved_solar_panel_size" defaultValue={(p as any).approved_solar_panel_size ?? ""} placeholder="e.g. 210W (empty = keep requested)" />
+                        </div>
+                        <div className="fcol">
+                          <span className="fl">Battery — requested: {p.battery_spec ?? "—"}</span>
+                          <input name="approved_battery_spec" defaultValue={(p as any).approved_battery_spec ?? ""} placeholder="empty = keep requested" />
+                        </div>
+                        <div className="fcol">
+                          <span className="fl">LED power — requested: {p.led_power ?? "—"}</span>
+                          <input name="approved_led_power" defaultValue={(p as any).approved_led_power ?? ""} placeholder="empty = keep requested" />
+                        </div>
+                        <div className="fcol">
+                          <span className="fl">Reason (optional, audited)</span>
+                          <input name="reason" placeholder="e.g. Optimized configuration" />
+                        </div>
+                      </div>
+                      <div className="savebar"><SubmitButton className="sx-btn sx-btn-sm" pendingLabel="Saving…">Save adjustments</SubmitButton></div>
+                    </ActionForm>
+                  </div>
+                )}
               </div>
             )}
             {status === "waiting_director_approval" && !canApprove && (
@@ -821,6 +862,7 @@ export default async function ProjectDetailPage({ params }: { params: { id: stri
                               <div className="fcol"><span className="fl">Length with frame (mm)</span><input name="solar_panel_length_mm" type="number" min={0} step="0.1" defaultValue={p.solar_panel_length_mm ?? ""} placeholder="e.g. 1480" /></div>
                               <div className="fcol"><span className="fl">Width with frame (mm)</span><input name="solar_panel_width_mm" type="number" min={0} step="0.1" defaultValue={p.solar_panel_width_mm ?? ""} placeholder="e.g. 670" /></div>
                               <div className="fcol"><span className="fl">Thickness with frame (mm)</span><input name="solar_panel_thickness_mm" type="number" min={0} step="0.1" defaultValue={p.solar_panel_thickness_mm ?? ""} placeholder="e.g. 35" /></div>
+                              <div className="fcol span2"><span className="fl">Solar panel dimensions <span className="req">*</span> — mandatory, as used in the cost calc</span><input name="solar_panel_dimensions" required defaultValue={(p as any).solar_panel_dimensions ?? ""} placeholder="e.g. 1722 × 1134 mm" /></div>
                             </>
                           )}
                           {/* m153 — revising a COMPLETED cost requires a reason
@@ -853,7 +895,7 @@ export default async function ProjectDetailPage({ params }: { params: { id: stri
                   {cost && (
                     <div style={{ borderTop: "1px solid var(--sx-line)", marginTop: 14, paddingTop: 14 }}>
                       <div className="sx-micro" style={{ marginBottom: 6 }}>
-                        Costing Excel — supplier / internal / final calculation
+                        Costing Excel <span className="req">*</span> — mandatory before approving (supplier / internal / final calculation)
                       </div>
                       {canCost &&
                         (m157Applied ? (
@@ -883,16 +925,16 @@ export default async function ProjectDetailPage({ params }: { params: { id: stri
                       )}
                     </div>
                   )}
-                  {/* m157 — POLE DRAWING (strongly recommended, never blocking).
-                      The drawing actually priced is the reference for future
-                      orders and for what Sales sends the customer. */}
+                  {/* Feature #1 — POLE DRAWING: mandatory as soon as a pole cost is
+                      entered (server-enforced in enterFactoryCost). The drawing
+                      actually priced is permanent documentary proof. */}
                   {cost && p.pole_required !== false && (
                     <div style={{ borderTop: "1px solid var(--sx-line)", marginTop: 14, paddingTop: 14 }}>
-                      <div className="sx-micro" style={{ marginBottom: 6 }}>Pole drawing</div>
+                      <div className="sx-micro" style={{ marginBottom: 6 }}>Pole drawing <span className="req">*</span></div>
                       <p style={{ fontSize: 12, color: "var(--sx-amber-deep)", marginBottom: 6 }}>
-                        <b>Strongly recommended:</b> upload the pole drawing used for this
-                        quotation. This document will be invaluable for future orders and
-                        customer support.
+                        <b>Mandatory when a pole cost is entered:</b> upload the pole drawing
+                        (PDF / DWG / JPG) used for this quotation before approving. It becomes
+                        permanent documentary proof for future orders and customer support.
                       </p>
                       {canCost &&
                         (m157Applied ? (
@@ -1038,6 +1080,22 @@ export default async function ProjectDetailPage({ params }: { params: { id: stri
                         {freight?.status ?? "not requested"}
                       </span>
                     </div>
+                    {/* Feature #3 — forwarder freight-quotation email from the SR
+                        packing/freight brief (Operations copy/paste). */}
+                    {canLogistics && (
+                      <ForwarderEmailButton
+                        compact
+                        brief={{
+                          projectRef: p.name,
+                          destinationCountry: freight?.destination_country ?? p.country ?? null,
+                          destinationPort: freight?.port_of_destination ?? null,
+                          incoterm: freight?.incoterm ?? null,
+                          transportMode: freight?.transport_mode ?? null,
+                          containers: packingContainers,
+                          cbm: (pack as any)?.total_cbm ?? null,
+                        }}
+                      />
+                    )}
                     {/* Request Freight Update (m098) — Sales/owner refresh, no director. */}
                     {freight?.status === "completed" && canGenerate && (
                       freight.update_requested_at ? (
@@ -1247,7 +1305,7 @@ export default async function ProjectDetailPage({ params }: { params: { id: stri
                   <ul className="sx-act-list">
                     {events.slice(0, ACTIVITY_PREVIEW).map((e: any) => (
                       <li key={e.id} className="sx-act-row">
-                        <span className="sx-act-label"><span className="d" />{(/pr\.(info_requested|rejected)/.test(e.event_type) && e.message) ? e.message : shortEvent(e.event_type)}</span>
+                        <span className="sx-act-label"><span className="d" />{e.message ? e.message : shortEvent(e.event_type)}</span>
                         <span className="sx-act-meta">{actMeta(e)}</span>
                       </li>
                     ))}
@@ -1258,7 +1316,7 @@ export default async function ProjectDetailPage({ params }: { params: { id: stri
                       <ul className="sx-act-list">
                         {events.slice(ACTIVITY_PREVIEW).map((e: any) => (
                           <li key={e.id} className="sx-act-row">
-                            <span className="sx-act-label"><span className="d" />{(/pr\.(info_requested|rejected)/.test(e.event_type) && e.message) ? e.message : shortEvent(e.event_type)}</span>
+                            <span className="sx-act-label"><span className="d" />{e.message ? e.message : shortEvent(e.event_type)}</span>
                             <span className="sx-act-meta">{actMeta(e)}</span>
                           </li>
                         ))}

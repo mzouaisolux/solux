@@ -10,6 +10,7 @@ import {
   type TransportRequestStatus,
 } from "@/lib/transport-request";
 import { TRANSPORT_MODE_LABEL } from "@/lib/types";
+import ForwarderEmailButton from "@/components/transport/ForwarderEmailButton";
 import {
   startTransportRequest,
   completeTransportRequest,
@@ -523,6 +524,20 @@ function QueueCard({ it }: { it: TransportQueueItem }) {
                   className={`${inputCls} mt-0.5 resize-none`}
                 />
               </label>
+
+              {/* Feature #3 — prepare the forwarder freight-quotation email from
+                  the live packing/freight brief (copy/paste, no auto-send). */}
+              <ForwarderEmailButton
+                brief={{
+                  projectRef: it.project,
+                  destinationCountry: it.destinationCountry,
+                  destinationPort: it.destinationPort,
+                  incoterm: it.incoterm,
+                  containers: containers.length ? containers : it.containers,
+                  grossWeightKg: gw ? Number(gw) : it.grossWeightKg,
+                  cbm: cbm ? Number(cbm) : it.cbm,
+                }}
+              />
 
               <div className="flex items-center gap-2">
                 <button

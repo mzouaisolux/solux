@@ -93,8 +93,15 @@ export function buildTaskListLineFromQuotationLine(
     product_id: l.product_id ?? null,
     category_id: l.category_id ?? null,
     is_manual: manual,
+    // Name snapshot: manual items always get one (their name IS the data).
+    // Service-Request family lines (no product, category set) snapshot the
+    // SR's descriptive commercial name too — without it the task-list line
+    // renders as just the bare category (OBS-1, E2E « 14 juillet »). Catalog
+    // lines stay null: the page reads the live products join / m089 snapshot.
     product_name: manual
       ? l.client_product_name?.trim() || MANUAL_ITEM_FALLBACK_NAME
+      : !l.product_id && l.category_id
+      ? l.client_product_name?.trim() || null
       : null,
     unit_price: manual ? l.unit_price ?? null : null,
     quantity: l.quantity ?? null,

@@ -609,6 +609,17 @@ export default async function DocumentViewPage({
         .find((c: any) => typeof c === "string" && c.trim()) ?? "",
   };
 
+  // Pricing History (feature #2, m168) — append-only audit of modifications to
+  // Director-APPROVED pricing (product / transport / discount). Guarded read:
+  // pre-m168 the table is absent → empty list, the card simply doesn't render.
+  const { data: pricingAuditRows } = await supabase
+    .from("document_pricing_audit")
+    .select("id, field, line_label, old_value, new_value, approved_by, changed_by, changed_at")
+    .eq("document_id", params.id)
+    .order("changed_at", { ascending: false })
+    .limit(50);
+  const pricingAudit = (pricingAuditRows ?? []) as any[];
+
   // Audit timeline — read events for this document. 100 is the same cap
   // used on /production/orders/[id]; plenty for any realistic history
   // and keeps the page predictable in size.
@@ -1925,6 +1936,54 @@ export default async function DocumentViewPage({
         documentId={doc.id}
         currentUserId={currentUserId}
       />
+
+      {/* Pricing History (feature #2, m168) — every modification of a
+          Director-APPROVED price (product / transport / discount) after
+          validation. Append-only; renders only when something changed. */}
+      {pricingAudit.length > 0 && (
+        <section className="panel p-5 space-y-3">
+          <div className="flex items-baseline justify-between gap-3">
+            <div>
+              <div className="eyebrow">Pricing History</div>
+              <h3 className="text-sm font-semibold text-neutral-900 mt-0.5">
+                Approved pricing modified after validation
+              </h3>
+            </div>
+            <span className="text-[11px] text-neutral-400 tabular-nums">
+              {pricingAudit.length} change{pricingAudit.length === 1 ? "" : "s"}
+            </span>
+          </div>
+          <ul className="space-y-1.5">
+            {pricingAudit.map((a) => {
+              const what =
+                a.field === "freight_cost"
+                  ? "Shipping"
+                  : a.field === "discount"
+                  ? `Discount${a.line_label ? ` — ${a.line_label}` : ""}`
+                  : a.field === "line_removed"
+                  ? `Line removed${a.line_label ? ` — ${a.line_label}` : ""}`
+                  : a.line_label ?? a.field;
+              return (
+                <li
+                  key={a.id}
+                  className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 rounded-md border border-amber-200 bg-amber-50/60 px-3 py-2 text-[13px]"
+                >
+                  <span className="font-medium text-neutral-800">{what}</span>
+                  <span className="tabular-nums text-neutral-700">
+                    {a.old_value ?? "—"} → <b>{a.new_value ?? "—"}</b>
+                  </span>
+                  <span className="ml-auto text-[11px] text-neutral-500">
+                    {docActorLabels.get(a.changed_by) ??
+                      (a.changed_by ? `User · ${String(a.changed_by).slice(0, 4)}` : "—")}
+                    {" · "}
+                    {a.changed_at ? new Date(a.changed_at).toLocaleString() : ""}
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+        </section>
+      )}
 
       {/* Audit timeline — every meaningful change to this quotation lands
           here. Useful both as a "who did what when" log for sales/admin

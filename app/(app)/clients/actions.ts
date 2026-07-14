@@ -903,6 +903,48 @@ export async function deleteClientPermanently(formData: FormData) {
 }
 
 /**
+ * FORCE delete a client — SUPER-ADMIN ONLY (m169). Unlike
+ * deleteClientPermanently (m128), this NEVER refuses: every affair,
+ * quotation, proforma, invoice, service request, transport request,
+ * production/shipping record, document, comment and audit event linked to
+ * the client is permanently deleted, atomically (single RPC transaction —
+ * any failure rolls everything back). The run is journaled into
+ * admin_force_delete_log (super-admin-only read) with per-table counts.
+ * The super-admin gate is re-checked INSIDE the SECURITY DEFINER RPC.
+ */
+export async function forceDeleteClientAction(formData: FormData) {
+  await requireSuperAdmin();
+  const id = String(formData.get("id"));
+  if (!id) throw new Error("Missing client id");
+  const supabase = createClient();
+  const { data: snapshot } = await supabase
+    .from("clients")
+    .select("company_name, client_code")
+    .eq("id", id)
+    .maybeSingle();
+  const { data: counts, error } = await supabase.rpc("admin_force_delete_client", {
+    p_client: id,
+  });
+  if (error) {
+    if (error.code === "42883") {
+      throw new Error(
+        "admin_force_delete_client RPC not deployed yet — apply migration 169_admin_force_delete.sql in Supabase."
+      );
+    }
+    throw new Error(error.message);
+  }
+  const total = counts
+    ? Object.values(counts as Record<string, number>).reduce((a, b) => a + Number(b || 0), 0)
+    : 0;
+  revalidatePath("/clients");
+  redirect(
+    `/clients?flash=${encodeURIComponent(
+      `🗑 Client "${snapshot?.company_name ?? id.slice(0, 8)}" permanently deleted (${total} records removed).`
+    )}`
+  );
+}
+
+/**
  * Soft-archive a client.
  *
  * Sets `archived_at = now()` so the client disappears from active

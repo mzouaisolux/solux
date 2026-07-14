@@ -11,6 +11,8 @@ import { createClient } from "@/lib/supabase/server";
 import { resolveUserLabelStrings } from "@/lib/user-display";
 import { listAssignableOwners } from "@/lib/owner";
 import { getCurrentUserRole } from "@/lib/auth";
+import ForceDeleteButton from "@/components/ForceDeleteButton";
+import { forceDeleteAffairAction } from "../actions";
 import { hasUiCapability } from "@/lib/permissions";
 import { isTechnicalRole } from "@/lib/types";
 import { loadShippingStatuses } from "@/lib/shipping-status-server";
@@ -90,7 +92,7 @@ export default async function AffairDetailPage({ params }: { params: { id: strin
   const requests = srError ? null : ((srRows ?? []) as any[]);
 
   const sourceTenderId = (affair as any).source_tender_id as string | null;
-  const [{ role }, ownerOptionsRaw, documentsRes, clientRes, tenderRes] = await Promise.all([
+  const [{ role, isSuperAdmin }, ownerOptionsRaw, documentsRes, clientRes, tenderRes] = await Promise.all([
     getCurrentUserRole(),
     listAssignableOwners(),
     supabase.from("documents").select(DOC_COLS).eq("affair_id", id),
@@ -420,6 +422,7 @@ export default async function AffairDetailPage({ params }: { params: { id: strin
   }
 
   return (
+    <>
     <AffairDetail
       affair={group}
       profitability={profitability}
@@ -455,5 +458,29 @@ export default async function AffairDetailPage({ params }: { params: { id: strin
           : null
       }
     />
+    {/* SUPER-ADMIN FORCE DELETE (m169) — its own clearly-separated danger
+        zone BELOW the workspace: never mixed with the day-to-day actions.
+        Two-step confirmation ("type DELETE") lives in the button; the RPC
+        re-checks super-admin and cascades atomically. */}
+    {isSuperAdmin && (
+      <div className="mx-auto max-w-screen-2xl px-6 pb-10">
+        <div className="mt-6 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-red-200 bg-red-50/50 px-4 py-3">
+          <div>
+            <div className="text-[12px] font-bold uppercase tracking-wide text-red-700">Danger zone — super admin</div>
+            <p className="mt-0.5 text-[12.5px] text-neutral-600">
+              Permanently delete this project and everything it contains (quotations, invoices,
+              requests, production &amp; shipping data, documents, comments, history).
+            </p>
+          </div>
+          <ForceDeleteButton
+            action={forceDeleteAffairAction}
+            id={id}
+            entity="project"
+            entityLabel={affair.name ?? id}
+          />
+        </div>
+      </div>
+    )}
+    </>
   );
 }

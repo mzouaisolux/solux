@@ -9,6 +9,12 @@ import { getCurrentUserRole } from "@/lib/auth";
 import { emitEvent } from "@/lib/events";
 import { requireCapability } from "@/lib/permissions";
 import { buildTaskListLineFromQuotationLine } from "@/lib/manual-items";
+import {
+  buildSrConfigValues,
+  isEmptyConfig,
+  mergeSrConfig,
+  type SrConfigField,
+} from "@/lib/sr-line-config";
 import { loadCostingSettings } from "@/lib/pricing-settings";
 import { computeCostingStatus } from "@/lib/costing-validity";
 import {
@@ -250,15 +256,26 @@ export async function generateProductionTaskList(formData: FormData) {
     );
   }
 
-  const { data: srcLines, error: linesErr } = await supabase
+  // unit_price comes across for MANUAL items only — a read-only reference
+  // price (poles are bought per-project). The commercial source of truth
+  // stays the proforma; we never edit this on the task list (m135).
+  const lineCols =
+    "id, product_id, category_id, quantity, config_values, selected_options, client_product_name, unit_price";
+  // source_project_request_id (m139) links an SR-derived line to its Service
+  // Request — the OBS-1 config backfill below keys on it. Resilient select:
+  // an env without m139 just loses the precise link, never the task list.
+  let srcLines: any[] | null = null;
+  let linesErr: { message?: string } | null = null;
+  ({ data: srcLines, error: linesErr } = await supabase
     .from("document_lines")
-    .select(
-      // unit_price comes across for MANUAL items only — a read-only reference
-      // price (poles are bought per-project). The commercial source of truth
-      // stays the proforma; we never edit this on the task list (m135).
-      "id, product_id, category_id, quantity, config_values, selected_options, client_product_name, unit_price"
-    )
-    .eq("document_id", quotation_id);
+    .select(`${lineCols}, source_project_request_id`)
+    .eq("document_id", quotation_id));
+  if (linesErr && /source_project_request_id/i.test(linesErr.message ?? "")) {
+    ({ data: srcLines, error: linesErr } = await supabase
+      .from("document_lines")
+      .select(lineCols)
+      .eq("document_id", quotation_id));
+  }
   if (linesErr) throw new Error(linesErr.message);
 
   // ---------------------------------------------------------------------
@@ -344,6 +361,142 @@ export async function generateProductionTaskList(formData: FormData) {
   const rows = (srcLines ?? []).map((l: any, i: number) =>
     buildTaskListLineFromQuotationLine(l, inserted!.id, i)
   );
+
+  // OBS-1 (E2E « 14 juillet ») — an SR-derived product line used to land here
+  // with config_values = {} (or, since the generator fix, with generic display
+  // labels like "Solar panel" that don't match the category's real field
+  // names), so the factory saw a bare line and the Factory Mapping gate had
+  // nothing to require. Backfill the STRUCTURED config from the source
+  // Service Request at copy time (lib/sr-line-config), keyed by the
+  // category's REAL sales config fields: exact option value when one matches,
+  // raw SR text otherwise (still displayed + counted as a missing mapping —
+  // which forces a real mapping pass before release). Scope is strict:
+  //   • only SR-derived, non-manual lines (source_project_request_id, or the
+  //     SR shape product_id-null + category for pre-m139 rows) — a catalogue
+  //     line can never inherit a spec that isn't its own;
+  //   • only lines whose config carries NO real field key yet — a config the
+  //     sales team actually filled is never modified.
+  // Best-effort: a failure here must never block Launch Production.
+  try {
+    const candidates = rows
+      .map((r, i) => ({ r, src: (srcLines ?? [])[i] as any }))
+      .filter(
+        ({ r, src }) =>
+          !r.is_manual &&
+          r.category_id &&
+          (src?.source_project_request_id || !r.product_id)
+      );
+    if (candidates.length) {
+      const cats = Array.from(
+        new Set(candidates.map(({ r }) => r.category_id).filter(Boolean))
+      ) as string[];
+      const { data: cfgFields } = await supabase
+        .from("config_fields")
+        .select("id, category_id, field_name, field_type")
+        .in("category_id", cats)
+        .eq("active", true)
+        .in("field_scope", ["sales", "both"]);
+      const fieldIds = ((cfgFields ?? []) as any[]).map((f) => f.id);
+      const { data: opts } = fieldIds.length
+        ? await supabase
+            .from("config_field_options")
+            .select("field_id, option_value")
+            .in("field_id", fieldIds)
+            .order("option_order")
+        : { data: [] as any[] };
+      const optByField = new Map<string, string[]>();
+      for (const o of (opts ?? []) as any[]) {
+        const a = optByField.get(o.field_id) ?? [];
+        a.push(o.option_value);
+        optByField.set(o.field_id, a);
+      }
+      const fieldsByCategory = new Map<string, SrConfigField[]>();
+      for (const f of (cfgFields ?? []) as any[]) {
+        const a = fieldsByCategory.get(f.category_id) ?? [];
+        a.push({
+          field_name: f.field_name,
+          field_type: f.field_type,
+          options: optByField.get(f.id) ?? [],
+        });
+        fieldsByCategory.set(f.category_id, a);
+      }
+
+      const needy = candidates.filter(({ r }) => {
+        const fields = fieldsByCategory.get(r.category_id!) ?? [];
+        const cfg = r.config_values ?? {};
+        return (
+          isEmptyConfig(cfg) ||
+          !fields.some((f) => String(cfg[f.field_name] ?? "").trim() !== "")
+        );
+      });
+      // Precise SR link when m139 is applied; otherwise fall back to the
+      // affaire's latest SR — only ever reached for SR-shaped lines (see the
+      // candidates filter), never for catalogue lines.
+      let fallbackSrId: string | null = null;
+      if (needy.some(({ src }) => !src?.source_project_request_id)) {
+        const { data: sr } = await supabase
+          .from("project_requests")
+          .select("id")
+          .eq("affair_id", (doc as any).affair_id)
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        fallbackSrId = (sr as any)?.id ?? null;
+      }
+      const srIdFor = ({ r, src }: { r: any; src: any }) =>
+        src?.source_project_request_id ?? (!r.product_id ? fallbackSrId : null);
+      const srIds = Array.from(
+        new Set(needy.map(srIdFor).filter(Boolean))
+      ) as string[];
+      if (srIds.length) {
+        const SPEC_COLS =
+          "led_power, solar_panel_size, battery_spec, controller, iot_required";
+        const [{ data: srs }, { data: pps }] = await Promise.all([
+          supabase
+            .from("project_requests")
+            .select(`id, ${SPEC_COLS}`)
+            .in("id", srIds),
+          // project_products = the priced snapshot; its spec wins over the
+          // raw request when both exist (same precedence as SR→quote).
+          supabase
+            .from("project_products")
+            .select(`project_request_id, ${SPEC_COLS}`)
+            .in("project_request_id", srIds),
+        ]);
+        const srById = new Map(((srs ?? []) as any[]).map((s) => [s.id, s]));
+        const ppBySr = new Map(
+          ((pps ?? []) as any[]).map((p) => [p.project_request_id, p])
+        );
+        for (const item of needy) {
+          const srId = srIdFor(item);
+          if (!srId) continue;
+          const sr = srById.get(srId) as any;
+          const pp = ppBySr.get(srId) as any;
+          if (!sr && !pp) continue;
+          const cfg = buildSrConfigValues(
+            {
+              led_power: pp?.led_power ?? sr?.led_power ?? null,
+              solar_panel_size:
+                pp?.solar_panel_size ?? sr?.solar_panel_size ?? null,
+              battery_spec: pp?.battery_spec ?? sr?.battery_spec ?? null,
+              controller: pp?.controller ?? sr?.controller ?? null,
+              iot_required: pp?.iot_required ?? sr?.iot_required ?? false,
+            },
+            fieldsByCategory.get(item.r.category_id!) ?? []
+          );
+          if (Object.keys(cfg).length) {
+            // Merge over the line's existing chips (e.g. "Tilt angle"), but
+            // drop the generator's generic spec labels the field-keyed values
+            // now supersede — no duplicate "Solar panel"/"SOLAR PANEL" chips.
+            item.r.config_values = mergeSrConfig(item.r.config_values, cfg);
+          }
+        }
+      }
+    }
+  } catch {
+    // Best-effort — the task list is still created with whatever the lines carry.
+  }
+
   if (rows.length) {
     let { error: tlErr } = await supabase
       .from("production_task_list_lines")
@@ -511,11 +664,50 @@ export async function launchProduction(formData: FormData) {
       discount_value: l.discount_value,
       client_product_name: l.client_product_name,
       config_values: l.config_values ?? {},
+      // m139/m140 — carry the price provenance/lock onto the proforma. The
+      // task list is generated FROM the proforma, so dropping
+      // source_project_request_id here severed the SR link the OBS-1 config
+      // backfill (and any future SR-keyed logic) depends on.
+      pricing_source:
+        l.pricing_source ??
+        (l.pricing_mode === "manual" ? "manual" : "catalogue"),
+      source_project_request_id: l.source_project_request_id ?? null,
+      approved_by: l.approved_by ?? null,
+      approved_at: l.approved_at ?? null,
+      source_component: l.source_component ?? null,
     }));
     if (lines.length) {
-      const { error: lErr } = await supabase
-        .from("document_lines")
-        .insert(lines);
+      // Two-stage resilience (same contract as saveDocument's insert): an env
+      // without m140 only loses the source_component tag; without m139 it
+      // loses the provenance columns — never the launch itself.
+      let { error: lErr } = await supabase.from("document_lines").insert(lines);
+      const m139Cols =
+        /(pricing_source|source_project_request_id|approved_by|approved_at)/;
+      const stripM140 = (r: any) => {
+        const { source_component, ...rest } = r;
+        return rest;
+      };
+      const stripM139 = (r: any) => {
+        const {
+          pricing_source,
+          source_project_request_id,
+          approved_by,
+          approved_at,
+          ...rest
+        } = r;
+        return rest;
+      };
+      if (lErr && /source_component/.test(lErr.message ?? "")) {
+        const noM140 = lines.map(stripM140);
+        ({ error: lErr } = await supabase.from("document_lines").insert(noM140));
+        if (lErr && m139Cols.test(lErr.message ?? "")) {
+          const base = noM140.map(stripM139);
+          ({ error: lErr } = await supabase.from("document_lines").insert(base));
+        }
+      } else if (lErr && m139Cols.test(lErr.message ?? "")) {
+        const base = lines.map(stripM140).map(stripM139);
+        ({ error: lErr } = await supabase.from("document_lines").insert(base));
+      }
       if (lErr) throw new Error(lErr.message);
     }
 

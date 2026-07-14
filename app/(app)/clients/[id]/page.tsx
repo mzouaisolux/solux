@@ -8,11 +8,12 @@ import {
 } from "@/components/clients/ClientDocumentsByAffaire";
 import ContextMenu from "@/components/ContextMenu";
 import {
-  deleteClientPermanently,
+  forceDeleteClientAction,
   archiveClientAction,
   unarchiveClientAction,
 } from "../actions";
 import { ContextMenuActionItem } from "@/components/ContextMenuActionItem";
+import ForceDeleteButton from "@/components/ForceDeleteButton";
 import {
   DOC_ACTIVE_STATUSES,
   DOC_TERMINAL_STATUSES,
@@ -514,19 +515,19 @@ export default async function ClientWorkspacePage({
                 variant="success"
               />
             )}
-            {isSuperAdmin && (
-              <ContextMenuActionItem
-                action={deleteClientPermanently}
-                id={client.id}
-                label="Permanently delete"
-                pendingLabel="Deleting…"
-                variant="danger"
-                confirmMessage={
-                  "Cette action est irréversible. Le client et toutes les données liées seront définitivement supprimés. Voulez-vous continuer ?"
-                }
-              />
-            )}
           </ContextMenu>
+          {/* SUPER-ADMIN FORCE DELETE (m169) — deliberately OUTSIDE the
+              actions menu: a standalone red control with its own two-step
+              "type DELETE" confirmation. Never refuses on dependencies —
+              the RPC cascades everything atomically and journals the run. */}
+          {isSuperAdmin && (
+            <ForceDeleteButton
+              action={forceDeleteClientAction}
+              id={client.id}
+              entity="client"
+              entityLabel={`${client.company_name}${client.client_code ? ` (${client.client_code})` : ""}`}
+            />
+          )}
         </div>
       </div>
 

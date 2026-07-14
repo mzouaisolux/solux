@@ -21,6 +21,13 @@ import {
  * `documents` bucket under project-requests/<id>/…, then a server action
  * records the row. Mirrors AttachmentUploader without coupling to documents.
  */
+// Advisory `accept` hint per category (UX audit). Falls back to any file.
+const ACCEPT_BY_CATEGORY: Partial<Record<ProjectRequestFileCategory, string>> = {
+  costing: ".xlsx,.xls,.csv",
+  pole_drawing: ".pdf,.dwg,.dxf,.jpg,.jpeg,.png",
+  packing: ".pdf,.xlsx,.xls,.csv",
+};
+
 export function ProjectFilesUploader({
   projectId,
   fixedCategory,
@@ -116,6 +123,10 @@ export function ProjectFilesUploader({
           ref={inputRef}
           type="file"
           multiple
+          // UX audit: steer the picker toward the expected formats per category
+          // (costing = spreadsheet, pole drawing = drawing/image, packing = doc).
+          // Advisory only — the size guard stays the hard limit.
+          accept={ACCEPT_BY_CATEGORY[category]}
           onChange={(e) => setFiles(Array.from(e.target.files ?? []))}
           className="text-sm"
         />

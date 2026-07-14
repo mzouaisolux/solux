@@ -35,14 +35,14 @@ const base: PoleSpec = {
   note: null,
 };
 
-test("spec example 1 — total pole height, single arm, galvanized, painting", () => {
+test("spec example 1 — overall pole height, single arm, galvanized, painting", () => {
   assert.equal(
     buildPoleDescription(base),
-    "Custom pole – total pole height 8m, single arm, arm length 1.5m, thickness 4mm, hot-dip galvanized, painting included"
+    "Custom pole – overall pole height 8m, single arm, arm length 1.5m, thickness 4mm, hot-dip galvanized, painting included"
   );
 });
 
-test("spec example 2 — light point height reference", () => {
+test("spec example 2 — light mounting height reference", () => {
   assert.equal(
     buildPoleDescription({
       ...base,
@@ -50,14 +50,14 @@ test("spec example 2 — light point height reference", () => {
       totalPoleHeightM: null,
       lightPointHeightM: 7,
     }),
-    "Custom pole – light point height 7m, single arm, arm length 1.5m, thickness 4mm, hot-dip galvanized, painting included"
+    "Custom pole – light mounting height 7m, single arm, arm length 1.5m, thickness 4mm, hot-dip galvanized, painting included"
   );
 });
 
 test("spec example 3 — both heights, chosen reference leads", () => {
   assert.equal(
     buildPoleDescription({ ...base, totalPoleHeightM: 8, lightPointHeightM: 7 }),
-    "Custom pole – total pole height 8m, light point height 7m, single arm, arm length 1.5m, thickness 4mm, hot-dip galvanized, painting included"
+    "Custom pole – overall pole height 8m, light mounting height 7m, single arm, arm length 1.5m, thickness 4mm, hot-dip galvanized, painting included"
   );
 });
 
@@ -72,7 +72,7 @@ test("spec example 4 — double arm, C5 treatment, no painting", () => {
       surfaceTreatment: "c5",
       painting: false,
     }),
-    "Custom pole – light point height 7m, double arm, arm length 1.5m, thickness 4mm, C5 treatment, no painting"
+    "Custom pole – light mounting height 7m, double arm, arm length 1.5m, thickness 4mm, C5 treatment, no painting"
   );
 });
 
@@ -116,7 +116,7 @@ test("at-least-one-height rule — never blocks when one is known", () => {
 
 test("emptyPoleSpec is a valid starting point (defaults set, no heights yet)", () => {
   const e = emptyPoleSpec();
-  assert.equal(e.heightReference, "total_pole_height");
+  assert.equal(e.heightReference, "light_point_height"); // #4 — primary = light mounting height
   assert.equal(e.armType, "single_arm");
   assert.ok(validatePoleSpec(e)); // needs a height before it's valid
 });

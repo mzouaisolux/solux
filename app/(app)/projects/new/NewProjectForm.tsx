@@ -47,6 +47,7 @@ export type ProjectFormInitial = {
   poleRequired?: boolean;
   poleQuantity?: string;
   poleHeight?: string;
+  lightMountingHeight?: string;
   armLength?: string;
   poleNotes?: string;
   transportMode?: string;
@@ -438,8 +439,9 @@ export default function NewProjectForm({
         </div>
         {poleRequired ? (
           <div className="fgrid">
+            <div className="fcol span3"><span className="fl">Light mounting height (light → ground) <span style={{ color: "var(--sx-mute-2)", fontWeight: 400 }}>— primary height, used by the Light Study</span></span><input name="light_mounting_height" placeholder="e.g. 6m" defaultValue={initial?.lightMountingHeight || undefined} /></div>
             <div className="fcol"><span className="fl">Pole quantity</span><input name="pole_quantity" type="number" min={0} value={poleQuantity} onChange={(e) => setPoleQuantity(e.target.value)} placeholder="e.g. 200" /></div>
-            <div className="fcol"><span className="fl">Pole height</span><input name="pole_height" value={poleHeight} onChange={(e) => setPoleHeight(e.target.value)} placeholder="e.g. 8m" /></div>
+            <div className="fcol"><span className="fl">Overall pole height <span style={{ color: "var(--sx-mute-2)", fontWeight: 400 }}>(if applicable)</span></span><input name="pole_height" value={poleHeight} onChange={(e) => setPoleHeight(e.target.value)} placeholder="e.g. 8m" /></div>
             <div className="fcol"><span className="fl">Arm length</span><input name="arm_length" value={armLength} onChange={(e) => setArmLength(e.target.value)} placeholder="e.g. 1.5m" /></div>
             <div className="fcol span3"><span className="fl">Pole notes</span><input name="pole_notes" placeholder="e.g. Single arm galvanized pole" defaultValue={initial?.poleNotes || undefined} /></div>
           </div>
@@ -494,7 +496,7 @@ export default function NewProjectForm({
           <Summary label="Panel tilt angle" value={tiltValue !== "" ? `${tiltValue}°` : "—"} />
           <Summary label="Pole" value={yn(poleRequired)} />
           {poleRequired && <Summary label="Pole qty" value={orDash(poleQuantity)} />}
-          {poleRequired && <Summary label="Pole height" value={orDash(poleHeight)} />}
+          {poleRequired && <Summary label="Overall pole height" value={orDash(poleHeight)} />}
           {poleRequired && <Summary label="Arm length" value={orDash(armLength)} />}
           <Summary label="Pricing requested" value={yn(reqProduct)} />
           <Summary label="Packing requested" value={yn(reqPacking && hasQty)} />

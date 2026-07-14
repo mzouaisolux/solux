@@ -181,6 +181,7 @@ export default async function NewProjectPage({
         poleRequired: pr.pole_required ?? false,
         poleQuantity: pr.pole_quantity != null ? String(pr.pole_quantity) : "",
         poleHeight: pr.pole_height ?? "",
+        lightMountingHeight: (pr as any).light_mounting_height ?? "",
         armLength: pr.arm_length ?? "",
         poleNotes: pr.pole_notes ?? "",
         transportMode: pr.freight_transport_mode ?? "",

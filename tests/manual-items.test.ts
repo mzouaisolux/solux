@@ -111,7 +111,10 @@ test("conversion: a Service-Request family line (category, no product) is NOT ma
   );
   assert.equal(row.is_manual, false);
   assert.equal(row.category_id, "cat-aospro");
-  assert.equal(row.product_name, null); // category name drives the display
+  // OBS-1: an SR family line (no product, category set) snapshots its
+  // descriptive commercial name so the task-list line isn't just the bare
+  // category. (Catalog lines with a product_id still snapshot nothing.)
+  assert.equal(row.product_name, "AOSPRO + (no model picked)");
   assert.equal(row.unit_price, null);
 });
 

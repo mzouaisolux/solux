@@ -223,6 +223,7 @@ export async function createProjectRequest(formData: FormData): Promise<void> {
       pole_required: bool(formData, "pole_required"),
       pole_quantity: intOrNull(formData, "pole_quantity"),
       pole_height: str(formData, "pole_height"),
+      light_mounting_height: str(formData, "light_mounting_height"),
       arm_length: str(formData, "arm_length"),
       pole_notes: str(formData, "pole_notes"),
       // freight brief (m096)
@@ -326,6 +327,7 @@ export async function updateProjectRequest(formData: FormData): Promise<void> {
       pole_required: bool(formData, "pole_required"),
       pole_quantity: intOrNull(formData, "pole_quantity"),
       pole_height: str(formData, "pole_height"),
+      light_mounting_height: str(formData, "light_mounting_height"),
       arm_length: str(formData, "arm_length"),
       pole_notes: str(formData, "pole_notes"),
       freight_transport_mode: transportMode,
@@ -384,8 +386,11 @@ export async function approveProjectRequest(formData: FormData): Promise<void> {
 
   // Director confirms which information is needed.
   const needCost = bool(formData, "req_product_pricing");
-  const needPack = bool(formData, "req_packing_list");
   const needFreight = bool(formData, "req_freight");
+  // Freight pricing is GENERATED FROM the packing list (the freight form only
+  // renders once packing containers exist), so a freight request without packing
+  // is a dead-end. Requesting freight therefore auto-requires the packing list.
+  const needPack = bool(formData, "req_packing_list") || needFreight;
 
   await supabase
     .from("project_requests")
@@ -435,6 +440,71 @@ export async function approveProjectRequest(formData: FormData): Promise<void> {
   revalidate(id);
 }
 
+/**
+ * Feature #5 (m167) — the Sales Director adjusts the requested technical
+ * parameters BEFORE approving, without bouncing the request back to Sales.
+ * The Sales-entered values are NEVER overwritten: the decision lives in
+ * approved_* columns (NULL = requested value stands). Every change is audited
+ * via pr.spec_adjusted (payload = requested → approved, reason).
+ */
+export async function adjustProjectSpec(formData: FormData): Promise<void> {
+  await requireCapability("project.approve");
+  const id = reqStr(formData, "id");
+  const reason = str(formData, "reason");
+  const supabase = createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  const { data: pr } = await supabase
+    .from("project_requests")
+    .select(
+      "solar_panel_size, battery_spec, led_power, approved_solar_panel_size, approved_battery_spec, approved_led_power"
+    )
+    .eq("id", id)
+    .maybeSingle();
+  if (!pr) throw new Error("Service request not found");
+  const cur: any = pr;
+
+  // Empty input = "requested value stands" (approved_* back to NULL).
+  const FIELDS = [
+    { form: "approved_solar_panel_size", requested: "solar_panel_size", label: "Solar Panel Power" },
+    { form: "approved_battery_spec", requested: "battery_spec", label: "Battery" },
+    { form: "approved_led_power", requested: "led_power", label: "LED Power" },
+  ] as const;
+
+  const patch: Record<string, unknown> = {};
+  const changes: { field: string; requested: string | null; approved: string | null }[] = [];
+  for (const f of FIELDS) {
+    const raw = str(formData, f.form);
+    // A value equal to the requested one means "no adjustment" → NULL.
+    const next = raw && raw !== (cur[f.requested] ?? "") ? raw : null;
+    if (next !== (cur[f.form] ?? null)) {
+      patch[f.form] = next;
+      changes.push({ field: f.label, requested: cur[f.requested] ?? null, approved: next });
+    }
+  }
+  if (changes.length === 0) return; // nothing to do — no noise in the audit
+
+  patch.spec_adjusted_by = user?.id ?? null;
+  patch.spec_adjusted_at = now();
+  patch.spec_adjust_reason = reason;
+  const { error } = await supabase.from("project_requests").update(patch).eq("id", id);
+  if (error) throw new Error(error.message);
+
+  await emitEvent({
+    entity_type: "project_request",
+    entity_id: id,
+    event_type: "pr.spec_adjusted",
+    message: changes
+      .map((c) => `${c.field}: ${c.requested ?? "—"} → ${c.approved ?? "(requested stands)"}`)
+      .join(" · ") + (reason ? ` — ${reason}` : ""),
+    payload: { changes, ...(reason ? { reason } : {}) },
+    bestEffort: true,
+  });
+  revalidate(id);
+}
+
 export async function rejectProjectRequest(formData: FormData): Promise<void> {
   await requireCapability("project.approve");
   const id = reqStr(formData, "id");
@@ -459,7 +529,13 @@ export async function rejectProjectRequest(formData: FormData): Promise<void> {
 export async function requestMoreInfo(formData: FormData): Promise<void> {
   await requireCapability("project.approve");
   const id = reqStr(formData, "id");
-  const note = str(formData, "note");
+  // UX audit fix: a bounce-back with no note left the request silently in
+  // 'draft' with nothing telling Sales WHAT to change. The note is now
+  // mandatory so the reason is always captured + surfaced (banner + audit).
+  const note = str(formData, "note")?.trim() || "";
+  if (!note) {
+    throw new Error("Please describe what needs to change — the note is required so Sales knows what to fix.");
+  }
   const supabase = createClient();
   const { error } = await supabase
     .from("project_requests")
@@ -536,9 +612,34 @@ export async function enterFactoryCost(formData: FormData): Promise<void> {
   const {
     data: { user },
   } = await supabase.auth.getUser();
+
+  const poleCostRmb = numOrNull(formData, "pole_cost_rmb");
+
+  // Feature #1 — mandatory documentary proof before completing a cost.
+  // The cost-calculation Excel is always required; a pole drawing becomes
+  // required as soon as a pole cost is entered. Files live on the SR
+  // (project_request_files) and stay attached + downloadable afterwards.
+  // Feature #6 — the physical panel dimensions used in the cost calc are
+  // mandatory (validate the visible form field first), so everyone sees the
+  // retained panel format without opening Excel.
+  if (!str(formData, "solar_panel_dimensions")) {
+    throw new Error("Solar panel dimensions are mandatory (e.g. 1722 × 1134 mm).");
+  }
+  const { data: attachedFiles } = await supabase
+    .from("project_request_files")
+    .select("category")
+    .eq("project_request_id", projectId);
+  const hasFile = (c: string) => (attachedFiles ?? []).some((f: any) => f.category === c);
+  if (!hasFile("costing")) {
+    throw new Error("Cost calculation Excel file is mandatory before approving this request.");
+  }
+  if (poleCostRmb != null && poleCostRmb > 0 && !hasFile("pole_drawing")) {
+    throw new Error("A pole cost was entered — the pole drawing (PDF/DWG/JPG) is mandatory before approving.");
+  }
+
   const patch = {
     product_cost_rmb: numOrNull(formData, "product_cost_rmb"),
-    pole_cost_rmb: numOrNull(formData, "pole_cost_rmb"),
+    pole_cost_rmb: poleCostRmb,
     cost_notes: str(formData, "cost_notes"),
     status: "completed" as const,
     completed_by: user?.id ?? null,
@@ -618,6 +719,7 @@ export async function enterFactoryCost(formData: FormData): Promise<void> {
     ["solar_panel_width_mm", numOrNull(formData, "solar_panel_width_mm")],
     ["solar_panel_thickness_mm", numOrNull(formData, "solar_panel_thickness_mm")],
     ["solar_panel_reference", str(formData, "solar_panel_reference")],
+    ["solar_panel_dimensions", str(formData, "solar_panel_dimensions")],
   ] as const;
   for (const [key, value] of panelFields) {
     if (formData.has(key)) panelPatch[key] = value;
@@ -1072,6 +1174,21 @@ export async function setProjectPricing(formData: FormData): Promise<void> {
   ]);
   // P9 backstop: never price without a client (so quotation can't dead-end).
   if (!(proj as any)?.client_id) throw new Error("Select a client before pricing this project.");
+
+  // m167 (feature #5) — downstream works with the Director-APPROVED spec.
+  // Guarded separate read: pre-m167 the columns are absent → the query errors
+  // → adj is null → requested values stand. Requested columns are untouched.
+  {
+    const { data: adj } = await supabase
+      .from("project_requests")
+      .select("approved_solar_panel_size, approved_battery_spec, approved_led_power")
+      .eq("id", id)
+      .maybeSingle();
+    const a: any = adj ?? {};
+    if (a.approved_solar_panel_size) (proj as any).solar_panel_size = a.approved_solar_panel_size;
+    if (a.approved_battery_spec) (proj as any).battery_spec = a.approved_battery_spec;
+    if (a.approved_led_power) (proj as any).led_power = a.approved_led_power;
+  }
   const round2 = (n: number) => Math.round(n * 100) / 100;
   const productFinal = round2(
     computeSectionPrice({ costRmb: (cost as any)?.product_cost_rmb ?? 0, exchangeRate: settings.exchangeRate, taxRebate: settings.taxRebate, marginPct: productMargin, commissionPct: productCommission }).finalUnitPrice
@@ -1549,10 +1666,15 @@ export async function generateQuotationFromProject(formData: FormData): Promise<
   const poleUnit = Number(pr?.pole_unit_price ?? p.pole_final_price ?? 0);
   const freightTotal = Number(pr?.freight_total ?? (freight as any)?.estimated_total_freight ?? 0);
 
+  // m167 (feature #5) — the sellable description uses the Director-APPROVED
+  // spec; the original_sales_request below keeps the REQUESTED values (m134).
+  const effLed = p.approved_led_power ?? p.led_power;
+  const effPanel = p.approved_solar_panel_size ?? p.solar_panel_size;
+  const effBattery = p.approved_battery_spec ?? p.battery_spec;
   const fallbackSpecs = [
-    p.led_power && `LED ${p.led_power}`,
-    p.solar_panel_size && `Panel ${p.solar_panel_size}`,
-    p.battery_spec && `Battery ${p.battery_spec}`,
+    effLed && `LED ${effLed}`,
+    effPanel && `Panel ${effPanel}`,
+    effBattery && `Battery ${effBattery}`,
     p.controller && `Controller ${p.controller}`,
     p.iot_required ? "IoT" : null,
   ].filter(Boolean);
@@ -1566,9 +1688,20 @@ export async function generateQuotationFromProject(formData: FormData): Promise<
   const poleHeight = pr?.pole_height ?? p.pole_height;
   const poleArm = pr?.arm_length ?? p.arm_length;
   const poleNotes = typeof p.pole_notes === "string" ? p.pole_notes.trim() : "";
+  // #4 terminology — the PRIMARY height is the light mounting height
+  // (light → ground, m166); the overall pole height is secondary. Both ride
+  // the line name so they survive quotation → proforma → task-list manual
+  // item → factory export.
+  const mountingHeight =
+    typeof p.light_mounting_height === "string" ? p.light_mounting_height.trim() : "";
   const poleName =
     [
-      poleHeight ? `Pole — ${poleHeight}` : "Pole",
+      mountingHeight
+        ? `Pole — mounting height ${mountingHeight}`
+        : poleHeight
+        ? `Pole — ${poleHeight}`
+        : "Pole",
+      mountingHeight && poleHeight ? `overall ${poleHeight}` : null,
       poleArm ? `arm ${poleArm}` : null,
       poleNotes || null,
     ]
@@ -1594,6 +1727,30 @@ export async function generateQuotationFromProject(formData: FormData): Promise<
     category_id: categoryId, // m133 — line-level product family for the factory-mapping resolver
     quantity: q,
     selected_options: {},
+    // OBS-1 — carry the SR's structured technical config onto the PRODUCT line
+    // so it survives to the production task-list line (which renders
+    // config_values) instead of living only as free text. The Pole line keeps
+    // its full descriptive name and needs no config chips.
+    config_values:
+      component === "product"
+        ? (Object.fromEntries(
+            [
+              effLed ? ["LED power", String(effLed)] : null,
+              (pr?.solar_panel_size ?? effPanel)
+                ? ["Solar panel", String(pr?.solar_panel_size ?? effPanel)]
+                : null,
+              (pr?.battery_spec ?? effBattery)
+                ? ["Battery", String(pr?.battery_spec ?? effBattery)]
+                : null,
+              (pr?.controller ?? p.controller)
+                ? ["Controller", String(pr?.controller ?? p.controller)]
+                : null,
+              p.solar_panel_tilt_angle != null
+                ? ["Tilt angle", `${p.solar_panel_tilt_angle}°`]
+                : null,
+            ].filter(Boolean) as [string, string][]
+          ))
+        : {},
     unit_price: round2(unit),
     total_price: round2(unit * q),
     pricing_mode: "manual",
@@ -1693,6 +1850,7 @@ export async function generateQuotationFromProject(formData: FormData): Promise<
       p.solar_panel_size && `Panel ${p.solar_panel_size}`,
       p.battery_spec && `Battery ${p.battery_spec}`,
       p.controller && `Controller ${p.controller}`,
+      p.light_mounting_height && `Mounting height (light→ground) ${p.light_mounting_height}`,
       p.pole_height && `Pole ${p.pole_height}`,
       p.arm_length && `Arm ${p.arm_length}`,
       p.iot_required ? "IoT required" : null,
@@ -1919,6 +2077,16 @@ export async function recordProjectFile(formData: FormData): Promise<void> {
     }
     throw new Error(error.message);
   }
+  // UX audit fix: uploads were invisible in the SR history. Audit them so the
+  // documentary trail (costing Excel, pole drawing, packing list…) is traceable.
+  await emitEvent({
+    entity_type: "project_request",
+    entity_id: projectId,
+    event_type: "pr.file_uploaded",
+    message: `File attached (${category}): ${str(formData, "file_name") ?? ""}`.trim(),
+    payload: { category, file_name: str(formData, "file_name") },
+    bestEffort: true,
+  });
   revalidate(projectId);
 }
 

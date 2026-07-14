@@ -10,8 +10,9 @@
 // =====================================================================
 
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { getCurrentUserRole } from "@/lib/auth";
+import { getCurrentUserRole, requireSuperAdmin } from "@/lib/auth";
 import { canSupervise } from "@/lib/types";
 import { emitEvent } from "@/lib/events";
 
@@ -278,6 +279,49 @@ export async function deleteAffair(formData: FormData) {
   if (error) throw new Error(error.message);
   revalidatePath("/affairs");
   revalidatePath("/clients", "layout");
+}
+
+/**
+ * FORCE delete an affair — SUPER-ADMIN ONLY (m169). Unlike deleteAffair
+ * (which refuses when quotations are linked), this deletes the affair AND
+ * everything inside it: quotations/proformas/invoices, service requests +
+ * costing, transport requests, task lists, production orders, attachments,
+ * comments and audit events — atomically in one RPC transaction. Journaled
+ * into admin_force_delete_log (super-admin-only read). The super-admin gate
+ * is re-checked INSIDE the SECURITY DEFINER RPC.
+ */
+export async function forceDeleteAffairAction(formData: FormData) {
+  await requireSuperAdmin();
+  const id = String(formData.get("id") ?? "");
+  if (!id) throw new Error("Missing project id");
+  const supabase = createClient();
+  const { data: snapshot } = await supabase
+    .from("affairs")
+    .select("name, client_id")
+    .eq("id", id)
+    .maybeSingle();
+  const { data: counts, error } = await supabase.rpc("admin_force_delete_affair", {
+    p_affair: id,
+  });
+  if (error) {
+    if (error.code === "42883") {
+      throw new Error(
+        "admin_force_delete_affair RPC not deployed yet — apply migration 169_admin_force_delete.sql in Supabase."
+      );
+    }
+    throw new Error(error.message);
+  }
+  const total = counts
+    ? Object.values(counts as Record<string, number>).reduce((a, b) => a + Number(b || 0), 0)
+    : 0;
+  revalidatePath("/affairs");
+  revalidatePath("/clients", "layout");
+  const dest = snapshot?.client_id ? `/clients/${snapshot.client_id}` : "/clients";
+  redirect(
+    `${dest}?flash=${encodeURIComponent(
+      `🗑 Project "${snapshot?.name ?? id.slice(0, 8)}" permanently deleted (${total} records removed).`
+    )}`
+  );
 }
 
 /** Resolve a document's whole version family (root + all its revisions). */

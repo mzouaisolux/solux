@@ -41,9 +41,13 @@ export type PoleSpec = {
   note: string | null;
 };
 
+// #4 terminology (owner 2026-07-14): the PRIMARY parameter is the light
+// mounting height (light → ground) — it feeds the future Light Study module.
+// The overall pole height is the secondary, "if applicable" figure. Order and
+// default reflect that priority.
 export const HEIGHT_REFERENCE_OPTIONS: { value: HeightReference; label: string }[] = [
-  { value: "total_pole_height", label: "Total pole height" },
-  { value: "light_point_height", label: "Light point height" },
+  { value: "light_point_height", label: "Light mounting height (light → ground)" },
+  { value: "total_pole_height", label: "Overall pole height" },
 ];
 export const ARM_TYPE_OPTIONS: { value: ArmType; label: string }[] = [
   { value: "no_arm", label: "No arm" },
@@ -60,7 +64,7 @@ export const SURFACE_TREATMENT_OPTIONS: { value: SurfaceTreatment; label: string
 
 export function emptyPoleSpec(): PoleSpec {
   return {
-    heightReference: "total_pole_height",
+    heightReference: "light_point_height",
     totalPoleHeightM: null,
     lightPointHeightM: null,
     armType: "single_arm",
@@ -106,8 +110,8 @@ export function poleSpecFromConfigValues(
 }
 
 const HEIGHT_LABEL: Record<HeightReference, string> = {
-  total_pole_height: "total pole height",
-  light_point_height: "light point height",
+  total_pole_height: "overall pole height",
+  light_point_height: "light mounting height",
 };
 
 function treatmentPhrase(t: SurfaceTreatment | null): string | null {

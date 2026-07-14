@@ -22,6 +22,11 @@ import {
 } from "@/lib/document-number";
 import { requireCapability } from "@/lib/permissions";
 import { emitEvent } from "@/lib/events";
+import {
+  diffApprovedPricing,
+  summarizePricingChanges,
+  type AuditableLine,
+} from "@/lib/pricing-audit";
 import type {
   Currency,
   DocType,
@@ -307,6 +312,71 @@ export async function saveDocument(
     }
   }
 
+  // ---- Pricing-integrity audit (feature #2, m168) ----------------------
+  // Director-approved lines (pricing_source='approved_service_request', m139)
+  // must never change silently. Before replacing a document's lines we
+  // snapshot them; after the save we diff old→new (product price, transport
+  // price, discounts), write append-only document_pricing_audit rows and emit
+  // doc.approved_price_changed (routed to the Sales Director's bell, m168).
+  // Everything degrades gracefully pre-m139/m168 (guarded reads/writes).
+  const AUDIT_LINE_COLS =
+    "unit_price, discount_type, discount_value, pricing_source, source_project_request_id, source_component, client_product_name, approved_by";
+  const readPricingSnapshot = async (
+    docId: string
+  ): Promise<{ lines: AuditableLine[]; freight: number | null } | null> => {
+    const [linesRes, docRes] = await Promise.all([
+      supabase.from("document_lines").select(AUDIT_LINE_COLS).eq("document_id", docId),
+      supabase.from("documents").select("freight_cost").eq("id", docId).maybeSingle(),
+    ]);
+    if (linesRes.error) return null; // pre-m139 env → no locked lines to protect
+    return {
+      lines: (linesRes.data ?? []) as unknown as AuditableLine[],
+      freight: (docRes.data as any)?.freight_cost ?? null,
+    };
+  };
+  const recordPricingAudit = async (
+    snapshot: { lines: AuditableLine[]; freight: number | null } | null,
+    targetDocId: string,
+    docNumber: string | null
+  ): Promise<void> => {
+    if (!snapshot) return;
+    const newLines: AuditableLine[] = input.lines.map((l) => ({
+      unit_price: l.unit_price,
+      discount_type: l.discount_type ?? null,
+      discount_value: l.discount_value ?? null,
+      // Same defaulting rule as buildLineRows (m139 backfill).
+      pricing_source:
+        l.pricing_source ?? (l.pricing_mode === "manual" ? "manual" : "catalogue"),
+      source_project_request_id: l.source_project_request_id ?? null,
+      source_component: l.source_component ?? null,
+      client_product_name: l.client_product_name || null,
+      approved_by: l.approved_by ?? null,
+    }));
+    const rows = diffApprovedPricing({
+      oldLines: snapshot.lines,
+      newLines,
+      oldFreight: snapshot.freight,
+      newFreight: freight_total,
+    });
+    if (rows.length === 0) return;
+    const {
+      data: { user: auditUser },
+    } = await supabase.auth.getUser();
+    // Append-only audit — guarded: pre-m168 the table is absent, skip silently
+    // (the event below still records the change in the immutable events log).
+    await supabase.from("document_pricing_audit").insert(
+      rows.map((r) => ({ document_id: targetDocId, ...r, changed_by: auditUser?.id ?? null }))
+    );
+    await emitEvent({
+      entity_type: "document",
+      entity_id: targetDocId,
+      event_type: "doc.approved_price_changed",
+      message: `Pricing modified after approval on ${docNumber ?? "document"} — ${summarizePricingChanges(rows)}`,
+      payload: { number: docNumber, changes: rows },
+      bestEffort: true,
+    });
+  };
+
   // ---- Auto-versioning (owner 2026-07-06) ------------------------------
   // Sales clicks Edit → Save without ever thinking about versions. If the
   // edit target is still a DRAFT we update it in place (below). If it has
@@ -338,6 +408,8 @@ export async function saveDocument(
   // draft exactly mirrors the builder state.
   if (input.edit_of && editSrc && editSrc.status === "draft") {
     const src = editSrc;
+    // #2 — snapshot the approved pricing BEFORE the lines are replaced.
+    const pricingSnapshot = await readPricingSnapshot(input.edit_of);
 
     // Mutable fields — everything except number / status / created_by.
     const baseUpdate: Record<string, unknown> = {
@@ -406,6 +478,8 @@ export async function saveDocument(
         .eq("document_id", input.edit_of);
       if (delLines) throw new Error(delLines.message);
       await insertLineRows(input.edit_of);
+      // #2 — approved price / transport / discount changed? → audit + notify.
+      await recordPricingAudit(pricingSnapshot, input.edit_of, src.number);
     }
     {
       const { error: delC } = await supabase
@@ -654,6 +728,15 @@ export async function saveDocument(
 
   // Same row shape + m139-resilient insert as the edit-in-place path.
   await insertLineRows(inserted!.id);
+
+  // #2 — versioned edit (sent/won → V{n+1}): the frozen original keeps its
+  // lines, but if the NEW version changes a Director-approved price/transport/
+  // discount vs the source version, that is the same "modified after approval"
+  // situation → audit on the new document + notify the Director.
+  if (reviseSourceId) {
+    const sourceSnapshot = await readPricingSnapshot(reviseSourceId);
+    await recordPricingAudit(sourceSnapshot, inserted!.id, numberRow);
+  }
 
   if (validContainers.length) {
     // Base row shape — fields that have always existed on

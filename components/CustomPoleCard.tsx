@@ -143,26 +143,12 @@ export default function CustomPoleCard({
             ))}
           </select>
           <span className={hint}>
-            Choose whether the entered height refers to the full pole height or
-            to the light point height.
+            The light mounting height (light → ground) is the primary
+            parameter; the overall pole height is secondary, if applicable.
           </span>
         </label>
         <label className={label}>
-          Total pole height (m)
-          <input
-            type="number"
-            min={0}
-            step="0.1"
-            value={numVal(spec.totalPoleHeightM)}
-            onChange={(e) =>
-              patchSpec({ totalPoleHeightM: parseNum(e.target.value) })
-            }
-            placeholder="e.g. 8"
-            className={`${input} tabular-nums`}
-          />
-        </label>
-        <label className={label}>
-          Light point height (m)
+          Light mounting height (m)
           <input
             type="number"
             min={0}
@@ -172,6 +158,20 @@ export default function CustomPoleCard({
               patchSpec({ lightPointHeightM: parseNum(e.target.value) })
             }
             placeholder="e.g. 7"
+            className={`${input} tabular-nums`}
+          />
+        </label>
+        <label className={label}>
+          Overall pole height (m)
+          <input
+            type="number"
+            min={0}
+            step="0.1"
+            value={numVal(spec.totalPoleHeightM)}
+            onChange={(e) =>
+              patchSpec({ totalPoleHeightM: parseNum(e.target.value) })
+            }
+            placeholder="e.g. 8"
             className={`${input} tabular-nums`}
           />
         </label>

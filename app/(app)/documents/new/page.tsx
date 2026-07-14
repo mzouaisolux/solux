@@ -294,13 +294,19 @@ export default async function NewDocumentPage({
       tierPrices = buildTierPriceMapByCategory((listPrices ?? []) as any, productCategory, categoryListMap);
     }
   }
-  if (!tierPrices) {
+  // Legacy all-prices fallback: ONLY for a genuinely pre-v5 env (no price
+  // lists exist at all). Once price lists are in use (m087+), a category with
+  // no catalogue-enabled published list (m170) must stay unpriced — falling
+  // back to every price here would leak a price the admin chose NOT to sell
+  // from the catalogue. So we gate the fallback on hasAnyPriceList.
+  if (!tierPrices && !pricingCtx.hasAnyPriceList) {
     const { data: legacyPrices } = await supabase
       .from("prices_version")
       .select("product_id, price, valid_from, pricing_tier")
       .order("valid_from", { ascending: false });
     tierPrices = buildTierPriceMap((legacyPrices ?? []) as any);
   }
+  if (!tierPrices) tierPrices = {};
 
   // Stale-link guard — a ?client= / ?affair= id can outlive its row (deleting
   // a client SET NULLs its affairs, m076 FK). Locking the builder onto a
@@ -409,6 +415,7 @@ export default async function NewDocumentPage({
         bankAccounts={(bankAccounts ?? []) as any}
         configFields={(configFields ?? []) as any}
         configFieldOptions={(configFieldOptions ?? []) as any}
+        catalogueBlockedCategoryIds={Array.from(pricingCtx.blockedCategoryIds)}
         initialDoc={initialDoc}
         {...(() => {
           // Auto-versioning (owner 2026-07-06): "Edit" on a document that is
