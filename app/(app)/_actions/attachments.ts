@@ -215,6 +215,49 @@ export async function updateAttachment(formData: FormData): Promise<void> {
 }
 
 /**
+ * Move an uploaded file to another CATEGORY (drag & drop, m164). Persists the
+ * user's choice in `attachments.folder`; the derived category (attachment_type)
+ * is left untouched. Only affects attachments — generated documents are filed
+ * by business logic and aren't movable.
+ */
+const FOLDER_KEYS = new Set<string>([
+  "commercial",
+  "customer",
+  "technical",
+  "energy_studies",
+  "certifications",
+  "photos",
+  "contracts",
+  "other",
+]);
+
+export async function moveAttachmentToFolder(formData: FormData): Promise<void> {
+  const id = String(formData.get("id") ?? "");
+  const documentId = String(formData.get("document_id") ?? "");
+  const folder = String(formData.get("folder") ?? "");
+  if (!id) throw new Error("Missing attachment id");
+  if (!FOLDER_KEYS.has(folder)) throw new Error(`Unknown category: ${folder}`);
+
+  const supabase = createClient();
+  const { error } = await supabase
+    .from("attachments")
+    .update({ folder })
+    .eq("id", id);
+  if (error) {
+    // Column not there yet → tell the user exactly what to apply.
+    if (/folder/.test(error.message ?? "") && /column|schema/i.test(error.message ?? "")) {
+      throw new Error(
+        "Document categories need migration m164 (164_attachment_folder.sql) applied in Supabase."
+      );
+    }
+    throw new Error(error.message);
+  }
+
+  if (documentId) revalidatePath(`/documents/${documentId}`);
+  revalidatePath("/task-lists", "layout");
+}
+
+/**
  * Delete an attachment: remove the row (RLS gates who can) then best-
  * effort remove the Storage object so we don't orphan files.
  */

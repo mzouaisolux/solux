@@ -19,22 +19,37 @@
 
 export type ProjectFolder =
   | "commercial"
-  | "study_lab"
+  | "customer"
   | "technical"
-  | "production"
-  | "logistics"
-  | "customer";
+  | "energy_studies"
+  | "certifications"
+  | "photos"
+  | "contracts"
+  | "other";
 
-// `icon` = NavIcons glyph name (Solux DNA line pictos); `emoji` kept for
-// plain-text surfaces (email bodies, PDF, logs) that can't render SVG.
+// `icon` = NavIcons glyph name (Solux DNA line pictos; unknown → dot);
+// `emoji` kept for plain-text surfaces (email bodies, PDF, logs) that
+// can't render SVG. Order = display order of the category sections.
+// 8 categories (owner refinement) — merged to cut cognitive load while
+// still covering every business need; a couple of keys keep their original
+// slug but now span a merged scope (see labels).
 export const PROJECT_FOLDERS: { key: ProjectFolder; label: string; emoji: string; icon: string }[] = [
   { key: "commercial", label: "Commercial", emoji: "💼", icon: "briefcase" },
-  { key: "study_lab", label: "Study Lab", emoji: "🔬", icon: "flask" },
-  { key: "technical", label: "Technical", emoji: "📐", icon: "dividers" },
-  { key: "production", label: "Production", emoji: "🏭", icon: "factory" },
-  { key: "logistics", label: "Logistics", emoji: "🚢", icon: "ship" },
   { key: "customer", label: "Customer Files", emoji: "📎", icon: "paperclip" },
+  { key: "technical", label: "Technical Files & Drawings", emoji: "📐", icon: "dividers" },
+  { key: "energy_studies", label: "Energy & Lighting Studies", emoji: "💡", icon: "bulb" },
+  { key: "certifications", label: "Certifications", emoji: "✅", icon: "check" },
+  { key: "photos", label: "Photos & Shipping Documents", emoji: "📦", icon: "package" },
+  { key: "contracts", label: "Contracts", emoji: "📝", icon: "doc" },
+  { key: "other", label: "Other", emoji: "📁", icon: "file" },
 ];
+
+/** The category keys, ordered — handy for validation + always-visible drop targets. */
+export const PROJECT_FOLDER_KEYS: ProjectFolder[] = PROJECT_FOLDERS.map((f) => f.key);
+
+export function isProjectFolder(v: string | null | undefined): v is ProjectFolder {
+  return v != null && PROJECT_FOLDER_KEYS.includes(v as ProjectFolder);
+}
 
 export function folderLabel(f: ProjectFolder): string {
   return PROJECT_FOLDERS.find((x) => x.key === f)?.label ?? f;
@@ -107,21 +122,21 @@ export type ProjectDocument = {
    Categorisation rules
    =========================================================================== */
 
-/** attachments.attachment_type → folder (extension can still override). */
+/** attachments.attachment_type → DEFAULT category (a saved `folder` wins). */
 const ATTACHMENT_FOLDER: Record<string, ProjectFolder> = {
   tender: "customer",
   technical_spec: "technical",
   mechanical_drawing: "technical",
   dimension_drawing: "technical",
-  inspection: "production",
+  inspection: "certifications",
   approved_doc: "customer",
-  packaging_artwork: "production",
+  packaging_artwork: "technical",
   logo: "customer",
-  rendering: "technical",
-  photo: "customer",
-  dialux: "study_lab",
-  special_instructions: "production",
-  other: "customer",
+  rendering: "photos",
+  photo: "photos",
+  dialux: "energy_studies",
+  special_instructions: "other",
+  other: "other",
 };
 
 /** File extensions that are unambiguously technical drawings / CAD. */
@@ -140,13 +155,19 @@ export function fileExtension(name: string): string {
   return i === -1 ? "" : name.slice(i + 1).toLowerCase();
 }
 
-/** Folder for a manual upload — the type picker decides, CAD extensions win. */
+/**
+ * Category for a manual upload. A user-assigned `folder` (drag & drop, m164)
+ * ALWAYS wins; otherwise CAD extensions land in Drawings, then the type
+ * picker decides, then Other.
+ */
 export function folderForAttachment(
   attachmentType: string | null | undefined,
-  fileName: string
+  fileName: string,
+  folderOverride?: string | null
 ): ProjectFolder {
+  if (isProjectFolder(folderOverride)) return folderOverride;
   if (TECHNICAL_EXTENSIONS.has(fileExtension(fileName))) return "technical";
-  return ATTACHMENT_FOLDER[attachmentType ?? "other"] ?? "customer";
+  return ATTACHMENT_FOLDER[attachmentType ?? "other"] ?? "other";
 }
 
 /** project_request_files.category → folder (SR technical dossier). */
@@ -157,9 +178,9 @@ export function folderForRequestFile(
     case "spec":
     case "drawing":
     case "pole_drawing":
-      return "technical";
+      return "technical"; // Technical Files & Drawings
     case "packing":
-      return "logistics";
+      return "photos"; // Photos & Shipping Documents
     case "costing":
       return "commercial"; // the cost basis of the offer (view_cost-gated upstream)
     case "tender":
@@ -174,12 +195,12 @@ export function folderForRequestFile(
 export function folderForOrderDoc(category: string | null | undefined): ProjectFolder {
   switch (category) {
     case "shipping":
-      return "logistics";
+      return "photos"; // Photos & Shipping Documents
     case "financial":
       return "commercial";
     case "production":
     default:
-      return "production";
+      return "technical";
   }
 }
 
@@ -287,16 +308,22 @@ export function repositoryAuthors(docs: ProjectDocument[]): string[] {
   ).sort();
 }
 
-/** Group into folders, catalog order, empty folders skipped. */
+/**
+ * Group into folders, catalog order. `includeEmpty` keeps every category
+ * (used by the affair Documents card so all categories stay visible as
+ * drag & drop targets, m164); default drops empties for compact views.
+ */
 export function groupByFolder(
-  docs: ProjectDocument[]
+  docs: ProjectDocument[],
+  includeEmpty = false
 ): { folder: (typeof PROJECT_FOLDERS)[number]; docs: ProjectDocument[] }[] {
-  return PROJECT_FOLDERS.map((folder) => ({
+  const groups = PROJECT_FOLDERS.map((folder) => ({
     folder,
     docs: docs
       .filter((d) => d.folder === folder.key)
       .sort((a, b) => (b.date ?? "").localeCompare(a.date ?? "")),
-  })).filter((g) => g.docs.length > 0);
+  }));
+  return includeEmpty ? groups : groups.filter((g) => g.docs.length > 0);
 }
 
 export function fileSizeLabel(bytes: number | null | undefined): string | null {

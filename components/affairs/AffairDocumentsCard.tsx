@@ -3,11 +3,16 @@
 // =====================================================================
 // Documents — the project's SINGLE SOURCE OF TRUTH (owner spec 2026-07-07).
 // Every document related to the project, from every module, in ONE place:
-// folder-organised (Commercial / Study Lab / Technical / Production /
-// Logistics / Customer Files), searchable, with uniform actions. Generated
-// documents are first-class rows exactly like uploads. The aggregation
-// itself lives in lib/project-documents-server.ts — this component just
-// renders whatever the repository contains.
+// organised into categories (Commercial / Customer Files / Technical /
+// Energy & Lighting Studies / Drawings / Certifications / Photos / Shipping /
+// Contracts / Other), searchable, with uniform actions. Generated documents
+// are first-class rows exactly like uploads. The aggregation itself lives in
+// lib/project-documents-server.ts — this component just renders it.
+//
+// m164 — uploaded files can be re-filed by DRAG & DROP between categories:
+// every category stays visible as a drop target (even empty), the move is
+// optimistic + persisted to attachments.folder. Generated documents keep
+// their business-derived category and aren't draggable.
 //
 // Fallback: when a caller doesn't provide `repository` (not wired yet),
 // the legacy flat list still renders so no surface ever goes blank.
@@ -21,6 +26,7 @@ import {
   filterProjectDocuments,
   repositoryAuthors,
   groupByFolder,
+  folderLabel,
   DOC_STATUS_LABEL,
   DOC_STATUS_TONE,
   type ProjectDocStatus,
@@ -32,6 +38,7 @@ import { setProjectDocumentStatus } from "@/app/(app)/_actions/project-doc-statu
 import { createDocumentShareLink } from "@/app/(app)/_actions/project-doc-share";
 import { pushToast } from "@/components/feedback/toast-store";
 import { AttachmentUploader } from "@/components/attachments/AttachmentUploader";
+import { moveAttachmentToFolder } from "@/app/(app)/_actions/attachments";
 import { AttachmentDeleteButton } from "@/components/attachments/AttachmentDeleteButton";
 import { AttachmentReplaceButton } from "@/components/affairs/AttachmentReplaceButton";
 import {
@@ -170,10 +177,19 @@ function DocRow({
   d,
   canSetDocStatus,
   affairId,
+  movable = false,
+  onDragStart,
+  onDragEnd,
+  dragging = false,
 }: {
   d: ProjectDocument;
   canSetDocStatus: boolean;
   affairId: string;
+  /** Only uploaded files carry a user-editable category → draggable. */
+  movable?: boolean;
+  onDragStart?: () => void;
+  onDragEnd?: () => void;
+  dragging?: boolean;
 }) {
   const isExternal = d.source !== "record" && d.source !== "quotation";
   const meta = [
@@ -185,7 +201,24 @@ function DocRow({
     .filter(Boolean)
     .join(" · ");
   return (
-    <li className={`flex items-center gap-2.5 py-2 ${d.isCurrent ? "" : "opacity-60"}`}>
+    <li
+      draggable={movable}
+      onDragStart={
+        movable
+          ? (e) => {
+              e.dataTransfer.effectAllowed = "move";
+              onDragStart?.();
+            }
+          : undefined
+      }
+      onDragEnd={movable ? onDragEnd : undefined}
+      className={`flex items-center gap-2.5 py-2 transition-all duration-200 ${
+        d.isCurrent ? "" : "opacity-60"
+      } ${movable ? "cursor-grab active:cursor-grabbing" : ""} ${
+        dragging ? "opacity-40" : ""
+      }`}
+      title={movable ? "Drag to another category to re-file" : undefined}
+    >
       <span className="sx-doc-ic" aria-hidden>
         <NavGlyph name="doc" />
       </span>
@@ -280,6 +313,7 @@ export function AffairDocumentsCard({
   /** hasUiCapability("document.set_status") — shows the status setter. */
   canSetDocStatus?: boolean;
 }) {
+  const router = useRouter();
   const [adding, setAdding] = useState(false);
   const [q, setQ] = useState("");
   const [folder, setFolder] = useState<ProjectFolder | null>(null);
@@ -289,20 +323,84 @@ export function AffairDocumentsCard({
   // users collapse what they don't need (state kept per folder).
   const [closed, setClosed] = useState<Record<string, boolean>>({});
 
+  // ----- Drag & drop re-categorisation (m164) -----
+  // `moved` = optimistic overrides (attachmentId → folder) applied on top of
+  // the server repository so a dropped file jumps categories instantly; the
+  // server refresh reconciles it. `draggingId` = the row in flight;
+  // `dropTarget` = the category currently hovered (for the highlight).
+  const [moved, setMoved] = useState<Record<string, ProjectFolder>>({});
+  const [draggingId, setDraggingId] = useState<string | null>(null);
+  const [dropTarget, setDropTarget] = useState<ProjectFolder | null>(null);
+
   const repo = repository ?? null;
   const authorsList = useMemo(() => (repo ? repositoryAuthors(repo) : []), [repo]);
   const hasHistory = useMemo(() => (repo ? repo.some((d) => !d.isCurrent) : false), [repo]);
-  const filtered = useMemo(
+  // Apply optimistic category moves before anything else reads the repo.
+  const repoMoved = useMemo(
     () =>
       repo
-        ? filterProjectDocuments(repo, q, folder, {
+        ? repo.map((d) =>
+            d.attachmentId && moved[d.attachmentId]
+              ? { ...d, folder: moved[d.attachmentId] }
+              : d
+          )
+        : null,
+    [repo, moved]
+  );
+  const filtered = useMemo(
+    () =>
+      repoMoved
+        ? filterProjectDocuments(repoMoved, q, folder, {
             author: author || null,
             latestOnly,
           })
         : [],
-    [repo, q, folder, author, latestOnly]
+    [repoMoved, q, folder, author, latestOnly]
   );
-  const groups = useMemo(() => groupByFolder(filtered), [filtered]);
+  // Default organising view (no search / author filter) shows EVERY category
+  // as a visible drop target — even empty ones. A search narrows to matches.
+  const includeEmpty = q.trim() === "" && author === "";
+  const groups = useMemo(
+    () => groupByFolder(filtered, includeEmpty),
+    [filtered, includeEmpty]
+  );
+
+  // A file is movable only if it's a current uploaded attachment.
+  function isMovable(d: ProjectDocument): boolean {
+    return d.source === "attachment" && !!d.attachmentId && d.isCurrent;
+  }
+
+  function onDropInto(target: ProjectFolder) {
+    setDropTarget(null);
+    const id = draggingId;
+    setDraggingId(null);
+    if (!id) return;
+    const doc = repoMoved?.find((d) => d.attachmentId === id);
+    if (!doc || !doc.documentId) return;
+    const current = doc.folder;
+    if (current === target) return; // no-op drop onto the same category
+
+    // Optimistic: move now, reconcile on the server.
+    setMoved((m) => ({ ...m, [id]: target }));
+    const fd = new FormData();
+    fd.set("id", id);
+    fd.set("document_id", doc.documentId);
+    fd.set("folder", target);
+    moveAttachmentToFolder(fd)
+      .then(() => {
+        pushToast(`Moved to ${folderLabel(target)}`);
+        router.refresh();
+      })
+      .catch((e: any) => {
+        // Revert the optimistic move and tell the user why.
+        setMoved((m) => {
+          const next = { ...m };
+          delete next[id];
+          return next;
+        });
+        pushToast(e?.message ?? "Could not move the document", "error");
+      });
+  }
   const count = repo
     ? repo.filter((d) => d.isCurrent).length
     : files.filter((f) => f.kind === "attachment").length +
@@ -420,14 +518,45 @@ export function AffairDocumentsCard({
                 </p>
               ) : (
                 <div className="mt-1">
-                  {groups.map(({ folder: f, docs }) => (
-                    <div key={f.key} className="border-t border-neutral-100">
+                  {groups.map(({ folder: f, docs }) => {
+                    const isTarget = dropTarget === f.key;
+                    // A hovered category during a drag becomes a highlighted
+                    // drop zone; a valid drag always expands the section so the
+                    // target is visible even if the user had collapsed it.
+                    const collapsed = !!closed[f.key] && !draggingId;
+                    return (
+                    <div
+                      key={f.key}
+                      onDragOver={(e) => {
+                        if (!draggingId) return;
+                        e.preventDefault();
+                        e.dataTransfer.dropEffect = "move";
+                        if (dropTarget !== f.key) setDropTarget(f.key);
+                      }}
+                      onDragLeave={(e) => {
+                        // Only clear when the pointer actually left the section.
+                        if (!e.currentTarget.contains(e.relatedTarget as Node))
+                          setDropTarget((t) => (t === f.key ? null : t));
+                      }}
+                      onDrop={(e) => {
+                        if (!draggingId) return;
+                        e.preventDefault();
+                        onDropInto(f.key);
+                      }}
+                      className={`rounded-lg border-t border-neutral-100 transition-colors ${
+                        isTarget
+                          ? "border-transparent bg-solux/5 ring-2 ring-solux/40 ring-inset"
+                          : draggingId
+                          ? "border-transparent ring-1 ring-dashed ring-neutral-200 ring-inset"
+                          : ""
+                      }`}
+                    >
                       <button
                         type="button"
                         onClick={() =>
                           setClosed((m) => ({ ...m, [f.key]: !m[f.key] }))
                         }
-                        className="flex w-full items-center gap-1.5 py-2 text-left"
+                        className="flex w-full items-center gap-1.5 py-2 pl-1 text-left"
                       >
                         <span className="sx-cat-ic" aria-hidden>
                           <NavGlyph name={f.icon} />
@@ -438,11 +567,21 @@ export function AffairDocumentsCard({
                         <span className="text-[11px] text-neutral-400">
                           {docs.length}
                         </span>
+                        {isTarget && (
+                          <span className="text-[10px] font-semibold text-solux">
+                            Drop to move here
+                          </span>
+                        )}
                         <span className="ml-auto text-[10px] text-neutral-300">
-                          {closed[f.key] ? "▸" : "▾"}
+                          {collapsed ? "▸" : "▾"}
                         </span>
                       </button>
-                      {!closed[f.key] && (
+                      {!collapsed && (
+                        docs.length === 0 ? (
+                          <p className="px-1 pb-2 pl-6 text-[11px] italic text-neutral-300">
+                            {draggingId ? "Drop files here" : "No documents yet"}
+                          </p>
+                        ) : (
                         <ul className="divide-y divide-neutral-50 pb-1 pl-5">
                           {docs.map((d) => (
                             <DocRow
@@ -450,12 +589,21 @@ export function AffairDocumentsCard({
                             d={d}
                             canSetDocStatus={canSetDocStatus}
                             affairId={affairId}
+                            movable={isMovable(d)}
+                            dragging={draggingId === d.attachmentId}
+                            onDragStart={() => setDraggingId(d.attachmentId)}
+                            onDragEnd={() => {
+                              setDraggingId(null);
+                              setDropTarget(null);
+                            }}
                           />
                           ))}
                         </ul>
+                        )
                       )}
                     </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </>

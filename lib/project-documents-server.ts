@@ -112,14 +112,24 @@ export async function loadProjectRepositories(
   // ---- Manual-upload metadata: lifecycle status (m150) + version chains
   //      (m151). Cascading soft-fail so any migration combo keeps working.
   const attachmentStatus = new Map<string, ProjectDocStatus>();
+  // m164 — user-assigned category (folder). Cascading soft-fail: drop the
+  // `folder` column first if it isn't there yet (migration pending), then
+  // group_id/version (m151), so any migration combo keeps rendering.
+  const attachmentFolderOverride = new Map<string, string>();
   let attachmentVersionMeta: { id: string; group_id: string | null; version: number | null }[] =
     [];
   if (attachmentIds.length) {
     let res: { data: any[] | null; error: { message?: string } | null } =
       await supabase
         .from("attachments")
+        .select("id, doc_status, group_id, version, folder")
+        .in("id", attachmentIds);
+    if (res.error && /folder/.test(res.error.message ?? "")) {
+      res = await supabase
+        .from("attachments")
         .select("id, doc_status, group_id, version")
         .in("id", attachmentIds);
+    }
     if (res.error && /group_id|version/.test(res.error.message ?? "")) {
       res = await supabase
         .from("attachments")
@@ -130,6 +140,7 @@ export async function loadProjectRepositories(
       for (const r of (res.data ?? []) as any[]) {
         const s = asDocStatus(r.doc_status);
         if (s) attachmentStatus.set(r.id, s);
+        if (r.folder) attachmentFolderOverride.set(r.id, String(r.folder));
         attachmentVersionMeta.push({
           id: r.id,
           group_id: r.group_id ?? null,
@@ -362,7 +373,7 @@ export async function loadProjectRepositories(
     const record = (key: string, name: string, href: string): ProjectDocument => ({
       key,
       name,
-      folder: "production",
+      folder: "technical",
       kindLabel: "Production record",
       source: "record",
       href,
@@ -403,7 +414,11 @@ export async function loadProjectRepositories(
       docs.push({
         key: f.key,
         name: f.name,
-        folder: folderForAttachment(f.attachmentType, f.name),
+        folder: folderForAttachment(
+          f.attachmentType,
+          f.name,
+          attachmentFolderOverride.get(f.attachmentId)
+        ),
         kindLabel: attachmentTypeLabel(f.attachmentType),
         source: "attachment",
         href: f.href,
@@ -511,7 +526,7 @@ export async function loadProjectRepositories(
         docs.push({
           key: `light:${i}:${e.kind}`,
           name: e.name ?? `${e.kind}.pdf`,
-          folder: "study_lab",
+          folder: "energy_studies", // Energy & Lighting Studies (merged)
           kindLabel: e.kind,
           source: "lighting",
           href: url,
