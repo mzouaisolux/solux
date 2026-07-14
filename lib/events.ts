@@ -276,6 +276,63 @@ export async function emitEventOnce(
 }
 
 /**
+ * Most recent event of a given type for an entity, or null. Used to decide
+ * whether to fold a repeated signal into an existing event's thread (digest)
+ * instead of emitting a fresh one — see coalescePricingNotification. Soft-fails
+ * to null (missing table / RLS / error) so the caller emits fresh, never drops.
+ */
+export async function getMostRecentEvent(
+  entityType: EventEntityType,
+  entityId: string,
+  eventType: EventType
+): Promise<{ id: string; created_at: string } | null> {
+  try {
+    const supabase = createClient();
+    const { data, error } = await supabase
+      .from("events")
+      .select("id, created_at")
+      .eq("entity_type", entityType)
+      .eq("entity_id", entityId)
+      .eq("event_type", eventType)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (error) {
+      console.warn("[getMostRecentEvent]", error.message);
+      return null;
+    }
+    return (data as { id: string; created_at: string } | null) ?? null;
+  } catch (e: any) {
+    console.warn("[getMostRecentEvent] uncaught:", e?.message);
+    return null;
+  }
+}
+
+/**
+ * Append a comment to an event's thread (best-effort). Used to FOLD a repeated
+ * signal into an existing event's running digest instead of emitting a new
+ * event. Attribute to the actor (userId): the bell excludes self-authored
+ * comments, so the author is never self-notified while every other recipient
+ * sees the item re-surface with a bumped unread count. Soft-fails — a lost
+ * comment must never block the business action.
+ */
+export async function appendEventComment(
+  eventId: string,
+  comment: string,
+  userId: string | null
+): Promise<void> {
+  try {
+    const supabase = createClient();
+    const { error } = await supabase
+      .from("event_comments")
+      .insert({ event_id: eventId, user_id: userId, comment });
+    if (error) console.warn("[appendEventComment] soft-fail:", error.message);
+  } catch (e: any) {
+    console.warn("[appendEventComment] uncaught:", e?.message);
+  }
+}
+
+/**
  * Fetch events for a specific entity, newest first.
  *
  * Used by timeline panels on PO detail, client workspace, task list

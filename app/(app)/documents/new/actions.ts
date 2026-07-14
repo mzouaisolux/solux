@@ -21,10 +21,12 @@ import {
   isDocumentNumberCollision,
 } from "@/lib/document-number";
 import { requireCapability } from "@/lib/permissions";
-import { emitEvent } from "@/lib/events";
+import { emitEvent, getMostRecentEvent, appendEventComment } from "@/lib/events";
 import {
   diffApprovedPricing,
   summarizePricingChanges,
+  coalescePricingNotification,
+  PRICING_NOTIF_COALESCE_MINUTES,
   type AuditableLine,
 } from "@/lib/pricing-audit";
 import type {
@@ -367,14 +369,40 @@ export async function saveDocument(
     await supabase.from("document_pricing_audit").insert(
       rows.map((r) => ({ document_id: targetDocId, ...r, changed_by: auditUser?.id ?? null }))
     );
-    await emitEvent({
-      entity_type: "document",
-      entity_id: targetDocId,
-      event_type: "doc.approved_price_changed",
-      message: `Pricing modified after approval on ${docNumber ?? "document"} — ${summarizePricingChanges(rows)}`,
-      payload: { number: docNumber, changes: rows },
-      bestEffort: true,
-    });
+    // Notification (anti-spam digest): fold successive post-approval price
+    // changes to the SAME document into ONE running bell item for the Sales
+    // Director. The first change emits the event; later changes within the
+    // coalescing window append to its thread — the bell re-surfaces that single
+    // item with a bumped unread-comment count + latest-change preview (and never
+    // self-notifies the Sales author). Append-only + RLS-safe: events are
+    // immutable (no UPDATE policy); we only INSERT an event or a comment.
+    const summary = summarizePricingChanges(rows);
+    const recent = await getMostRecentEvent(
+      "document",
+      targetDocId,
+      "doc.approved_price_changed"
+    );
+    const decision = coalescePricingNotification(
+      recent?.created_at ?? null,
+      new Date().toISOString(),
+      PRICING_NOTIF_COALESCE_MINUTES
+    );
+    if (recent && decision === "append") {
+      await appendEventComment(
+        recent.id,
+        `Pricing changed again — ${summary}`,
+        auditUser?.id ?? null
+      );
+    } else {
+      await emitEvent({
+        entity_type: "document",
+        entity_id: targetDocId,
+        event_type: "doc.approved_price_changed",
+        message: `Pricing modified after approval on ${docNumber ?? "document"} — ${summary}`,
+        payload: { number: docNumber, changes: rows },
+        bestEffort: true,
+      });
+    }
   };
 
   // ---- Auto-versioning (owner 2026-07-06) ------------------------------

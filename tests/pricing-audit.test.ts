@@ -1,6 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { diffApprovedPricing, summarizePricingChanges } from "../lib/pricing-audit.ts";
+import {
+  diffApprovedPricing,
+  summarizePricingChanges,
+  coalescePricingNotification,
+  PRICING_NOTIF_COALESCE_MINUTES,
+} from "../lib/pricing-audit.ts";
 
 const approvedLine = (over: Record<string, unknown> = {}) => ({
   unit_price: 520,
@@ -95,4 +100,54 @@ test("summary reads old → new", () => {
   const s = summarizePricingChanges(rows);
   assert.match(s, /Product A: 520 → 495/);
   assert.match(s, /Shipping: 780 → 920/);
+});
+
+// --- Notification coalescing (anti-spam digest) -----------------------------
+
+const NOW = "2026-07-15T12:00:00.000Z";
+
+test("coalesce: no recent event → emit (first change on the document)", () => {
+  assert.equal(coalescePricingNotification(null, NOW, 60), "emit");
+  assert.equal(coalescePricingNotification(undefined, NOW, 60), "emit");
+});
+
+test("coalesce: recent event within the window → append (fold into digest)", () => {
+  // 30 min ago, window 60 → still the same running digest.
+  assert.equal(
+    coalescePricingNotification("2026-07-15T11:30:00.000Z", NOW, 60),
+    "append"
+  );
+});
+
+test("coalesce: recent event older than the window → emit (new occasion)", () => {
+  // 120 min ago, window 60 → a fresh notification.
+  assert.equal(
+    coalescePricingNotification("2026-07-15T10:00:00.000Z", NOW, 60),
+    "emit"
+  );
+});
+
+test("coalesce: unparseable timestamp → emit (never silently drop a change)", () => {
+  assert.equal(coalescePricingNotification("not-a-date", NOW, 60), "emit");
+});
+
+test("coalesce: successive same-day changes fold under the 7-day default window", () => {
+  // Two changes 3 hours apart both belong to one running digest.
+  assert.equal(
+    coalescePricingNotification(
+      "2026-07-15T09:00:00.000Z",
+      NOW,
+      PRICING_NOTIF_COALESCE_MINUTES
+    ),
+    "append"
+  );
+  // A change 8 days later starts fresh.
+  assert.equal(
+    coalescePricingNotification(
+      "2026-07-07T09:00:00.000Z",
+      NOW,
+      PRICING_NOTIF_COALESCE_MINUTES
+    ),
+    "emit"
+  );
 });

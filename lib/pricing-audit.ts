@@ -9,6 +9,8 @@
 // diff: old state vs new state → audit rows. Framework-free = unit-testable.
 // =====================================================================
 
+import { shouldEmitOnce } from "./notification-catalog.ts";
+
 export const APPROVED_SOURCE = "approved_service_request";
 
 export interface AuditableLine {
@@ -134,4 +136,42 @@ export function summarizePricingChanges(rows: PricingAuditRow[]): string {
       return `${what}: ${fmt(r.old_value)} → ${fmt(r.new_value)}`;
     })
     .join(" · ");
+}
+
+// =====================================================================
+// Notification anti-spam — coalesce successive post-approval changes
+// =====================================================================
+// A Sales user reworking a just-approved quote may save it many times in a
+// row. Each save that touches an approved line emits doc.approved_price_changed
+// → without grouping, the Sales Director's bell floods with one item per save.
+// We fold successive changes to the SAME document into ONE running bell item:
+// the first change emits the event, later changes within a window append to its
+// thread (the bell already renders one item with an unread-comment count +
+// latest-change preview, and re-surfaces it after read). This keeps the Director
+// aware of EVERY change (nothing is dropped, unlike a pure debounce) with a
+// single, quiet, always-current notification per document.
+
+/**
+ * Coalescing window (minutes) for post-approval price-change notifications.
+ * 7 days comfortably spans an active re-pricing period; a change after that
+ * starts a fresh notification (a genuinely new "occasion").
+ */
+export const PRICING_NOTIF_COALESCE_MINUTES = 7 * 24 * 60;
+
+/**
+ * Decide whether a post-approval price change should EMIT a fresh event or
+ * APPEND to the most recent one (fold into the running digest). Pure — mirrors
+ * shouldEmitOnce so the window semantics stay identical:
+ *   - no recent event            → "emit"   (first change on this document)
+ *   - recent within the window   → "append" (fold into the running digest)
+ *   - recent older than window   → "emit"   (a new occasion)
+ *   - unparseable timestamp      → "emit"   (never silently drop a real change)
+ */
+export function coalescePricingNotification(
+  recentEventAtIso: string | null | undefined,
+  nowIso: string,
+  windowMinutes: number
+): "emit" | "append" {
+  if (!recentEventAtIso) return "emit";
+  return shouldEmitOnce(recentEventAtIso, nowIso, windowMinutes) ? "emit" : "append";
 }
