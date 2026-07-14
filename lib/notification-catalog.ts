@@ -88,6 +88,7 @@ export const NOTIFICATION_CATALOG: Record<EventType, NotificationCatalogEntry> =
   "doc.shipping_update_requested": { entity: "document", category: "shipping", severity: "medium", label: "Shipping update requested" },
   "doc.shipping_update_completed": { entity: "document", category: "shipping", severity: "medium", label: "Shipping quotation updated" },
   "doc.shipping_update_cancelled": { entity: "document", category: "shipping", severity: "low", label: "Shipping update cancelled" },
+  "doc.approved_price_changed": { entity: "document", category: "money", severity: "high", label: "Approved pricing modified" },
   // ---- transport request module (m161) ----
   "transport.requested": { entity: "affair", category: "shipping", severity: "medium", label: "Transport request submitted" },
   "transport.completed": { entity: "affair", category: "shipping", severity: "medium", label: "Transport request completed" },
@@ -117,6 +118,8 @@ export const NOTIFICATION_CATALOG: Record<EventType, NotificationCatalogEntry> =
   "pr.approved": { entity: "project_request", category: "workflow", severity: "medium", label: "Service request approved" },
   "pr.rejected": { entity: "project_request", category: "workflow", severity: "medium", label: "Service request rejected" },
   "pr.info_requested": { entity: "project_request", category: "workflow", severity: "medium", label: "More info requested" },
+  "pr.spec_adjusted": { entity: "project_request", category: "workflow", severity: "medium", label: "Spec adjusted by Director" },
+  "pr.file_uploaded": { entity: "project_request", category: "workflow", severity: "low", label: "File attached" },
   "pr.cost_entered": { entity: "project_request", category: "money", severity: "medium", label: "Factory cost entered" },
   "pr.cost_overridden": { entity: "project_request", category: "money", severity: "high", label: "Factory cost overridden" },
   "pr.logistics_entered": { entity: "project_request", category: "workflow", severity: "low", label: "Logistics entered" },

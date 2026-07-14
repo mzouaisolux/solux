@@ -223,6 +223,11 @@ export const EVENT_HELP: Record<EventType, EventHelp> = {
     why: "The requester gets the refreshed shipping cost on their document.",
     recipients: ["Sales"],
   },
+  "doc.approved_price_changed": {
+    when: "A Director-approved price (product, transport or discount) is modified on a document after validation.",
+    why: "No silent changes to approved pricing — the Sales Director is notified and the change is written to the Pricing History audit.",
+    recipients: ["Sales Director"],
+  },
   "doc.shipping_update_cancelled": {
     when: "A shipping update request is withdrawn or declined.",
     why: "Keeps the document timeline honest about abandoned refreshes.",
@@ -350,6 +355,16 @@ export const EVENT_HELP: Record<EventType, EventHelp> = {
     when: "A service request is rejected.",
     why: "The owner must rework the request or drop it.",
     recipients: ["Sales"],
+  },
+  "pr.file_uploaded": {
+    when: "A document (costing Excel, pole drawing, packing list…) is attached to a service request.",
+    why: "Keeps the SR's documentary trail auditable — who attached what, when.",
+    recipients: ["Sales"],
+  },
+  "pr.spec_adjusted": {
+    when: "The Sales Director adjusts requested technical parameters (panel power, battery) before approving a service request.",
+    why: "Operations must cost the APPROVED spec; the Sales-requested values stay visible for traceability.",
+    recipients: ["Sales", "Operations"],
   },
   "pr.info_requested": {
     when: "A reviewer asks for more information on a request.",

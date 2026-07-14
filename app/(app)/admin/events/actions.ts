@@ -18,6 +18,7 @@ import { isAdminLike, VIEW_AS_ROLES } from "@/lib/types";
 import { NOTIFICATION_CATALOG } from "@/lib/notification-catalog";
 import { KPI_KEYS, type CatalogOverride } from "@/lib/event-registry";
 import { emitEvent } from "@/lib/events";
+import { clearNotificationConfigCache } from "@/lib/notifications";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
@@ -142,6 +143,7 @@ export async function saveEventConfig(formData: FormData): Promise<void> {
     bestEffort: true,
   });
 
+  clearNotificationConfigCache(); // routing changed → drop the per-role cache
   revalidatePath("/", "layout"); // bell + future consumers read these
   revalidatePath(`/admin/events/${eventKey}`);
   redirect(`/admin/events/${eventKey}?saved=1`);
@@ -177,6 +179,7 @@ export async function resetEventConfig(formData: FormData): Promise<void> {
     bestEffort: true,
   });
 
+  clearNotificationConfigCache(); // routing reset → drop the per-role cache
   revalidatePath("/", "layout");
   revalidatePath(`/admin/events/${eventKey}`);
   redirect(`/admin/events/${eventKey}?reset=1`);

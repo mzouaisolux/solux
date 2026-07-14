@@ -208,6 +208,11 @@ export default async function HomeDashboardPage({
   profMark("LOAD START");
 
   // ---- ONE parallel wave (perf rule from the 2026-06-12 pass) ----
+  // PERF NOTE (2026-07-11 Phase 2): the Action Center keeps its OWN fetch phase
+  // (<ActionCenter/> below) on purpose — merging its ~11 queries into this wave
+  // was measured and REGRESSED (remote Supabase pool saturates past ~10-15
+  // concurrent queries; cumulative DB time rose ~46%). Two moderate waves beat
+  // one huge wave here.
   const [
     actionData,
     preventiveDays,
@@ -219,7 +224,11 @@ export default async function HomeDashboardPage({
     userRes,
     profileRes,
   ] = await profStep("parallel-wave (9 sources)", () => Promise.all([
-    getOperationsActions(userId, effectiveRole),
+    // PERF: the Sales tab only consumes the OPS URGENT COUNT from this (badge
+    // on the tab). Note previews are Operations-tab-only, so skip that read
+    // unless the Operations tab is actually being rendered — same counts,
+    // ~3 fewer round-trips on the (default) Sales view.
+    getOperationsActions(userId, effectiveRole, { includeNotes: tab === "operations" }),
     getNumberSetting(supabase, PREVENTIVE_DAYS_KEY, PREVENTIVE_DAYS_DEFAULT),
     hasUiCapability("quotation.create"),
     supabase

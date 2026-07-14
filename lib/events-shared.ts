@@ -137,6 +137,9 @@ export type EventType =
   | "doc.shipping_update_requested"
   | "doc.shipping_update_completed"
   | "doc.shipping_update_cancelled"
+  // pricing integrity (feature #2, m168) — an APPROVED price was modified
+  // after validation (product / transport / discount) on a document
+  | "doc.approved_price_changed"
   // transport request module (m161) — affair-centric logistics loop
   | "transport.requested"
   | "transport.completed"
@@ -167,6 +170,8 @@ export type EventType =
   | "pr.approved"
   | "pr.rejected"
   | "pr.info_requested"
+  | "pr.spec_adjusted"
+  | "pr.file_uploaded"
   | "pr.cost_entered"
   | "pr.cost_overridden"
   | "pr.logistics_entered"
@@ -223,7 +228,7 @@ export const ACTIONABLE_MEDIUM_EVENTS: ReadonlySet<EventType> = new Set<EventTyp
   // Costing versions (m140) — a newer approved costing needs the salesperson's
   // explicit Keep/Apply decision on the quotation
   "doc.newer_costing_available", // → sales (doc owner)
-  "pr.ready_for_pricing", // → director
+  "pr.ready_for_pricing", // → sales_director (prices the request — routed by m171)
   "pr.priced", // → sales
   "pr.quotation_generated", // → sales
   "pr.info_requested", // → sales (owner)
@@ -416,6 +421,7 @@ export function eventTypeLabel(t: EventType): string {
     "doc.shipping_update_requested": "Shipping update requested",
     "doc.shipping_update_completed": "Shipping quotation updated",
     "doc.shipping_update_cancelled": "Shipping update cancelled",
+    "doc.approved_price_changed": "Approved pricing modified",
     "transport.requested": "Transport request submitted",
     "transport.completed": "Transport request completed",
     "transport.cancelled": "Transport request cancelled",
@@ -443,6 +449,8 @@ export function eventTypeLabel(t: EventType): string {
     "pr.approved": "Sent to operations",
     "pr.rejected": "Project rejected",
     "pr.info_requested": "More information requested",
+    "pr.spec_adjusted": "Technical spec adjusted by Director",
+    "pr.file_uploaded": "File attached",
     "pr.cost_entered": "Factory cost entered",
     "pr.cost_overridden": "Factory cost overridden",
     "pr.logistics_entered": "Logistics entered",

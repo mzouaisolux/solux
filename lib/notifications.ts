@@ -116,10 +116,30 @@ type NotificationConfig = {
  * Defensive: a missing table (pre-m136) or any error ⇒ empty config ⇒ no
  * event is enabled ⇒ the bell stays silent until an admin opts an event in.
  */
+/* PERF (2026-07-11 perf pass): the notification routing config is STABLE — an
+   admin toggles an event only occasionally — yet loadNotificationConfig ran on
+   EVERY page load (the nav bell, app-wide). Cache it per role with a short TTL,
+   exactly like the capability cache (lib/permissions). This reduces per-request
+   query COUNT app-wide, which is what actually matters under concurrency once
+   the remote PostgREST pool is the ceiling (measured 2026-07-11). The admin
+   toggle action calls clearNotificationConfigCache() so changes apply at once;
+   other instances refresh within the TTL. The cached Maps/Sets are read-only
+   for callers (getNotificationSummary only .get/.has them). */
+const NOTIF_CFG_TTL_MS = 30_000;
+const notifCfgCache = new Map<Role, { cfg: NotificationConfig; expiresAt: number }>();
+
+/** Drop the notification-config cache (call after an admin edits event_routing). */
+export function clearNotificationConfigCache(): void {
+  notifCfgCache.clear();
+}
+
 async function loadNotificationConfig(
   supabase: ReturnType<typeof createClient>,
   role: Role
 ): Promise<NotificationConfig> {
+  const cached = notifCfgCache.get(role);
+  if (cached && cached.expiresAt > Date.now()) return cached.cfg;
+
   const rules = new Map<string, NotificationChannel>();
   const enabled = new Set<string>();
   try {
@@ -128,7 +148,7 @@ async function loadNotificationConfig(
       .select("event_key, role, config, enabled")
       .eq("consumer", "notification")
       .in("role", [role, "*"]);
-    if (error) return { rules, enabled };
+    if (error) return { rules, enabled }; // don't cache a transient error
     for (const r of (data ?? []) as any[]) {
       if (!r.event_key) continue;
       if (r.role === "*") {
@@ -141,9 +161,12 @@ async function loadNotificationConfig(
       }
     }
   } catch {
-    /* table absent or transient error → nothing enabled */
+    /* table absent or transient error → nothing enabled (uncached) */
+    return { rules, enabled };
   }
-  return { rules, enabled };
+  const cfg: NotificationConfig = { rules, enabled };
+  notifCfgCache.set(role, { cfg, expiresAt: Date.now() + NOTIF_CFG_TTL_MS });
+  return cfg;
 }
 
 export async function getNotificationSummary(

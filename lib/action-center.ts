@@ -487,7 +487,14 @@ function ageDaysFrom(iso: string | null | undefined): number | null {
  */
 async function gatherSignals(
   supabase: SupabaseClient,
-  scope: Awaited<ReturnType<typeof getVisibilityScope>>
+  // PERF (2026-07-11): accept the scope as a PROMISE so the visibility fetch
+  // (access_grants, ~1 round-trip) overlaps the main data wave below instead
+  // of running serially before it. Scope is only needed for the client-side
+  // canSeeRecord/canSeeRow filtering AFTER the queries return, so we await it
+  // right before the first filter. Resolved value is identical — timing only.
+  scopePromise:
+    | Awaited<ReturnType<typeof getVisibilityScope>>
+    | Promise<Awaited<ReturnType<typeof getVisibilityScope>>>
 ): Promise<Signal[]> {
   const signals: Signal[] = [];
   const today = new Date();
@@ -541,6 +548,10 @@ async function gatherSignals(
       )
       .limit(5000),
   ]);
+
+  // Scope resolved concurrently with the wave above; needed from here on for
+  // the client-side visibility filters (canSeeRecord / canSeeRow).
+  const scope = await scopePromise;
 
   // Build factoryDelayByOrder map from the delay-event rows.
   // Σ days_added where delay_type = 'production' (or NULL = legacy = production).
@@ -1119,19 +1130,29 @@ function emptySectionData(): ActionCenterData {
   return { sections: { urgent: [], waiting_me: [], waiting_client: [], info_missing: [] }, total: 0, urgentCount: 0 };
 }
 
-/** Classic dashboard — groups by section (role-filtered + ack-aware). */
+/** Classic dashboard — groups by section (role-filtered + ack-aware).
+ *
+ * `opts.includeNotes` (default true) attaches the per-card note previews via a
+ * further entity_messages + name-resolution read. That data is PURELY
+ * presentational (noteCount + inline preview) and is only rendered by the
+ * Operations tab / operations-v2. When the caller only needs the sections +
+ * counts (e.g. the Sales tab, which uses this solely for the "ops urgent"
+ * badge number), pass `includeNotes: false` to skip ~3 round-trips — the
+ * sections, membership and counts are byte-for-byte identical either way. */
 export async function getOperationsActions(
   userId: string | null,
-  role: Role | null
+  role: Role | null,
+  opts?: { includeNotes?: boolean }
 ): Promise<ActionCenterData> {
   if (!userId) return emptySectionData();
+  const includeNotes = opts?.includeNotes ?? true;
   const supabase = createClient();
-  const scope = await getVisibilityScope(userId, role);
-  const signals = await gatherSignals(supabase, scope);
-  const items = await attachNotes(
-    supabase,
-    await applyAcks(supabase, filterByRole(signals.map(materialize), role))
-  );
+  // PERF (2026-07-11): don't await the scope here — hand the promise to
+  // gatherSignals so the access_grants read overlaps its main data wave.
+  const scopePromise = getVisibilityScope(userId, role);
+  const signals = await gatherSignals(supabase, scopePromise);
+  const acked = await applyAcks(supabase, filterByRole(signals.map(materialize), role));
+  const items = includeNotes ? await attachNotes(supabase, acked) : acked;
 
   const data = emptySectionData();
   for (const it of items) data.sections[it.section].push(it);
