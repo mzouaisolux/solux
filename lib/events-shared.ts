@@ -172,6 +172,8 @@ export type EventType =
   | "pr.info_requested"
   | "pr.spec_adjusted"
   | "pr.file_uploaded"
+  | "pr.file_deleted"
+  | "pr.updated"
   | "pr.cost_entered"
   | "pr.cost_overridden"
   | "pr.logistics_entered"
@@ -451,6 +453,8 @@ export function eventTypeLabel(t: EventType): string {
     "pr.info_requested": "More information requested",
     "pr.spec_adjusted": "Technical spec adjusted by Director",
     "pr.file_uploaded": "File attached",
+    "pr.file_deleted": "File removed",
+    "pr.updated": "Request edited",
     "pr.cost_entered": "Factory cost entered",
     "pr.cost_overridden": "Factory cost overridden",
     "pr.logistics_entered": "Logistics entered",

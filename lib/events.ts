@@ -120,6 +120,8 @@ const DEFAULT_SEVERITY: Record<EventType, EventSeverity> = {
   "pr.info_requested": "medium",
   "pr.spec_adjusted": "medium",
   "pr.file_uploaded": "low",
+  "pr.file_deleted": "low",
+  "pr.updated": "low",
   "pr.cost_entered": "medium",
   "pr.cost_overridden": "high",
   "pr.logistics_entered": "low",

@@ -120,6 +120,8 @@ export const NOTIFICATION_CATALOG: Record<EventType, NotificationCatalogEntry> =
   "pr.info_requested": { entity: "project_request", category: "workflow", severity: "medium", label: "More info requested" },
   "pr.spec_adjusted": { entity: "project_request", category: "workflow", severity: "medium", label: "Spec adjusted by Director" },
   "pr.file_uploaded": { entity: "project_request", category: "workflow", severity: "low", label: "File attached" },
+  "pr.file_deleted": { entity: "project_request", category: "workflow", severity: "low", label: "File removed" },
+  "pr.updated": { entity: "project_request", category: "workflow", severity: "low", label: "Request edited" },
   "pr.cost_entered": { entity: "project_request", category: "money", severity: "medium", label: "Factory cost entered" },
   "pr.cost_overridden": { entity: "project_request", category: "money", severity: "high", label: "Factory cost overridden" },
   "pr.logistics_entered": { entity: "project_request", category: "workflow", severity: "low", label: "Logistics entered" },

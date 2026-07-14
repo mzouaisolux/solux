@@ -136,6 +136,39 @@ export function computeSectionPrice(input: SectionPriceInput): SectionPrice {
   };
 }
 
+/**
+ * INVERSE of computeSectionPrice (m172, UX): given a target selling price per
+ * unit (the customer-facing finalUnitPrice, commission included), return the
+ * margin % (0–99) that produces exactly that price. Lets the Sales Director
+ * price by "I want to sell at $800" instead of guessing the margin.
+ *
+ * finalUnitPrice = enginePrice·(1+c)  and  enginePrice = usdCost·(1−rebate)/(1−m)
+ *   → 1−m = usdCost·(1−rebate)·(1+c)/finalUnitPrice
+ *   → m   = 1 − usdCost·(1−rebate)/(finalUnitPrice/(1+c))
+ * Clamped to [0, 99] like computeSectionPrice, so a selling price at/below cost
+ * floors the margin at 0 (never negative).
+ */
+export function sellingPriceToMarginPct(input: {
+  costRmb?: number | null;
+  exchangeRate: number;
+  taxRebate: number;
+  sellingUnitPrice?: number | null;
+  commissionPct?: number | null;
+}): number {
+  const usdCost =
+    Number(input.exchangeRate || 0) > 0 ? Number(input.costRmb ?? 0) / Number(input.exchangeRate) : 0;
+  const c = Math.max(0, Number(input.commissionPct ?? 0)) / 100;
+  const selling = Number(input.sellingUnitPrice ?? 0);
+  const enginePrice = 1 + c > 0 ? selling / (1 + c) : 0;
+  const rebated = usdCost * (1 - Number(input.taxRebate ?? 0));
+  if (enginePrice <= 0 || rebated <= 0) return 0;
+  const m = 1 - rebated / enginePrice;
+  const clamped = Math.min(0.99, Math.max(0, m));
+  // 4-decimal % so the round-trip (price → margin → price) is virtually exact
+  // (2 decimals left an ~8¢ drift on an $800 unit).
+  return Math.round(clamped * 100 * 10000) / 10000;
+}
+
 export type ProjectTotalInput = {
   productUnit: number;
   poleUnit: number;

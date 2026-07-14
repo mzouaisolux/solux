@@ -142,7 +142,7 @@ function n(v: number): string {
 
 /**
  * Client-facing description, e.g.
- *   "Custom pole – total pole height 8m, single arm, arm length 1.5m,
+ *   "Custom pole – overall pole height 8m, single arm, arm length 1.5m,
  *    thickness 4mm, hot-dip galvanized, painting included"
  * The chosen height reference leads; the other height is appended when set.
  */

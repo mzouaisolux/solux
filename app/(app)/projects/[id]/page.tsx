@@ -3,6 +3,8 @@ import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { getEffectiveRole } from "@/lib/auth";
 import { hasUiCapability } from "@/lib/permissions";
+import AccessDenied from "@/components/AccessDenied";
+import { EventDiscussionPanel, parseEventSearchParam } from "@/components/dashboard/EventDiscussionPanel";
 import { resolveUserLabelStrings } from "@/lib/user-display";
 import { listEventsForEntity, eventTypeLabel } from "@/lib/events";
 import { loadPricingSettings } from "@/lib/pricing-settings";
@@ -93,9 +95,23 @@ const PR_EVENT_SHORT: Record<string, string> = {
 };
 const ACTIVITY_PREVIEW = 6;
 
-export default async function ProjectDetailPage({ params }: { params: { id: string } }) {
+export default async function ProjectDetailPage({
+  params,
+  searchParams,
+}: {
+  params: { id: string };
+  searchParams?: { event?: string | string[] };
+}) {
   const supabase = createClient();
   await getEffectiveRole();
+  // QA2 (Élevé) — deep-link from the notification bell: /projects/{id}?event={id}.
+  // The SR page was the only entity ignoring ?event= → the notification opened
+  // nothing and the event was never marked read (stuck in the bell forever).
+  // EventDiscussionPanel opens the thread AND auto-marks it read on open.
+  const eventDiscussionId = parseEventSearchParam(searchParams?.event);
+  const {
+    data: { user: currentUser },
+  } = await supabase.auth.getUser();
 
   const { data: project } = await supabase
     .from("project_requests")
@@ -181,6 +197,14 @@ export default async function ProjectDetailPage({ params }: { params: { id: stri
     // m157 — technical dossier (costing Excel / pole drawing / real panel).
     migrationApplied(supabase, "157_sr_technical_dossier.sql"),
   ]);
+
+  // QA2 quick-win — defense in depth: even though RLS already bounds who can
+  // read a project_request, gate the VIEW on holding at least one project
+  // capability (or being admin). A permissive RLS regression must not silently
+  // expose the SR to a role with no business reason to see it.
+  if (!(canCreate || canApprove || canCost || canLogistics || canPrice || canGenerate || canViewCost || canOverride)) {
+    return <AccessDenied capability="project.create" />;
+  }
 
   const cost = (costReqs ?? [])[0] as any | undefined;
   const pack = (packReqs ?? [])[0] as any | undefined;
@@ -906,7 +930,7 @@ export default async function ProjectDetailPage({ params }: { params: { id: stri
                           />
                         ) : (
                           <p style={{ fontSize: 12, color: "var(--sx-mute-2)" }}>
-                            Costing file upload activates once migration m157 is applied.
+                            Costing file upload isn't available yet — please contact your administrator.
                           </p>
                         ))}
                       {fileRows.filter((f) => f.category === "costing").length > 0 && (
@@ -945,7 +969,7 @@ export default async function ProjectDetailPage({ params }: { params: { id: stri
                           />
                         ) : (
                           <p style={{ fontSize: 12, color: "var(--sx-mute-2)" }}>
-                            Pole drawing upload activates once migration m157 is applied.
+                            Pole drawing upload isn't available yet — please contact your administrator.
                           </p>
                         ))}
                       {fileRows.filter((f) => f.category === "pole_drawing").length > 0 && (
@@ -1329,6 +1353,14 @@ export default async function ProjectDetailPage({ params }: { params: { id: stri
           </div>
         </div>
       </div>
+
+      {/* Conversation drawer overlay — opens when ?event=<id> is in the URL
+          (notification bell entry point) and auto-marks the event read. */}
+      <EventDiscussionPanel
+        eventId={eventDiscussionId}
+        expectedEntityId={params.id}
+        currentUserId={currentUser?.id ?? null}
+      />
     </div>
   );
 }

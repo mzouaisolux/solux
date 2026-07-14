@@ -22,6 +22,7 @@ import { hasCapability, requireCapability } from "@/lib/permissions";
 import { emitEvent } from "@/lib/events";
 import { loadPricingSettings } from "@/lib/pricing-settings";
 import { computeSectionPrice, buildCommercialDescription, computeFreightTotal, buildShippingContainers } from "@/lib/project-pricing";
+import { normalizePanelDimensions } from "@/lib/panel-dimensions";
 import { validityFromPeriod } from "@/lib/freight-validity";
 import { cleanTiltAngle } from "@/lib/industrial-spec";
 import { normalizeAdditionalCharges } from "@/lib/logistics";
@@ -338,6 +339,25 @@ export async function updateProjectRequest(formData: FormData): Promise<void> {
       req_freight: reqFreight,
       updated_at: now(),
   };
+  // QA2 (Élevé) — snapshot BEFORE the edit so we can audit what Sales changed.
+  // After a director bounce-back the SR is edited in place; without this diff
+  // the Director re-approves blind. The diff lands in the Activity timeline.
+  const TRACKED: [keyof typeof updateRow | "solar_panel_tilt_angle", string][] = [
+    ["quantity", "Quantity"], ["led_power", "LED power"], ["solar_panel_size", "Solar panel"],
+    ["battery_spec", "Battery"], ["controller", "Controller"], ["iot_required", "IoT"],
+    ["solar_panel_tilt_angle", "Tilt angle"], ["pole_required", "Pole required"],
+    ["pole_quantity", "Pole qty"], ["pole_height", "Overall pole height"],
+    ["light_mounting_height", "Mounting height"], ["arm_length", "Arm length"],
+    ["additional_notes", "Notes"], ["freight_transport_mode", "Transport mode"],
+    ["freight_destination", "Destination"], ["req_product_pricing", "Req: product cost"],
+    ["req_packing_list", "Req: packing"], ["req_freight", "Req: freight"],
+  ];
+  const { data: before } = await supabase
+    .from("project_requests")
+    .select(TRACKED.map(([k]) => k).join(","))
+    .eq("id", id)
+    .maybeSingle();
+
   let { error } = await supabase
     .from("project_requests")
     .update({ ...updateRow, solar_panel_tilt_angle: tiltAngle })
@@ -352,6 +372,27 @@ export async function updateProjectRequest(formData: FormData): Promise<void> {
       .eq("status", "draft"));
   }
   if (error) throw new Error(error.message);
+
+  // Compute the field-level diff (only when the draft was actually editable).
+  if (before) {
+    const next: Record<string, unknown> = { ...updateRow, solar_panel_tilt_angle: tiltAngle };
+    const norm = (v: unknown) => (v == null || v === "" ? null : typeof v === "boolean" ? (v ? "yes" : "no") : String(v));
+    const changes = TRACKED.flatMap(([k, label]) => {
+      const from = norm((before as any)[k]);
+      const to = norm(next[k as string]);
+      return from === to ? [] : [{ field: label, from, to }];
+    });
+    if (changes.length) {
+      await emitEvent({
+        entity_type: "project_request",
+        entity_id: id,
+        event_type: "pr.updated",
+        message: `Request edited — ${changes.map((c) => `${c.field}: ${c.from ?? "—"} → ${c.to ?? "—"}`).join(" · ")}`,
+        payload: { changes },
+        bestEffort: true,
+      });
+    }
+  }
 
   revalidate();
   redirect(`/projects/${id}?flash=${encodeURIComponent("Service request updated")}`);
@@ -622,9 +663,11 @@ export async function enterFactoryCost(formData: FormData): Promise<void> {
   // Feature #6 — the physical panel dimensions used in the cost calc are
   // mandatory (validate the visible form field first), so everyone sees the
   // retained panel format without opening Excel.
-  if (!str(formData, "solar_panel_dimensions")) {
-    throw new Error("Solar panel dimensions are mandatory (e.g. 1722 × 1134 mm).");
-  }
+  // QA2 quick-win: validate + normalize the free-text dimensions so the same
+  // panel format reads identically everywhere ("1722 x 1134" → "1722 × 1134 mm").
+  const dim = normalizePanelDimensions(str(formData, "solar_panel_dimensions"));
+  if (!dim.ok) throw new Error(dim.error);
+  const normalizedDimensions = dim.value;
   const { data: attachedFiles } = await supabase
     .from("project_request_files")
     .select("category")
@@ -719,7 +762,7 @@ export async function enterFactoryCost(formData: FormData): Promise<void> {
     ["solar_panel_width_mm", numOrNull(formData, "solar_panel_width_mm")],
     ["solar_panel_thickness_mm", numOrNull(formData, "solar_panel_thickness_mm")],
     ["solar_panel_reference", str(formData, "solar_panel_reference")],
-    ["solar_panel_dimensions", str(formData, "solar_panel_dimensions")],
+    ["solar_panel_dimensions", normalizedDimensions],
   ] as const;
   for (const [key, value] of panelFields) {
     if (formData.has(key)) panelPatch[key] = value;
@@ -2002,10 +2045,14 @@ export async function setProjectAffair(formData: FormData): Promise<void> {
   const supabase = createClient();
   const { data: project } = await supabase
     .from("project_requests")
-    .select("client_id")
+    .select("client_id, status")
     .eq("id", id)
     .maybeSingle();
   if (!project) throw new Error("Project not found");
+  // QA2 quick-win: never re-assign a finalised request (won/lost/cancelled).
+  if (["won", "lost", "cancelled"].includes((project as any).status)) {
+    throw new Error("This service request is finalised — its project can no longer be changed.");
+  }
   const { data: affair } = await supabase
     .from("affairs")
     .select("id, client_id")
@@ -2028,6 +2075,11 @@ export async function setProjectClient(formData: FormData): Promise<void> {
   const id = reqStr(formData, "id");
   const clientId = reqStr(formData, "client_id");
   const supabase = createClient();
+  const { data: cur } = await supabase.from("project_requests").select("status").eq("id", id).maybeSingle();
+  // QA2 quick-win: never re-assign the client of a finalised request.
+  if (cur && ["won", "lost", "cancelled"].includes((cur as any).status)) {
+    throw new Error("This service request is finalised — its client can no longer be changed.");
+  }
   const { error } = await supabase
     .from("project_requests")
     .update({ client_id: clientId, updated_at: now() })
@@ -2095,7 +2147,22 @@ export async function deleteProjectFile(formData: FormData): Promise<void> {
   const id = reqStr(formData, "id");
   const projectId = reqStr(formData, "project_id");
   const supabase = createClient();
+  // QA2 quick-win: audit deletions too (upload was already audited) so a
+  // costing Excel / pole drawing / packing file can't vanish without a trace.
+  const { data: f } = await supabase
+    .from("project_request_files")
+    .select("file_name, category")
+    .eq("id", id)
+    .maybeSingle();
   const { error } = await supabase.from("project_request_files").delete().eq("id", id);
   if (error) throw new Error(error.message);
+  await emitEvent({
+    entity_type: "project_request",
+    entity_id: projectId,
+    event_type: "pr.file_deleted",
+    message: `File removed (${(f as any)?.category ?? "?"}): ${(f as any)?.file_name ?? ""}`.trim(),
+    payload: { file_name: (f as any)?.file_name, category: (f as any)?.category },
+    bestEffort: true,
+  });
   revalidate(projectId);
 }

@@ -356,6 +356,16 @@ export const EVENT_HELP: Record<EventType, EventHelp> = {
     why: "The owner must rework the request or drop it.",
     recipients: ["Sales"],
   },
+  "pr.updated": {
+    when: "A service request is edited (typically by Sales after a director bounce-back).",
+    why: "The Sales Director can see exactly what changed since the request was returned, instead of re-reading everything.",
+    recipients: ["Sales director"],
+  },
+  "pr.file_deleted": {
+    when: "A document is removed from a service request.",
+    why: "Keeps the SR's documentary trail auditable — deletions are traced, not silent.",
+    recipients: ["Sales"],
+  },
   "pr.file_uploaded": {
     when: "A document (costing Excel, pole drawing, packing list…) is attached to a service request.",
     why: "Keeps the SR's documentary trail auditable — who attached what, when.",

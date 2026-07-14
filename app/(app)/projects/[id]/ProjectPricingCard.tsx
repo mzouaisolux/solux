@@ -3,16 +3,22 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useFormStatus } from "react-dom";
-import { computeSectionPrice, fmtMarginPct } from "@/lib/project-pricing";
+import { computeSectionPrice, sellingPriceToMarginPct, fmtMarginPct } from "@/lib/project-pricing";
+import { NumericField } from "@/components/forms/NumericField";
 import { setProjectPricing } from "../actions";
 import { toast } from "@/components/feedback/toast-store";
+
+const inputCls =
+  "w-full rounded border border-neutral-200 px-2 py-1 text-sm tabular-nums disabled:bg-neutral-50 disabled:text-neutral-500";
+const money = (n: number) => `$${n.toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
+
+type PricingMode = "margin" | "selling";
 
 function PricingSubmit({ ready }: { ready: boolean }) {
   const { pending } = useFormStatus();
   // `ready` guards the brief pre-hydration window: a <form action={fn}> with a
   // CLIENT function isn't wired until React hydrates, so an early click would
   // submit natively and silently do nothing (the first-click no-op bug).
-  // Disabling until mounted guarantees the first click always registers.
   const disabled = pending || !ready;
   return (
     <button disabled={disabled} className="sx-btn sx-btn-go disabled:opacity-60">
@@ -21,11 +27,122 @@ function PricingSubmit({ ready }: { ready: boolean }) {
   );
 }
 
+function Summary({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="min-w-0">
+      <div className="text-[10px] uppercase tracking-wide text-neutral-400">{label}</div>
+      <div className="truncate text-sm text-neutral-800">{value}</div>
+    </div>
+  );
+}
+
+function Line({ label, value, bold }: { label: string; value: string; bold?: boolean }) {
+  return (
+    <div className={`flex items-center justify-between gap-3 ${bold ? "border-t border-neutral-100 pt-1 font-semibold" : ""}`}>
+      <dt className="text-neutral-500">{label}</dt>
+      <dd className="tabular-nums">{value}</dd>
+    </div>
+  );
+}
+
+/**
+ * One priced section (Product or Pole). Module-level so it is NOT recreated on
+ * every keystroke — that recreation was what stole the caret / focus. In
+ * "margin" mode the Director types a margin %; in "selling" mode they type the
+ * customer price and the margin % is derived + shown read-only. Commission is
+ * always editable. Every numeric input is a NumericField (Excel-like).
+ */
+function SectionControls({
+  title,
+  costRmb,
+  usdCost,
+  mode,
+  canEdit,
+  marginPct, // number 0–99
+  onMargin,
+  commissionPct, // number 0–…
+  onComm,
+  sellingUnit, // number — current finalUnitPrice (derived)
+  onSelling,
+  computedMarginFrac, // 0–1, for the read-only display in selling mode
+}: {
+  title: string;
+  costRmb: number | null;
+  usdCost: number;
+  mode: PricingMode;
+  canEdit: boolean;
+  marginPct: number;
+  onMargin: (n: number | null) => void;
+  commissionPct: number;
+  onComm: (n: number | null) => void;
+  sellingUnit: number;
+  onSelling: (n: number | null) => void;
+  computedMarginFrac: number;
+}) {
+  return (
+    <div className="rounded-lg border border-neutral-200 p-3 space-y-2">
+      <div className="flex items-center justify-between">
+        <div className="text-[12px] font-semibold text-neutral-700">{title}</div>
+        <div className="text-[11px] text-neutral-400">
+          {costRmb != null ? `${costRmb.toLocaleString()} RMB ≈ ${money(usdCost)}` : "no cost"}
+        </div>
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        {mode === "margin" ? (
+          <label className="block">
+            <span className="text-[10px] uppercase text-neutral-400">Margin %</span>
+            <NumericField
+              value={marginPct}
+              onCommit={onMargin}
+              disabled={!canEdit}
+              min={0}
+              max={99}
+              ariaLabel={`${title} margin percent`}
+              className={inputCls}
+            />
+          </label>
+        ) : (
+          <>
+            <label className="block">
+              <span className="text-[10px] uppercase text-neutral-400">Selling price / unit</span>
+              <NumericField
+                value={Math.round(sellingUnit * 100) / 100}
+                onCommit={onSelling}
+                disabled={!canEdit}
+                min={0}
+                prefix="$"
+                ariaLabel={`${title} selling price per unit`}
+                className={inputCls + " pl-5"}
+              />
+            </label>
+            <label className="block">
+              <span className="text-[10px] uppercase text-neutral-400">Calculated margin</span>
+              <div className="w-full rounded border border-neutral-100 bg-neutral-50 px-2 py-1 text-sm tabular-nums text-neutral-500">
+                {fmtMarginPct(computedMarginFrac)}
+              </div>
+            </label>
+          </>
+        )}
+        <label className="block">
+          <span className="text-[10px] uppercase text-neutral-400">Commission %</span>
+          <NumericField
+            value={commissionPct}
+            onCommit={onComm}
+            disabled={!canEdit}
+            min={0}
+            ariaLabel={`${title} commission percent`}
+            className={inputCls}
+          />
+        </label>
+      </div>
+    </div>
+  );
+}
+
 /**
  * Pricing workspace (Sales Director). Surfaces the FINANCIALS — revenue, margin
- * value, profit, total project value — not just percentages, so profitability
- * reads in seconds. Independent Product + Pole pricing via the existing engine
- * (computeSectionPrice → computePricing); freight is a pass-through line.
+ * value, profit, total project value. Two entry modes (m172): reason in margin
+ * % OR type the selling price directly; switching converts losslessly.
  */
 export default function ProjectPricingCard({
   projectId,
@@ -72,93 +189,42 @@ export default function ProjectPricingCard({
   const router = useRouter();
   const [ok, setOk] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const [pm, setPm] = useState(defaults.productMargin != null ? String(defaults.productMargin) : "30");
-  const [pc, setPc] = useState(defaults.productCommission != null ? String(defaults.productCommission) : "0");
-  const [polem, setPolem] = useState(defaults.poleMargin != null ? String(defaults.poleMargin) : "12");
-  const [polec, setPolec] = useState(defaults.poleCommission != null ? String(defaults.poleCommission) : "0");
-  // Hydration guard for the submit button (see PricingSubmit) — prevents the
-  // first-click-does-nothing race on the client-action form.
+  // Margin % + commission % remain the SOURCE OF TRUTH submitted to the server
+  // (setProjectPricing is unchanged). Selling mode just converts price→margin.
+  const [pm, setPm] = useState<number>(defaults.productMargin ?? 30);
+  const [pc, setPc] = useState<number>(defaults.productCommission ?? 0);
+  const [polem, setPolem] = useState<number>(defaults.poleMargin ?? 12);
+  const [polec, setPolec] = useState<number>(defaults.poleCommission ?? 0);
+  const [mode, setMode] = useState<PricingMode>("margin");
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
 
-  const num = (s: string) => Number((s || "").replace(",", ".")) || 0;
-  const money = (n: number) => `$${n.toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
-
   const productQty = Math.max(0, Number(quantity ?? 0));
   const poleQty = Math.max(0, Number(poleQuantity ?? quantity ?? 0));
-  const product = computeSectionPrice({ costRmb: productCostRmb, exchangeRate, taxRebate, marginPct: num(pm), commissionPct: num(pc) });
-  const pole = computeSectionPrice({ costRmb: poleCostRmb, exchangeRate, taxRebate, marginPct: num(polem), commissionPct: num(polec) });
+  const product = computeSectionPrice({ costRmb: productCostRmb, exchangeRate, taxRebate, marginPct: pm, commissionPct: pc });
+  const pole = computeSectionPrice({ costRmb: poleCostRmb, exchangeRate, taxRebate, marginPct: polem, commissionPct: polec });
   const freightRev = Number(freightTotal ?? 0);
 
-  // Per-section financials (revenue = what the customer pays; margin = profit).
+  // Selling mode: convert a typed customer price back into the margin % we store.
+  const setProductSelling = (v: number | null) =>
+    setPm(sellingPriceToMarginPct({ costRmb: productCostRmb, exchangeRate, taxRebate, sellingUnitPrice: v ?? 0, commissionPct: pc }));
+  const setPoleSelling = (v: number | null) =>
+    setPolem(sellingPriceToMarginPct({ costRmb: poleCostRmb, exchangeRate, taxRebate, sellingUnitPrice: v ?? 0, commissionPct: polec }));
+
   const productRev = product.finalUnitPrice * productQty;
   const productMargin = product.marginValuePerUnit * productQty;
   const poleRev = poleRequired ? pole.finalUnitPrice * poleQty : 0;
   const poleMargin = poleRequired ? pole.marginValuePerUnit * poleQty : 0;
-  const freightMargin = 0; // freight is passed through to the customer at cost
 
   const totalRevenue = productRev + poleRev + freightRev;
-  const totalMargin = productMargin + poleMargin + freightMargin;
+  const totalMargin = productMargin + poleMargin;
   const overallPct = totalRevenue > 0 ? totalMargin / totalRevenue : 0;
-
-  const inputCls = "w-full rounded border border-neutral-200 px-2 py-1 text-sm tabular-nums disabled:bg-neutral-50 disabled:text-neutral-500";
-
-  const Summary = ({ label, value }: { label: string; value: string }) => (
-    <div className="min-w-0">
-      <div className="text-[10px] uppercase tracking-wide text-neutral-400">{label}</div>
-      <div className="truncate text-sm text-neutral-800">{value}</div>
-    </div>
-  );
-
-  // Editable margin/commission inputs for a section.
-  const Controls = ({ title, costRmb, usdCost, marginVal, setMargin, commVal, setComm }: {
-    title: string; costRmb: number | null; usdCost: number; marginVal: string; setMargin: (v: string) => void; commVal: string; setComm: (v: string) => void;
-  }) => (
-    <div className="rounded-lg border border-neutral-200 p-3 space-y-2">
-      <div className="flex items-center justify-between">
-        <div className="text-[12px] font-semibold text-neutral-700">{title}</div>
-        <div className="text-[11px] text-neutral-400">{costRmb != null ? `${costRmb.toLocaleString()} RMB ≈ ${money(usdCost)}` : "no cost"}</div>
-      </div>
-      <div className="grid grid-cols-2 gap-2">
-        <label className="block">
-          <span className="text-[10px] uppercase text-neutral-400">Margin %</span>
-          <input type="number" min={0} max={99} step="0.5" value={marginVal} onChange={(e) => setMargin(e.target.value)} disabled={!canEdit} className={inputCls} />
-        </label>
-        <label className="block">
-          <span className="text-[10px] uppercase text-neutral-400">Commission %</span>
-          <input type="number" min={0} step="0.5" value={commVal} onChange={(e) => setComm(e.target.value)} disabled={!canEdit} className={inputCls} />
-        </label>
-      </div>
-    </div>
-  );
 
   type Row = { item: string; qty: string; costUnit: string; sellUnit: string; marginUnit: string; revenue: string; margin: string };
   const rows: Row[] = [
-    {
-      item: "Product",
-      qty: String(productQty),
-      costUnit: money(product.usdCost),
-      sellUnit: money(product.finalUnitPrice),
-      marginUnit: `${money(product.marginValuePerUnit)} · ${fmtMarginPct(product.marginPct)}`,
-      revenue: money(productRev),
-      margin: money(productMargin),
-    },
-    ...(poleRequired
-      ? [
-          {
-            item: "Pole",
-            qty: String(poleQty),
-            costUnit: money(pole.usdCost),
-            sellUnit: money(pole.finalUnitPrice),
-            marginUnit: `${money(pole.marginValuePerUnit)} · ${fmtMarginPct(pole.marginPct)}`,
-            revenue: money(poleRev),
-            margin: money(poleMargin),
-          } as Row,
-        ]
-      : []),
-    ...(freightRev > 0
-      ? [{ item: "Freight", qty: "—", costUnit: "—", sellUnit: "—", marginUnit: "pass-through", revenue: money(freightRev), margin: money(0) } as Row]
-      : []),
+    { item: "Product", qty: String(productQty), costUnit: money(product.usdCost), sellUnit: money(product.finalUnitPrice), marginUnit: `${money(product.marginValuePerUnit)} · ${fmtMarginPct(product.marginPct)}`, revenue: money(productRev), margin: money(productMargin) },
+    ...(poleRequired ? [{ item: "Pole", qty: String(poleQty), costUnit: money(pole.usdCost), sellUnit: money(pole.finalUnitPrice), marginUnit: `${money(pole.marginValuePerUnit)} · ${fmtMarginPct(pole.marginPct)}`, revenue: money(poleRev), margin: money(poleMargin) } as Row] : []),
+    ...(freightRev > 0 ? [{ item: "Freight", qty: "—", costUnit: "—", sellUnit: "—", marginUnit: "pass-through", revenue: money(freightRev), margin: money(0) } as Row] : []),
   ];
 
   return (
@@ -182,7 +248,7 @@ export default function ProjectPricingCard({
       <input type="hidden" name="pole_margin_pct" value={polem} />
       <input type="hidden" name="pole_commission_pct" value={polec} />
 
-      {/* PROJECT SUMMARY — always visible while pricing */}
+      {/* PROJECT SUMMARY */}
       <div className="grid grid-cols-2 gap-x-6 gap-y-2 rounded-lg border border-neutral-200 bg-neutral-50/60 p-3 sm:grid-cols-3 lg:grid-cols-6">
         <Summary label="Project" value={projectName} />
         <Summary label="Client" value={clientName ?? "—"} />
@@ -192,11 +258,37 @@ export default function ProjectPricingCard({
         <Summary label="Freight" value={freightType ?? "—"} />
       </div>
 
-      {/* MARGIN / COMMISSION controls */}
+      {/* PRICING METHOD toggle (m172) */}
+      <div className="flex flex-wrap items-center gap-3 rounded-lg border border-neutral-200 bg-white px-3 py-2">
+        <span className="text-[11px] font-semibold uppercase tracking-wide text-neutral-500">Pricing method</span>
+        {(["margin", "selling"] as PricingMode[]).map((m) => (
+          <label key={m} className={`flex cursor-pointer items-center gap-1.5 text-sm ${mode === m ? "font-semibold text-neutral-900" : "text-neutral-500"}`}>
+            <input type="radio" name="pricing_method" value={m} checked={mode === m} disabled={!canEdit} onChange={() => setMode(m)} />
+            {m === "margin" ? "Margin %" : "Selling price"}
+          </label>
+        ))}
+        <span className="ml-auto text-[11px] text-neutral-400">
+          {mode === "margin" ? "Type the margin — price is computed." : "Type the customer price — margin is computed."}
+        </span>
+      </div>
+
+      {/* SECTION CONTROLS */}
       <div className={`grid grid-cols-1 gap-3 ${poleRequired ? "sm:grid-cols-2" : ""}`}>
-        <Controls title="Product" costRmb={productCostRmb} usdCost={product.usdCost} marginVal={pm} setMargin={setPm} commVal={pc} setComm={setPc} />
+        <SectionControls
+          title="Product" costRmb={productCostRmb} usdCost={product.usdCost} mode={mode} canEdit={canEdit}
+          marginPct={pm} onMargin={(n) => setPm(n ?? 0)}
+          commissionPct={pc} onComm={(n) => setPc(n ?? 0)}
+          sellingUnit={product.finalUnitPrice} onSelling={setProductSelling}
+          computedMarginFrac={product.marginPct}
+        />
         {poleRequired && (
-          <Controls title="Pole" costRmb={poleCostRmb} usdCost={pole.usdCost} marginVal={polem} setMargin={setPolem} commVal={polec} setComm={setPolec} />
+          <SectionControls
+            title="Pole" costRmb={poleCostRmb} usdCost={pole.usdCost} mode={mode} canEdit={canEdit}
+            marginPct={polem} onMargin={(n) => setPolem(n ?? 0)}
+            commissionPct={polec} onComm={(n) => setPolec(n ?? 0)}
+            sellingUnit={pole.finalUnitPrice} onSelling={setPoleSelling}
+            computedMarginFrac={pole.marginPct}
+          />
         )}
       </div>
 
@@ -235,7 +327,7 @@ export default function ProjectPricingCard({
         </table>
       </div>
 
-      {/* FINANCIAL SUMMARY BLOCK + headline */}
+      {/* FINANCIAL SUMMARY BLOCK */}
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <div className="rounded-lg border border-neutral-200 p-3">
           <div className="eyebrow mb-2">Revenue</div>
@@ -257,7 +349,7 @@ export default function ProjectPricingCard({
         </div>
       </div>
 
-      {/* Headline — % AND value, profitability at a glance */}
+      {/* Headline */}
       <div className="flex flex-wrap items-baseline justify-between gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3">
         <div className="text-sm text-emerald-900">
           <span className="text-2xl font-bold tabular-nums">{fmtMarginPct(overallPct)}</span>
@@ -287,14 +379,5 @@ export default function ProjectPricingCard({
         ))}
       <p className="text-[11px] text-neutral-400">Margin includes the export tax rebate, so it matches the target margin % you set. Freight is passed through at cost.</p>
     </form>
-  );
-}
-
-function Line({ label, value, bold }: { label: string; value: string; bold?: boolean }) {
-  return (
-    <div className={`flex items-center justify-between gap-3 ${bold ? "border-t border-neutral-100 pt-1 font-semibold" : ""}`}>
-      <dt className="text-neutral-500">{label}</dt>
-      <dd className="tabular-nums">{value}</dd>
-    </div>
   );
 }
