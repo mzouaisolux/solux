@@ -10,6 +10,10 @@ import {
 import { PremiumPill } from "@/components/production/premium-ui";
 import ProductLightingSetupCard from "@/components/lighting/ProductLightingSetupCard";
 import { StatusSelect } from "@/components/production/StatusSelect";
+import OrderWorkspace, {
+  type WsTab,
+  type WsTone,
+} from "@/components/production/OrderWorkspace";
 import { getEffectiveRole } from "@/lib/auth";
 import { resolveUserLabelStrings } from "@/lib/user-display";
 import { ATTACHMENTS_BUCKET } from "@/lib/attachments";
@@ -89,15 +93,8 @@ import {
   LC_EXPIRY_WARNING_DAYS,
 } from "@/lib/operations-alerts";
 import { OperationsAlertBadge } from "@/components/OperationsAlertBadge";
-import {
-  OrderOperationsStrip,
-  type OperationsShippingState,
-} from "@/components/production/OrderOperationsStrip";
-import {
-  NextActionBand,
-  AttentionQueue,
-  naSectionFor,
-} from "@/components/production/OrderCockpitSpine";
+import { type OperationsShippingState } from "@/components/production/OrderOperationsStrip";
+import { naSectionFor } from "@/components/production/OrderCockpitSpine";
 import { computeNextAction } from "@/lib/production-next-action";
 import { DelayTimelineCard } from "@/components/production/DelayTimelineCard";
 import { type StageTone } from "@/components/production/LiveStatusSidebar";
@@ -777,7 +774,194 @@ export default async function ProductionOrderDetailPage({
   // The section the primary action edits — used to auto-open its editor in
   // place. An explicit `?open=` always wins over the suggestion.
   const openSection = openParam ?? naSectionFor(na.primary?.key);
-  const sectionOpen = (name: string) => openSection === name;
+
+  // ===== Ops Dense workspace: tab metadata + KPI helpers + right rail =====
+  const money = (n: number) => `${currency} ${fmtMoney(n)}`;
+  const totalDelayDays =
+    liveStatus.factoryDelayDays + liveStatus.externalDelayDays;
+  const depositPct =
+    expectedDeposit > 0
+      ? Math.min(100, Math.round((depositReceived / expectedDeposit) * 100))
+      : depositReceived > 0
+      ? 100
+      : 0;
+  const SHIP_META: Record<string, [string, string]> = {
+    not_started: ["Not started", "after production"],
+    ready_to_ship: ["Ready to ship", "production done"],
+    booked: ["Booked", "in transit soon"],
+    shipped: ["Shipped", "en route"],
+    delivered: ["Delivered", "closed"],
+    cancelled: ["—", "cancelled"],
+  };
+  const [shipLabel, shipSub] = SHIP_META[liveStatus.shipping] ?? ["—", ""];
+  const producesStr = configLines.length
+    ? `${configLines[0].quantity} × ${configLines[0].productName}${
+        configLines.length > 1 ? ` +${configLines.length - 1}` : ""
+      }`
+    : "—";
+
+  // per-tab tone + short status
+  let prodTone: WsTone = "idle";
+  let prodStatus = "";
+  if (status === "production_completed") {
+    prodTone = "complete";
+    prodStatus = "done";
+  } else if (status === "cancelled") {
+    prodStatus = "cancelled";
+  } else if (!productionCanStart) {
+    prodTone = "attention";
+    prodStatus = "awaiting deposit";
+  } else if (totalDelayDays > 0) {
+    prodTone = "blocked";
+    prodStatus = `+${totalDelayDays}d`;
+  } else {
+    prodTone = "complete";
+    prodStatus = "on track";
+  }
+
+  let payTone: WsTone = "idle";
+  let payStatus = "";
+  if (paymentState === "paid_in_full" || paymentState === "no_deposit_required") {
+    payTone = "complete";
+    payStatus = "settled";
+  } else if (paymentState === "awaiting_deposit") {
+    payTone = "blocked";
+    payStatus = "deposit due";
+  } else {
+    payTone = "attention";
+    payStatus = `${Math.round(liveStatus.balanceRemaining / 1000)}k due`;
+  }
+
+  const shipBlocked = na.queue.some((q) => q.key === "book" || q.key === "etd");
+  let shipTone: WsTone = "idle";
+  let shipStatus = "not started";
+  if (order.shipment_booked) {
+    shipTone = "complete";
+    shipStatus = "booked";
+  } else if (shipBlocked) {
+    shipTone = "blocked";
+    shipStatus = "blocked";
+  } else if (status === "production_completed") {
+    shipTone = "attention";
+    shipStatus = "ready";
+  }
+
+  const dReady = docsReadiness.requiredReady;
+  const dTotal = docsReadiness.requiredTotal;
+  const docTone: WsTone =
+    dTotal === 0 ? "idle" : dReady >= dTotal ? "complete" : "attention";
+
+  const workspaceTabs: WsTab[] = [
+    { id: "production", label: "Production", tone: prodTone, status: prodStatus },
+    { id: "payment", label: "Payment", tone: payTone, status: payStatus },
+    { id: "shipping", label: "Shipping", tone: shipTone, status: shipStatus },
+    {
+      id: "documents",
+      label: "Documents",
+      tone: docTone,
+      status: `${dReady}/${dTotal}`,
+    },
+    { id: "details", label: "Order details", tone: "idle" },
+    {
+      id: "timeline",
+      label: "Activity",
+      tone: "idle",
+      status: String(events.length),
+    },
+  ];
+
+  // Right rail — Needs Attention (from the ranked queue) + At a Glance + Latest
+  // Activity. Persistent across tabs.
+  const railNode = (
+    <>
+      <div className="rail-card">
+        <div className="rail-h">Needs attention</div>
+        {na.queue.length === 0 ? (
+          <div className="attn-item good">
+            <div className="ai-t">
+              {na.clear ? "On schedule" : "Nothing outstanding"}
+            </div>
+            <div className="ai-d">Nothing needs you on this order right now.</div>
+          </div>
+        ) : (
+          na.queue.map((it, i) => (
+            <div
+              key={i}
+              className={`attn-item ${it.tone === "good" ? "good" : ""}`}
+            >
+              <div className="ai-t">{it.title}</div>
+              <div className="ai-d">{it.detail}</div>
+            </div>
+          ))
+        )}
+      </div>
+
+      <div className="rail-card">
+        <div className="rail-h">At a glance</div>
+        <div className="glance-row">
+          <span className="g-l">Value</span>
+          <span className="g-r">{money(totalPrice)}</span>
+        </div>
+        <div className="glance-row">
+          <span className="g-l">Deposit</span>
+          <span className={`g-r ${depositPct >= 100 ? "pos" : ""}`}>
+            {depositPct}%
+          </span>
+        </div>
+        <div className="glance-row">
+          <span className="g-l">Produces</span>
+          <span className="g-r">{producesStr}</span>
+        </div>
+        <div className="glance-row">
+          <span className="g-l">Baseline</span>
+          <span className="g-r">
+            {(order as any).production_working_days ?? "—"} wd
+            {liveStatus.initialDeadline ? " · locked" : ""}
+          </span>
+        </div>
+        <div className="glance-row">
+          <span className="g-l">Quotation</span>
+          <span className="g-r">
+            {((order.documents as any)?.status ?? "—")
+              .toString()
+              .replace(/_/g, " ")
+              .toUpperCase()}
+          </span>
+        </div>
+        <div className="glance-row">
+          <span className="g-l">Task list</span>
+          <span className="g-r">
+            {((order.task_lists as any)?.status ?? "—")
+              .toString()
+              .replace(/_/g, " ")
+              .toUpperCase()}
+          </span>
+        </div>
+      </div>
+
+      <div className="rail-card">
+        <div className="rail-h">Latest activity</div>
+        {events.length === 0 ? (
+          <div className="glance-row">
+            <span className="g-l">No activity yet</span>
+          </div>
+        ) : (
+          events.slice(0, 4).map((e, i) => (
+            <div key={i} className="act-row">
+              <span className={`a-dot ${i > 0 ? "done" : ""}`} aria-hidden />
+              <span className="a-tx">{(e as any).message}</span>
+              <span className="a-dt">{fmtDate((e as any).created_at)}</span>
+            </div>
+          ))
+        )}
+        {events.length > 0 && (
+          <a href="#area-timeline" className="rail-link">
+            All {events.length} events →
+          </a>
+        )}
+      </div>
+    </>
+  );
 
   return (
     <div className="po-premium mx-auto max-w-screen-2xl px-6 py-8 space-y-5">
@@ -983,12 +1167,7 @@ export default async function ProductionOrderDetailPage({
       {/* ---------- COGNITION SPINE — next action + ranked attention queue ----
           The heart of the cockpit: one hero action + everything else
           outstanding, ranked. CTAs open the matching editor in place. */}
-      {status !== "cancelled" && (
-        <>
-          <NextActionBand na={na} baseHref={baseHref} />
-          <AttentionQueue na={na} baseHref={baseHref} />
-        </>
-      )}
+      {/* Next-action + attention queue now live in the workspace right rail. */}
 
       {/* ---------- TOP OPERATIONAL STRIP (m072) — sticky ----------
           The single most important read on the page: who owes what
@@ -998,21 +1177,100 @@ export default async function ProductionOrderDetailPage({
           visible while the operator scrolls down to edit — this replaced
           the old right-hand sidebar. The wrapper bleeds full-width and
           fills with the page canvas so content scrolls cleanly under it. */}
-      <div className="lg:sticky lg:top-[62px] lg:z-30 lg:-mx-6 lg:border-b lg:border-[color:var(--line)] lg:bg-[color:var(--canvas)] lg:px-6 lg:py-3">
-        <OrderOperationsStrip {...liveStatus} />
+      {/* ---------- DENSE KPI STRIP (Ops mockup) ---------- */}
+      <div className="ops-strip">
+        <div className="ops-kpi">
+          <div className="kpi-top">
+            <span className="kpi-k">Committed</span>
+            <span className="kpi-v">{fmtDate(liveStatus.initialDeadline)}</span>
+          </div>
+          <div className="kpi-s">
+            {liveStatus.initialDeadline ? "baseline · locked" : "not locked yet"}
+          </div>
+        </div>
+        <div className="ops-kpi">
+          <div className="kpi-top">
+            <span className="kpi-k">Due</span>
+            <span className="kpi-v">{fmtDate(liveStatus.productionDue)}</span>
+          </div>
+          <div className="kpi-s">
+            {liveStatus.daysToEta != null ? `in ${liveStatus.daysToEta}d` : "—"}
+          </div>
+        </div>
+        <div className={`ops-kpi ${totalDelayDays > 0 ? "attn" : ""}`}>
+          <div className="kpi-top">
+            <span className="kpi-k">Delay</span>
+            <span className="kpi-v">
+              {totalDelayDays > 0 ? (
+                `▲ +${totalDelayDays}d`
+              ) : (
+                <span className="pos">On schedule</span>
+              )}
+            </span>
+          </div>
+          <div className="kpi-s">
+            {totalDelayDays > 0
+              ? `+${liveStatus.factoryDelayDays}d factory · +${liveStatus.externalDelayDays}d ext.`
+              : "no shift recorded"}
+          </div>
+        </div>
+        <div
+          className={`ops-kpi ${
+            paymentState !== "paid_in_full" &&
+            paymentState !== "no_deposit_required"
+              ? "attn"
+              : ""
+          }`}
+        >
+          <div className="kpi-top">
+            <span className="kpi-k">Payment</span>
+            <span className="kpi-v">
+              {paymentState === "paid_in_full" ? (
+                <span className="pos">Paid</span>
+              ) : (
+                money(liveStatus.balanceRemaining)
+              )}
+            </span>
+          </div>
+          <div className="kpi-s">
+            {paymentState === "awaiting_deposit"
+              ? "deposit missing"
+              : paymentState === "paid_in_full"
+              ? "balance settled"
+              : `balance${
+                  liveStatus.daysToEta != null
+                    ? ` · due in ${liveStatus.daysToEta}d`
+                    : ""
+                }`}
+          </div>
+        </div>
+        <div className="ops-kpi">
+          <div className="kpi-top">
+            <span className="kpi-k">Shipping</span>
+            <span className="kpi-v">{shipLabel}</span>
+          </div>
+          <div className="kpi-s">{shipSub}</div>
+        </div>
       </div>
 
       {/* ---------- COCKPIT ----------
           Full-width single column. The top OrderOperationsStrip is the KPI
           surface; the old sticky live-status sidebar was removed — it merely
           mirrored the strip and cost 320px of width on the most-edited page. */}
+      <OrderWorkspace
+        tabs={workspaceTabs}
+        initial={openSection ?? undefined}
+        rail={railNode}
+      >
+
+      {/* ===== PANEL · Production (production · lighting · schedule) ===== */}
       <div className="space-y-6">
 
       {/* ---------- PRODUCTION (status workflow + baseline) ---------- */}
       <div id="area-production" className="scroll-mt-24">
       <CollapsibleSection
         title="Production"
-        defaultOpen={sectionOpen("production")}
+        defaultOpen
         attention={status === "production_delayed"}
         attentionLabel="Delayed"
         badge={
@@ -1340,6 +1598,7 @@ export default async function ProductionOrderDetailPage({
       {/* ---------- DELAY & TIMELINE (m075) ---------- */}
       <CollapsibleSection
         title="Delay & timeline"
+        defaultOpen
         attention={delayBreakdown.factoryDays + delayBreakdown.externalDays > 0}
         attentionLabel="Behind schedule"
         badge={
@@ -1437,10 +1696,14 @@ export default async function ProductionOrderDetailPage({
       </CollapsibleSection>
 
       {/* ---------- PAYMENT ---------- */}
+      </div>{/* /panel Production */}
+
+      {/* ===== PANEL · Payment ===== */}
+      <div className="space-y-6">
       <div id="area-payment" className="scroll-mt-24">
       <CollapsibleSection
         title="Payment"
-        defaultOpen={sectionOpen("payment")}
+        defaultOpen
         attention={!productionCanStart && !(order as any).deposit_override_at}
         attentionLabel="Deposit due"
         badge={
@@ -1851,10 +2114,14 @@ export default async function ProductionOrderDetailPage({
           2026-06-12): booking status, BL profile completeness and document
           readiness all show as header pills — the Hazard rail (attention)
           fires when something actually blocks the shipment. */}
+      </div>{/* /panel Payment */}
+
+      {/* ===== PANEL · Shipping ===== */}
+      <div className="space-y-6">
       <div id="area-shipping" className="scroll-mt-24">
       <CollapsibleSection
         title="Shipping & logistics"
-        defaultOpen={sectionOpen("shipping")}
+        defaultOpen
         attention={status === "production_completed" && !order.shipment_booked}
         attentionLabel="Book shipment"
         badge={
@@ -2067,10 +2334,14 @@ export default async function ProductionOrderDetailPage({
           logistics — collapsed header shows required/optional readiness,
           open state embeds the SAME components as the tab (checklist with
           Generate CI + the full hub with drag&drop, versions, audit). */}
+      </div>{/* /panel Shipping */}
+
+      {/* ===== PANEL · Documents ===== */}
+      <div className="space-y-6">
       <div id="area-documents" className="scroll-mt-24">
       <CollapsibleSection
         title="Shipping documents"
-        defaultOpen={sectionOpen("documents")}
+        defaultOpen
         attention={
           !docsReadiness.allRequiredReady &&
           (order.shipment_booked ||
@@ -2142,9 +2413,14 @@ export default async function ProductionOrderDetailPage({
       </CollapsibleSection>
       </div>
 
+      </div>{/* /panel Documents */}
+
+      {/* ===== PANEL · Order details ===== */}
+      <div className="space-y-6">
       {/* ---------- ORDER DETAILS (value + configuration) ---------- */}
       <CollapsibleSection
         title="Order details"
+        defaultOpen
         summary={
           <SummaryRow>
             <SummaryStat
@@ -2211,9 +2487,14 @@ export default async function ProductionOrderDetailPage({
       />
       </CollapsibleSection>
 
+      </div>{/* /panel Order details */}
+
+      {/* ===== PANEL · Activity ===== */}
+      <div className="space-y-6">
       {/* ---------- ACTIVITY TIMELINE ---------- */}
       <CollapsibleSection
         title="Activity timeline"
+        defaultOpen
         badge={
           <span className="inline-flex items-center rounded-full border border-neutral-200 bg-neutral-50 px-2 py-0.5 text-[11px] font-medium text-neutral-600 tabular-nums">
             {events.length} event{events.length === 1 ? "" : "s"}
@@ -2244,8 +2525,9 @@ export default async function ProductionOrderDetailPage({
         </p>
         <Timeline events={events} actorLabelByUser={labelByUser} />
       </CollapsibleSection>
+      </div>{/* /panel Activity */}
 
-      </div>
+      </OrderWorkspace>
 
       {/* Conversation drawer — overlaid on top of this page when the
           URL carries ?event=<id>. Lets notifications land on PO

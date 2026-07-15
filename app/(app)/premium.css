@@ -821,3 +821,305 @@
 /* document category groups: clearer group breaks */
 .po-premium button:has(> .sx-cat-ic) { border-top: 1px solid var(--line-2); padding-top: 9px; padding-bottom: 9px; }
 .po-premium button:has(> .sx-cat-ic) span.uppercase { color: var(--ink); }
+
+/* =====================================================================
+   OPS DENSE — single-screen Operations cockpit (owner mockup 2026-07-15)
+   Re-layout only: same tokens/identity. Adds ONE colour (attention amber)
+   already used by the mockup. Header row + dense KPI strip + tab bar that
+   switches the LEFT column + a persistent right rail (Needs Attention /
+   At a Glance / Latest Activity).
+   ===================================================================== */
+.po-premium {
+  --ops-amber: #e8870e;
+  --ops-amber-bg: rgba(232, 135, 14, 0.1);
+}
+
+/* ---- compact order header ---- */
+.po-premium .ops-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.po-premium .ops-head .oh-id {
+  font-size: 27px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+  line-height: 1.05;
+  font-variant-numeric: tabular-nums;
+}
+.po-premium .ops-head .oh-eyebrow {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--mute);
+}
+.po-premium .ops-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 18px;
+  margin-top: 7px;
+  font-size: 12px;
+}
+.po-premium .ops-meta .m-k {
+  color: var(--mute);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-size: 10.5px;
+  font-weight: 600;
+  margin-right: 5px;
+}
+.po-premium .ops-meta .m-v {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+/* ---- dense KPI strip ---- */
+.po-premium .ops-strip {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  border: 1px solid var(--line-2);
+  background: #fff;
+  margin-top: 12px;
+}
+.po-premium .ops-kpi {
+  padding: 10px 14px;
+  border-right: 1px solid var(--line-2);
+  min-width: 0;
+}
+.po-premium .ops-kpi:last-child {
+  border-right: 0;
+}
+.po-premium .ops-kpi .kpi-top {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  flex-wrap: wrap;
+}
+.po-premium .ops-kpi .kpi-k {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--mute);
+}
+.po-premium .ops-kpi .kpi-v {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+.po-premium .ops-kpi .kpi-v .pos {
+  color: var(--green-deep);
+}
+.po-premium .ops-kpi .kpi-s {
+  font-size: 10.5px;
+  color: var(--mute);
+  margin-top: 2px;
+}
+.po-premium .ops-kpi.attn {
+  background: var(--ops-amber-bg);
+  box-shadow: inset 0 2px 0 var(--ops-amber);
+}
+.po-premium .ops-kpi.attn .kpi-k {
+  color: var(--ops-amber);
+}
+
+/* ---- tab bar (switches the left column) ---- */
+.po-premium .ws-nav {
+  display: flex;
+  gap: 7px;
+  overflow-x: auto;
+  margin-top: 14px;
+  scrollbar-width: thin;
+}
+.po-premium .ws-tab {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 13px;
+  background: #fff;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius);
+  color: var(--ink-soft);
+  font-size: 12.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  transition: background 0.14s ease, border-color 0.14s ease, color 0.14s ease;
+}
+.po-premium .ws-tab:hover {
+  border-color: var(--mute-2);
+}
+.po-premium .ws-tab.is-active {
+  background: var(--ink);
+  color: #fff;
+  border-color: var(--ink);
+}
+.po-premium .ws-tab .ws-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+}
+.po-premium .ws-tab .ws-st {
+  font-weight: 500;
+  color: var(--mute);
+}
+.po-premium .ws-tab.is-active .ws-st {
+  color: rgba(255, 255, 255, 0.72);
+}
+
+/* ---- main + rail grid ---- */
+.po-premium .ops-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 316px;
+  gap: 16px;
+  align-items: start;
+  margin-top: 12px;
+}
+.po-premium .ops-main {
+  min-width: 0;
+}
+.po-premium .ops-rail {
+  display: flex;
+  flex-direction: column;
+  gap: 13px;
+  position: sticky;
+  top: 70px;
+}
+@media (max-width: 1120px) {
+  .po-premium .ops-grid {
+    grid-template-columns: 1fr;
+  }
+  .po-premium .ops-rail {
+    position: static;
+  }
+}
+
+/* ---- rail cards ---- */
+.po-premium .rail-card {
+  background: #fff;
+  border: 1px solid var(--line-2);
+  padding: 13px 14px;
+}
+.po-premium .rail-h {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--mute);
+  margin-bottom: 10px;
+}
+.po-premium .attn-item {
+  border: 1px solid var(--line-2);
+  border-left: 3px solid var(--ops-amber);
+  background: var(--ops-amber-bg);
+  padding: 9px 11px;
+}
+.po-premium .attn-item + .attn-item {
+  margin-top: 8px;
+}
+.po-premium .attn-item.good {
+  border-left-color: var(--green-deep);
+  background: var(--green-tint);
+}
+.po-premium .attn-item .ai-t {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.po-premium .attn-item .ai-d {
+  font-size: 11px;
+  color: var(--ink-soft);
+  margin-top: 2px;
+  line-height: 1.35;
+}
+.po-premium .glance-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+  padding: 5px 0;
+  font-size: 12px;
+  border-top: 1px solid var(--line);
+}
+.po-premium .glance-row:first-child {
+  border-top: 0;
+}
+.po-premium .glance-row .g-l {
+  color: var(--mute);
+}
+.po-premium .glance-row .g-r {
+  font-weight: 600;
+  color: var(--ink);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.po-premium .glance-row .g-r.pos {
+  color: var(--green-deep);
+}
+.po-premium .act-row {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  padding: 4px 0;
+  font-size: 11.5px;
+}
+.po-premium .act-row .a-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--ops-amber);
+  margin-top: 4px;
+  flex: 0 0 auto;
+}
+.po-premium .act-row .a-dot.done {
+  background: var(--mute-2);
+}
+.po-premium .act-row .a-tx {
+  flex: 1;
+  color: var(--ink-soft);
+  min-width: 0;
+}
+.po-premium .act-row .a-dt {
+  color: var(--mute);
+  font-size: 10.5px;
+  white-space: nowrap;
+}
+.po-premium .rail-link {
+  display: inline-block;
+  margin-top: 8px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--green-deep);
+}
+
+/* ---- density: trim section padding inside the workspace ---- */
+.po-premium .ops-main .ws-stage > .space-y-6 > * + * {
+  margin-top: 14px;
+}
+.po-premium .ws-stage.is-on {
+  animation: wsFade 0.16s ease both;
+}
+@keyframes wsFade {
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .po-premium .ws-stage.is-on {
+    animation: none;
+  }
+  .po-premium .ws-tab {
+    transition: none;
+  }
+}
