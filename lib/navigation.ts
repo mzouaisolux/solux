@@ -55,7 +55,10 @@ export type NavVisibility =
   | { kind: "adminLikeOrFinance" }
   // admin/super_admin OR any of these capabilities (+ optionally finance).
   // Anti-lockout: admins always pass even before the matrix is seeded.
-  | { kind: "capabilityOrAdmin"; capabilities: Capability[]; includeFinance?: boolean };
+  | { kind: "capabilityOrAdmin"; capabilities: Capability[]; includeFinance?: boolean }
+  // super_admin ONLY (real role). Used for isolated, not-yet-validated modules
+  // (e.g. the Phase-1 Packing module) that must stay hidden from everyone else.
+  | { kind: "superAdminOnly" };
 
 export type NavItem = {
   label: string;
@@ -544,6 +547,16 @@ export const NAVIGATION: NavCategory[] = [
       },
     ],
   },
+
+  // N) Packing (Phase 1) — isolated, super-admin-only direct link. Hidden
+  //    from every other role until the module is validated for wider use.
+  {
+    id: "packing",
+    label: "Packing (beta)",
+    href: "/packing",
+    visibility: { kind: "superAdminOnly" },
+    groups: [],
+  },
 ];
 
 /* ===========================================================================
@@ -567,6 +580,8 @@ export type NavContext = {
   technical: boolean;
   /** effectiveRole === "finance". */
   finance: boolean;
+  /** REAL role is super_admin AND not simulating — gates `superAdminOnly`. */
+  superAdmin?: boolean;
 };
 
 /** All distinct capability keys referenced anywhere in the menu. The Nav
@@ -605,6 +620,8 @@ export function isVisible(v: NavVisibility | undefined, ctx: NavContext): boolea
         (!!v.includeFinance && ctx.finance) ||
         v.capabilities.some((c) => ctx.granted.has(c))
       );
+    case "superAdminOnly":
+      return !!ctx.superAdmin;
   }
 }
 

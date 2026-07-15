@@ -69,6 +69,9 @@ export async function Nav({
     adminLike: isAdminLike(role),
     technical: isTechnicalRole(role),
     finance: role === "finance",
+    // super-admin-only entries (e.g. Packing beta) show for a REAL super-admin
+    // who isn't previewing another role — faithful to View-As.
+    superAdmin: isSuperAdmin && !isSimulating,
   });
 
   // i18n — translate the (English-config) menu via reverse-lookup so the
