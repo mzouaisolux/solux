@@ -18,8 +18,14 @@ node_modules */
 e2e/.auth
 e2e/.runs
 
-# sales-analytics import data (real customer financials — never commit)
-/data/*.csv
+# sales-analytics import data + local staging (real customer financials / binaries — never commit)
+/data/
+
+# scratch: temp audit scripts, design references, office lock files
+*.tmp.ts
+*.tmp.mjs
+.design-ref/
+~$*
 
 # misc
 .DS_Store
