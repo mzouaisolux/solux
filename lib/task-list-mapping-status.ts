@@ -132,6 +132,13 @@ export function evaluateRelease(args: {
    * applied yet).
    */
   tiltConflictPending?: boolean;
+  /**
+   * m178 — number of OPEN blocking Pre-Validation action items ("Waiting for
+   * pole calculation", "Missing engineering approval", …). A department has
+   * flagged unfinished blocking work — Final Validation must wait for it.
+   * Undefined/0 = not blocking (no items, or m178 not applied yet).
+   */
+  openBlockingActionItems?: number;
 }): { ok: boolean; reason: string | null } {
   if (!args.statusAllowed) {
     return {
@@ -147,6 +154,17 @@ export function evaluateRelease(args: {
       ok: false,
       reason:
         "This task list has no products — there's nothing to manufacture. Check the source quotation has line items before releasing to production.",
+    };
+  }
+  // m178 — blocking Pre-Validation items outrank the revision loop: they are
+  // the departments' own "not finished" flags, raised deliberately.
+  if ((args.openBlockingActionItems ?? 0) > 0) {
+    const n = args.openBlockingActionItems!;
+    return {
+      ok: false,
+      reason: `${n} blocking Pre-Validation item${n === 1 ? "" : "s"} still open — resolve ${
+        n === 1 ? "it" : "them"
+      } on the Pre-Validation board before Final Validation.`,
     };
   }
   if (args.hasOpenRevision) {

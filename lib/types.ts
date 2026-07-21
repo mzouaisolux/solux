@@ -808,11 +808,16 @@ export const TASK_LIST_STATUSES: ProductionTaskListStatus[] = [
   "production_ready",
   "cancelled",
 ];
+// m178 (owner spec 2026-07-21): the DB status values are unchanged for
+// compatibility (RLS, queues, notifications, exports all match on them), but
+// the BUSINESS names evolved — `under_validation` is the collaborative
+// PRE-VALIDATION phase (TLM ⇄ factory ⇄ engineering ⇄ sales iterate until the
+// file is complete) and `validated` is the official FINAL VALIDATION.
 export const TASK_LIST_STATUS_LABEL: Record<ProductionTaskListStatus, string> = {
   draft: "Draft",
-  under_validation: "Under validation",
+  under_validation: "Pre-Validation",
   needs_revision: "Needs revision",
-  validated: "Validated",
+  validated: "Final Validation",
   production_ready: "Production ready",
   cancelled: "Cancelled",
 };

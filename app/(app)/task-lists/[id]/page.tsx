@@ -14,6 +14,16 @@ import { StickerRequirementsEditor } from "@/components/documents/StickerRequire
 import { RiskFlagsEditor } from "@/components/documents/RiskFlagsEditor";
 import { IndustrialFileEditor } from "@/components/documents/IndustrialFileEditor";
 import {
+  PreValidationBoard,
+  type BoardAiField,
+} from "@/components/PreValidationBoard";
+import {
+  normalizeActionItem,
+  type TaskListActionItem,
+} from "@/lib/task-list-action-items";
+import { normalizeRiskFlags } from "@/lib/risks";
+import { formatTiltAngle } from "@/lib/industrial-spec";
+import {
   normalizeTiltProvenance,
   tiltConflictPending,
   type TiltProvenance,
@@ -637,6 +647,88 @@ export default async function TaskListDetailPage({
       ? (task as any).clients[0]
       : (task as any).clients)?.company_name ?? null;
 
+  // ---- m178 — PRE-VALIDATION BOARD data -----------------------------------
+  // The board renders during the collaborative phase (Pre-Validation +
+  // needs_revision). Action items are fetched DEFENSIVELY: pre-m178 the table
+  // is absent and the board runs without them (its other signals all exist).
+  const showPreValidationBoard =
+    status === "under_validation" || status === "needs_revision";
+  let actionItems: TaskListActionItem[] = [];
+  let m178Live = false;
+  let boardUsers: { id: string; label: string }[] = [];
+  if (showPreValidationBoard) {
+    const { data: itemRows, error: itemsErr } = await supabase
+      .from("task_list_action_items")
+      .select(
+        "id, task_list_id, title, details, department, assignee, status, blocking, due_date, created_by, created_at, resolved_at, resolved_by"
+      )
+      .eq("task_list_id", params.id)
+      .order("created_at");
+    if (!itemsErr) {
+      m178Live = true;
+      actionItems = ((itemRows ?? []) as unknown[])
+        .map(normalizeActionItem)
+        .filter((i): i is TaskListActionItem => i != null);
+      const { data: profs } = await supabase
+        .from("profiles")
+        .select("id, full_name, email")
+        .order("full_name");
+      boardUsers = ((profs ?? []) as any[]).map((u) => ({
+        id: u.id as string,
+        label: (u.full_name || u.email || "—") as string,
+      }));
+      const byId = new Map(boardUsers.map((u) => [u.id, u.label]));
+      for (const it of actionItems) {
+        it.assignee_label = it.assignee ? (byId.get(it.assignee) ?? null) : null;
+      }
+    }
+  }
+  // AI review list — every AI-extracted value with its review state. Tilt has
+  // the full m176 state machine; the lighting fields carry provenance +
+  // confidence (their explicit ack states are the next phase).
+  const boardAiFields: BoardAiField[] = [];
+  if (showPreValidationBoard) {
+    const prov = industrial?.provenance ?? null;
+    if (prov) {
+      boardAiFields.push({
+        label: "Solar panel tilt (Energy Study)",
+        value: formatTiltAngle(prov.value),
+        confidence: prov.confidence,
+        state: prov.resolution === "applied" ? "accepted_ai" : prov.resolution,
+        manuallyModified: prov.manually_modified_after,
+      });
+    }
+    const ai = (lightingRow?.ai_extracted ?? null) as any;
+    const aiFieldRows: Array<[string, unknown, string]> = ai?.fields
+      ? [
+          ["Lighting power", ai.fields.lighting_power, "lighting_power"],
+          ["Operating hours / night", ai.fields.operating_hours, "operating_hours"],
+          [
+            "Lighting program",
+            Array.isArray(ai.fields.lighting_program) && ai.fields.lighting_program.length
+              ? `${ai.fields.lighting_program.length} periods`
+              : null,
+            "lighting_program",
+          ],
+        ]
+      : [];
+    for (const [label, value, key] of aiFieldRows) {
+      if (value == null) continue;
+      const conf = Number(ai?.confidence?.[key]);
+      boardAiFields.push({
+        label: `${label} (Energy Study)`,
+        value: String(value),
+        confidence: Number.isFinite(conf) ? Math.max(0, Math.min(1, conf)) : null,
+      });
+    }
+  }
+  // Warnings — the manually-flagged risks (m062): non-blocking by design.
+  const boardWarnings: string[] = showPreValidationBoard
+    ? normalizeRiskFlags(riskFlags)
+        .items.filter((r) => r.active)
+        .map((r) => r.label)
+    : [];
+
   const flowSteps = deriveFlowSteps(
     status,
     (linkedPo?.status as string | null) ?? null
@@ -793,12 +885,37 @@ export default async function TaskListDetailPage({
         </div>
       </div>
 
-      {/* RELEASE READINESS (#7/#8) — surface what blocks validation at the TOP,
-          not only inside the final Release modal. Shown to the production team
-          while reviewing / before release; per-row detail lives in Product
-          configuration below. */}
+      {/* m178 — PRE-VALIDATION BOARD: the dashboard of the collaborative
+          phase. Aggregates the SAME signals the server-side release gate
+          enforces (no second source of truth) + the departments' own pending
+          items. Visible to every role; edit affordances follow the role. */}
+      {showPreValidationBoard && (
+        <PreValidationBoard
+          taskListId={task.id}
+          items={actionItems}
+          users={boardUsers}
+          signals={{
+            requiredEmptyCount,
+            missingMappingCount,
+            tiltCheckpointPending,
+            tiltConflictPending: tiltConflict,
+            hasOpenRevision: !!revisionThread.request && !revisionThread.request.resolved,
+            lineCount: (lines ?? []).length,
+          }}
+          aiFields={boardAiFields}
+          warnings={boardWarnings}
+          canCreate={m178Live && (technical || salesCanEdit || status === "under_validation")}
+          canBlock={technical}
+          isTechnical={technical}
+          userId={currentUserId ?? null}
+          m178Live={m178Live}
+        />
+      )}
+
+      {/* RELEASE READINESS (#7/#8) — kept for the Final Validation stage; the
+          Pre-Validation board above covers the collaborative phase. */}
       {technical &&
-        (status === "under_validation" || status === "validated") &&
+        status === "validated" &&
         (missingMappingCount > 0 ||
           requiredEmptyCount > 0 ||
           tiltCheckpointPending ||
