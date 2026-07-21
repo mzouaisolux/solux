@@ -45,6 +45,11 @@ export default async function TerminologyPage() {
     .select("key, category, en, zh, fr, status, notes, updated_at, updated_by")
     .order("key");
   const live = !error;
+  // Never guess WHY the read failed. "Apply m177" is only one possible cause —
+  // a permissions/RLS problem or a stale PostgREST schema cache produce the
+  // same empty page, and silently blaming the migration sends you to the wrong
+  // fix. Surface what Postgres actually said.
+  const readError = error ? `${error.code ?? "error"}: ${error.message}` : null;
 
   const stored = new Map<string, TermRow>();
   for (const raw of (data ?? []) as unknown[]) {
@@ -121,13 +126,21 @@ export default async function TerminologyPage() {
           <b>English</b> → the key itself.
         </p>
         {!live && (
-          <p className="mt-3 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900 max-w-3xl">
-            Editing activates once migration <b>m177</b>{" "}
-            (177_terminology.sql) is applied in Supabase. Until then this page
-            lists the built-in catalog shipped in the code, which is exactly
-            what the documents render today — nothing is broken, and applying
-            the migration changes no document.
-          </p>
+          <div className="mt-3 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900 max-w-3xl">
+            <p>
+              The terminology table could not be read, so this page is listing
+              the built-in catalog shipped in the code — which is exactly what
+              the documents render today. Nothing is broken.
+            </p>
+            <p className="mt-1.5">
+              If migration <b>m177</b> (177_terminology.sql) has not been
+              applied in Supabase, that is the cause. Otherwise the database
+              said:
+            </p>
+            <code className="mt-1 block rounded bg-amber-100 px-2 py-1 font-mono text-[11px]">
+              {readError}
+            </code>
+          </div>
         )}
         <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px]">
           <span className="rounded-full border border-neutral-200 bg-white px-2.5 py-1">
