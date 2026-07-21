@@ -17,6 +17,16 @@ import {
   PreValidationBoard,
   type BoardAiField,
 } from "@/components/PreValidationBoard";
+import { RevisionsPanel } from "@/components/RevisionsPanel";
+import {
+  diffSnapshots,
+  isFrozenStatus,
+  type RevisionFieldChange,
+} from "@/lib/task-list-revisions";
+import {
+  buildTaskListSnapshot,
+  fetchRevisions,
+} from "@/lib/task-list-revisions-server";
 import {
   normalizeActionItem,
   type TaskListActionItem,
@@ -729,6 +739,37 @@ export default async function TaskListDetailPage({
         .map((r) => r.label)
     : [];
 
+  // ---- m179 — FINAL VALIDATION freeze + revision lineage ------------------
+  // Defensive: pre-m179 fetchRevisions returns [] and the panel stays hidden
+  // (unless frozen, where it renders the freeze banner without lineage).
+  const frozen = isFrozenStatus(status);
+  const revisions = await fetchRevisions(supabase, params.id);
+  let revisionDiff: RevisionFieldChange[] = [];
+  let revisionDiffLabel: string | null = null;
+  const validatedRevs = revisions.filter(
+    (r) => r.status !== "in_progress" && r.snapshot
+  );
+  const inProgressRev = revisions.find((r) => r.status === "in_progress");
+  try {
+    if (inProgressRev && !frozen && validatedRevs[0]) {
+      // Live: the current working state vs the last validated version.
+      const live = await buildTaskListSnapshot(supabase, params.id);
+      if (live) {
+        revisionDiff = diffSnapshots(validatedRevs[0].snapshot!, live);
+        revisionDiffLabel = `Rev ${inProgressRev.rev} (in progress) vs Rev ${validatedRevs[0].rev}`;
+      }
+    } else if (validatedRevs.length >= 2) {
+      revisionDiff = diffSnapshots(validatedRevs[1].snapshot!, validatedRevs[0].snapshot!);
+      revisionDiffLabel = `Rev ${validatedRevs[0].rev} vs Rev ${validatedRevs[1].rev}`;
+    }
+  } catch {
+    revisionDiff = []; // a malformed legacy snapshot must never sink the page
+  }
+  const currentRev =
+    ((task as any).current_rev as string | null | undefined) ??
+    validatedRevs[0]?.rev ??
+    null;
+
   const flowSteps = deriveFlowSteps(
     status,
     (linkedPo?.status as string | null) ?? null
@@ -909,6 +950,20 @@ export default async function TaskListDetailPage({
           isTechnical={technical}
           userId={currentUserId ?? null}
           m178Live={m178Live}
+        />
+      )}
+
+      {/* m179 — FINAL VALIDATION: freeze banner, controlled revisions, and
+          the field-level diff between revisions. */}
+      {(frozen || revisions.length > 0) && (
+        <RevisionsPanel
+          taskListId={task.id}
+          frozen={frozen}
+          currentRev={currentRev}
+          revisions={revisions.map((r) => ({ ...r, snapshot: null }))}
+          diff={revisionDiff.slice(0, 200)}
+          diffLabel={revisionDiffLabel}
+          canManage={technical && canValidateTaskList}
         />
       )}
 
@@ -1277,8 +1332,8 @@ export default async function TaskListDetailPage({
             tiltVerifiedAt={industrial.verifiedAt}
             tiltProvenance={industrial.provenance}
             initialSpec={industrial.spec}
-            editable={salesCanEdit}
-            canVerify={technical && canValidateTaskList}
+            editable={salesCanEdit && !frozen}
+            canVerify={technical && canValidateTaskList && !frozen}
             families={orderedFamilies}
             dictionary={dictionary}
           />

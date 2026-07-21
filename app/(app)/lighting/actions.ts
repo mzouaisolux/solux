@@ -20,6 +20,7 @@ import {
 } from "@/lib/types";
 import { ATTACHMENTS_BUCKET } from "@/lib/attachments";
 import { cleanTiltAngle } from "@/lib/industrial-spec";
+import { isFrozenStatus } from "@/lib/task-list-revisions";
 import {
   cleanConfidence,
   resolveExtraction,
@@ -177,10 +178,13 @@ export async function extractEnergyStudyAction(
     let tilt: TiltOutcome = { kind: "none" };
     const documentId = String(formData.get("document_id") ?? "").trim();
     if (documentId && extraction.tilt_angle != null) {
+      // m179 — frozen task lists (Final Validation) are immutable: the
+      // extraction records/conflicts only against lists still in the cycle.
       const { data: lists } = await supabase
         .from("production_task_lists")
         .select("id, solar_panel_tilt_angle")
-        .eq("quotation_id", documentId);
+        .eq("quotation_id", documentId)
+        .in("status", ["draft", "under_validation", "needs_revision"]);
       const sourceName =
         String(formData.get("source_name") ?? "").trim() || basename(path);
       for (const tl of (lists ?? []) as any[]) {
@@ -319,6 +323,14 @@ export async function aiFindTiltAction(
       return {
         ok: false,
         error: "This task list is in production validation — the tilt angle can no longer be edited by sales.",
+      };
+    }
+    // m179 — Final Validation freeze: immutable for every role.
+    if (isFrozenStatus(tl.status as string)) {
+      return {
+        ok: false,
+        error:
+          "Final Validation freeze — this task list is immutable. Open a controlled revision to change the tilt angle.",
       };
     }
 

@@ -19,6 +19,11 @@ import { normalizeStickerRequirements } from "@/lib/stickers";
 import { normalizeRiskFlags } from "@/lib/risks";
 import { isRevisionCategory, revisionCategoryLabel } from "@/lib/revision-shared";
 import { evaluateRelease } from "@/lib/task-list-mapping-status";
+import { isFrozenStatus } from "@/lib/task-list-revisions";
+import {
+  openRevisionRecord,
+  recordValidationRevision,
+} from "@/lib/task-list-revisions-server";
 import {
   countMissingTaskListMappings,
   taskListHasOpenRevision,
@@ -101,6 +106,41 @@ async function tiltCheckpointPendingFor(
  * against a tilt under dispute, so this blocks the release exactly like the
  * pending drawing checkpoint. Defensive: pre-m176 (column absent) → false.
  */
+/**
+ * m179 — HARD FREEZE assert (friendly early error; the DB triggers are the
+ * authoritative guarantee). A frozen task list (Final Validation /
+ * production-ready) is immutable — content changes require a controlled
+ * revision, which re-runs the full Pre-Validation cycle.
+ */
+function assertNotFrozen(status: string | null | undefined, rev?: string | null): void {
+  if (isFrozenStatus(status)) {
+    throw new Error(
+      `Final Validation freeze — this task list (Rev ${rev ?? "A"}) is immutable. ` +
+        `Open a controlled revision (with a reason) to modify it.`
+    );
+  }
+}
+
+/**
+ * m178 — how many OPEN blocking Pre-Validation action items does this task
+ * list carry? A department flagged unfinished blocking work ("Waiting for
+ * pole calculation", "Missing engineering approval") — Final Validation must
+ * wait. Defensive: pre-m178 (table absent) → 0, never blocks a deployment
+ * that predates the migration.
+ */
+async function openBlockingActionItemsFor(
+  supabase: ReturnType<typeof createClient>,
+  id: string
+): Promise<number> {
+  const { count, error } = await supabase
+    .from("task_list_action_items")
+    .select("id", { count: "exact", head: true })
+    .eq("task_list_id", id)
+    .eq("blocking", true)
+    .in("status", ["open", "in_progress"]);
+  return error ? 0 : (count ?? 0);
+}
+
 async function tiltConflictPendingFor(
   supabase: ReturnType<typeof createClient>,
   id: string
@@ -142,6 +182,7 @@ export async function updateRiskFlags(formData: FormData) {
       "This task list is in production validation and can no longer be edited by sales."
     );
   }
+  assertNotFrozen(current.status);
 
   const raw = String(formData.get("risk_flags") ?? "");
   let parsed: unknown;
@@ -196,6 +237,7 @@ export async function updateStickerRequirements(formData: FormData) {
       "This task list is in production validation and can no longer be edited by sales."
     );
   }
+  assertNotFrozen(currentStatus);
 
   const raw = String(formData.get("sticker_requirements") ?? "");
   let parsed: unknown;
@@ -268,6 +310,7 @@ export async function updateIndustrialFile(formData: FormData) {
       "This task list is in production validation and can no longer be edited by sales."
     );
   }
+  assertNotFrozen(current.status);
 
   // Pre-state of the m159 columns — fetched separately + defensively so the
   // basic read above still works pre-migration (42703 only hits this select).
@@ -454,6 +497,7 @@ export async function resolveTiltConflict(formData: FormData) {
       "This task list is in production validation and can no longer be edited by sales."
     );
   }
+  assertNotFrozen(current.status);
 
   const { data: row, error: readErr } = await supabase
     .from("production_task_lists")
@@ -622,6 +666,7 @@ export async function updateTaskListHeader(formData: FormData) {
       "This task list has been submitted for production validation and can no longer be edited by sales."
     );
   }
+  assertNotFrozen(currentStatus);
 
   const production_notes =
     (formData.get("production_notes") &&
@@ -700,6 +745,7 @@ export async function updateTaskListLine(formData: FormData) {
   ) {
     throw new Error("Sales config is locked while under production validation.");
   }
+  assertNotFrozen(parentStatus);
 
   const internal_notes =
     (formData.get("internal_notes") &&
@@ -1159,6 +1205,7 @@ export async function validateTaskList(formData: FormData) {
     lineCount,
     tiltCheckpointPending,
     tiltConflictPendingNow,
+    openBlockingActionItems,
   ] =
     await Promise.all([
       countMissingTaskListMappings(id),
@@ -1170,6 +1217,7 @@ export async function validateTaskList(formData: FormData) {
         .then((r) => r.count ?? 0),
       tiltCheckpointPendingFor(supabase, id), // m159
       tiltConflictPendingFor(supabase, id), // m176
+      openBlockingActionItemsFor(supabase, id), // m178
     ]);
   const verdict = evaluateRelease({
     statusAllowed: row.status === "under_validation",
@@ -1178,6 +1226,7 @@ export async function validateTaskList(formData: FormData) {
     lineCount,
     tiltCheckpointPending,
     tiltConflictPending: tiltConflictPendingNow,
+    openBlockingActionItems,
   });
   if (!verdict.ok) {
     throw new Error(verdict.reason ?? "Cannot release to production.");
@@ -1194,10 +1243,16 @@ export async function validateTaskList(formData: FormData) {
     .eq("message_kind", "request")
     .is("resolved_at", null);
 
+  // m179 — freeze the validated content as an immutable revision BEFORE the
+  // transition (the row is still editable here; afterwards the DB trigger
+  // only lets workflow columns change). Dormant pre-m179 (returns null).
+  const frozenRev = await recordValidationRevision(supabase, id, userId ?? null);
+
   // Auto-create is handled centrally by transition() (ensureProductionOrder).
   await transition(id, "validated", {
     allowedFrom: ["under_validation"],
     stampValidator: true,
+    note: frozenRev ? `Rev ${frozenRev} frozen` : undefined,
   });
   // Immediate operational handoff: jump straight to the production order.
   await handoffToProductionOrder(id);
@@ -1227,6 +1282,7 @@ export async function markProductionReady(formData: FormData) {
     lineCount,
     tiltCheckpointPending,
     tiltConflictPendingNow,
+    openBlockingActionItems,
   ] =
     await Promise.all([
       countMissingTaskListMappings(id),
@@ -1238,6 +1294,7 @@ export async function markProductionReady(formData: FormData) {
         .then((r) => r.count ?? 0),
       tiltCheckpointPendingFor(supabase, id), // m159
       tiltConflictPendingFor(supabase, id), // m176
+      openBlockingActionItemsFor(supabase, id), // m178
     ]);
   const verdict = evaluateRelease({
     statusAllowed:
@@ -1247,9 +1304,18 @@ export async function markProductionReady(formData: FormData) {
     lineCount,
     tiltCheckpointPending,
     tiltConflictPending: tiltConflictPendingNow,
+    openBlockingActionItems,
   });
   if (!verdict.ok) {
     throw new Error(verdict.reason ?? "Cannot release to production.");
+  }
+
+  // m179 — the under_validation → production_ready FAST-TRACK is also a Final
+  // Validation: it must freeze a revision too. From `validated` the snapshot
+  // already exists (taken by validateTaskList) — don't double-freeze.
+  if (row.status === "under_validation") {
+    const { userId: uid } = await getCurrentUserRole();
+    await recordValidationRevision(supabase, id, uid ?? null);
   }
 
   await transition(id, "production_ready", {
@@ -1280,8 +1346,11 @@ async function handoffToProductionOrder(taskListId: string) {
  */
 export async function requestRevision(formData: FormData) {
   await requireCapability("task_list.validate");
+  // m179 — from a FROZEN state (validated / production_ready) the only exit
+  // to editability is a CONTROLLED revision (reason + Rev N + full re-cycle).
+  // This action is the Pre-Validation-phase bounce to sales only.
   await transition(String(formData.get("id")), "needs_revision", {
-    allowedFrom: ["under_validation", "validated", "production_ready"],
+    allowedFrom: ["under_validation"],
   });
 }
 
@@ -1313,11 +1382,9 @@ export async function requestRevisionWithReason(formData: FormData) {
 
   // Pre-check status so we never post a request that can't transition
   // (avoids an orphan request message with no status change).
-  const allowed: ProductionTaskListStatus[] = [
-    "under_validation",
-    "validated",
-    "production_ready",
-  ];
+  // m179 — frozen states (validated / production_ready) exit ONLY via a
+  // controlled revision; the reasoned bounce-to-sales is a Pre-Validation move.
+  const allowed: ProductionTaskListStatus[] = ["under_validation"];
   const { data: row } = await supabase
     .from("production_task_lists")
     .select("status")
@@ -1443,6 +1510,61 @@ export async function rejectTaskList(formData: FormData) {
       "production_ready",
     ],
   });
+}
+
+/**
+ * m179 — open a CONTROLLED REVISION on a frozen task list. The only path
+ * from Final Validation back to editability:
+ *   - requires a reason (recorded on the new revision, with author + time);
+ *   - captures a baseline snapshot first for lists validated before m179;
+ *   - creates Rev <next> as `in_progress`;
+ *   - sends the task list back through the FULL cycle (Pre-Validation →
+ *     Final Validation) — the new revision only becomes the official
+ *     version when its own validation freezes it.
+ */
+export async function openControlledRevision(formData: FormData) {
+  await requireCapability("task_list.validate");
+  const id = String(formData.get("id"));
+  if (!id) throw new Error("Missing task list id");
+  const reason = String(formData.get("reason") ?? "").trim();
+  if (reason.length < 5) {
+    throw new Error("A reason for the revision is required (a few words minimum).");
+  }
+
+  const { userId } = await getCurrentUserRole();
+  const supabase = createClient();
+  const { data: row } = await supabase
+    .from("production_task_lists")
+    .select("id, number, status, validated_at, validated_by")
+    .eq("id", id)
+    .maybeSingle();
+  if (!row) throw new Error("Task list not found");
+  if (!isFrozenStatus((row as any).status)) {
+    throw new Error("Controlled revisions start from a validated task list.");
+  }
+
+  const rev = await openRevisionRecord(
+    supabase,
+    row as any,
+    reason,
+    userId ?? null
+  );
+
+  await transition(id, "under_validation", {
+    allowedFrom: ["validated", "production_ready"],
+    note: `Controlled revision Rev ${rev} opened — ${reason.slice(0, 160)}`,
+  });
+
+  await emitEvent({
+    entity_type: "task_list",
+    entity_id: id,
+    event_type: "tl.header_changed",
+    message: `Controlled revision Rev ${rev} opened on ${(row as any).number ?? "task list"} — ${reason.slice(0, 200)}`,
+    payload: { section: "revision", rev, reason },
+    bestEffort: true,
+  });
+
+  revalidatePath(`/task-lists/${id}`);
 }
 
 /**
