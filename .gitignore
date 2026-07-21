@@ -10,6 +10,11 @@ node_modules */
 # typescript incremental build cache (regenerated on every tsc run)
 *.tsbuildinfo
 
+# pdf.js worker copied out of node_modules by scripts/copy-pdf-worker.mjs
+# (postinstall / predev / prebuild). Generated, never committed — a committed
+# copy would silently drift from the installed pdfjs-dist version.
+/public/pdf.worker.min.mjs
+
 # env / secrets
 .env.local
 .env*.local

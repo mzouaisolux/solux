@@ -51,10 +51,13 @@ async function renderPdfThumb(url: string): Promise<string> {
 
   // Dynamic import: keeps pdf.js out of the initial bundle entirely.
   const pdfjs: any = await import("pdfjs-dist");
-  pdfjs.GlobalWorkerOptions.workerSrc = new URL(
-    "pdfjs-dist/build/pdf.worker.min.mjs",
-    import.meta.url
-  ).toString();
+  // Static asset, NOT the `new URL(..., import.meta.url)` bundler form: that
+  // makes webpack pull the worker into the bundle, and pdfjs-dist v6's worker
+  // uses syntax the Next 14 build cannot parse — it broke `next build` while
+  // `next dev` kept working. public/pdf.worker.min.mjs is refreshed on every
+  // install and build by scripts/copy-pdf-worker.mjs, so it always matches the
+  // installed pdfjs-dist version.
+  pdfjs.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs";
 
   const doc = await pdfjs.getDocument({
     url,
