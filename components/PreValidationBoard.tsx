@@ -7,6 +7,7 @@ import {
   setTaskListActionItemStatus,
   deleteTaskListActionItem,
 } from "@/app/(app)/task-lists/[id]/action-items";
+import { confirmLightingAiField } from "@/app/(app)/lighting/actions";
 import {
   ACTION_ITEM_DEPARTMENTS,
   ACTION_ITEM_DEPARTMENT_LABELS,
@@ -44,6 +45,10 @@ export type BoardAiField = {
   /** m176-style review state when the field has one (tilt today). */
   state?: "pending" | "applied" | "accepted_ai" | "kept_manual" | null;
   manuallyModified?: boolean;
+  /** Phase 2 — lighting fields: server key for the explicit Confirm action. */
+  fieldKey?: "lighting_power" | "operating_hours" | "lighting_program";
+  /** Phase 2 — human acknowledgment; null/undefined = unreviewed. */
+  ack?: "confirmed" | "corrected" | null;
 };
 
 export function PreValidationBoard({
@@ -58,6 +63,8 @@ export function PreValidationBoard({
   isTechnical,
   userId,
   m178Live,
+  documentId,
+  canReviewAi,
 }: {
   taskListId: string;
   items: TaskListActionItem[];
@@ -73,6 +80,10 @@ export function PreValidationBoard({
   userId: string | null;
   /** false = m178 not applied — the board renders read-only with a hint. */
   m178Live: boolean;
+  /** The command (proforma) id — target of the AI confirm action. */
+  documentId: string | null;
+  /** May confirm AI values (same collaboration window as editing). */
+  canReviewAi: boolean;
 }) {
   const router = useRouter();
   const [adding, setAdding] = useState(false);
@@ -113,7 +124,9 @@ export function PreValidationBoard({
     });
 
   const aiNeedingReview = aiFields.filter(
-    (f) => f.state === "pending" || (f.state == null && f.confidence != null && f.confidence < 0.85)
+    (f) =>
+      f.state === "pending" ||
+      (f.fieldKey != null && f.ack == null) // extracted, no human act yet
   );
 
   const submitCreate = (fd: FormData) => {
@@ -156,6 +169,19 @@ export function PreValidationBoard({
       } catch (e: any) {
         setError(e?.message ?? "Failed to delete the item.");
       }
+    });
+  };
+
+  const confirmAi = (fieldKey: string) => {
+    if (!documentId) return;
+    setError(null);
+    const fd = new FormData();
+    fd.set("document_id", documentId);
+    fd.set("field", fieldKey);
+    startTransition(async () => {
+      const res = await confirmLightingAiField(fd);
+      if (!res.ok) setError(res.error);
+      else router.refresh();
     });
   };
 
@@ -347,6 +373,28 @@ export function PreValidationBoard({
                 )}
                 {f.manuallyModified && (
                   <span className="text-[10px] text-neutral-500">· manually corrected since</span>
+                )}
+                {f.ack === "confirmed" && (
+                  <span className="rounded-full border border-emerald-200 bg-emerald-50 px-1.5 py-0.5 text-[10px] text-emerald-800">reviewed ✓ confirmed</span>
+                )}
+                {f.ack === "corrected" && (
+                  <span className="rounded-full border border-neutral-200 bg-neutral-100 px-1.5 py-0.5 text-[10px] text-neutral-600">manually corrected</span>
+                )}
+                {f.fieldKey && f.ack == null && (
+                  <>
+                    <span className="rounded-full border border-amber-300 bg-amber-50 px-1.5 py-0.5 text-[10px] text-amber-900">needs review</span>
+                    {canReviewAi && (
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={() => confirmAi(f.fieldKey!)}
+                        data-testid={`confirm-ai-${f.fieldKey}`}
+                        className="text-[11px] text-emerald-700 underline decoration-emerald-200 hover:decoration-emerald-500 disabled:opacity-60"
+                      >
+                        confirm
+                      </button>
+                    )}
+                  </>
                 )}
               </li>
             ))}

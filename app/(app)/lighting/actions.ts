@@ -22,6 +22,11 @@ import { ATTACHMENTS_BUCKET } from "@/lib/attachments";
 import { cleanTiltAngle } from "@/lib/industrial-spec";
 import { isFrozenStatus } from "@/lib/task-list-revisions";
 import {
+  applyCorrectionsAfterSave,
+  isReviewableField,
+  normalizeAiReview,
+} from "@/lib/lighting/ai-review";
+import {
   cleanConfidence,
   resolveExtraction,
   type TiltProvenance,
@@ -505,9 +510,34 @@ export async function saveProductLightingSetup(
 
     const { data: existing } = await supabase
       .from("product_lighting_setups")
-      .select("id")
+      .select("id, ai_extracted")
       .eq("document_id", documentId)
       .maybeSingle();
+
+    // Phase 2 (owner spec 2026-07-21) — MANUAL CORRECTIONS are detected here,
+    // server-side, never self-reported: any AI-extracted field whose saved
+    // value now differs is stamped `corrected` (who + when + both values).
+    // The review map rides inside ai_extracted; the incoming blob (client) or
+    // the stored one (server) provides the AI baseline — stored wins for the
+    // existing review history.
+    {
+      const storedAi = ((existing as any)?.ai_extracted ?? null) as any;
+      const incomingAi = (fields.ai_extracted ?? storedAi) as any;
+      if (incomingAi?.fields) {
+        const review = applyCorrectionsAfterSave({
+          aiFields: incomingAi.fields,
+          existingReview: normalizeAiReview(storedAi?.review ?? incomingAi?.review),
+          saved: {
+            lighting_power: fields.lighting_power,
+            operating_hours: fields.operating_hours,
+            lighting_program: fields.lighting_program,
+          },
+          userId: user.id,
+          now: new Date().toISOString(),
+        });
+        fields.ai_extracted = { ...incomingAi, review };
+      }
+    }
 
     if (existing) {
       const { error } = await supabase
@@ -528,6 +558,76 @@ export async function saveProductLightingSetup(
       ok: false,
       error: e?.message ?? "Could not save the lighting setup.",
     };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Phase 2 — explicit "confirm" of an AI-extracted lighting value.
+// ---------------------------------------------------------------------------
+export type ConfirmAiFieldResult = { ok: true } | { ok: false; error: string };
+
+/**
+ * A human confirms one AI-extracted Energy-Study value (power / hours /
+ * program) as reviewed-and-correct. Stored in the ai_extracted.review map;
+ * a later manual correction overwrites it (the newer human act wins).
+ * Refused once any task list of the command is frozen — and the m179 DB
+ * trigger enforces that even if this check were bypassed.
+ */
+export async function confirmLightingAiField(
+  formData: FormData
+): Promise<ConfirmAiFieldResult> {
+  try {
+    await requireCapability("quotation.create");
+    const documentId = str(formData.get("document_id"));
+    const field = str(formData.get("field"));
+    if (!documentId) return { ok: false, error: "Missing production command reference." };
+    if (!isReviewableField(field)) return { ok: false, error: "Unknown AI field." };
+
+    const supabase = createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) return { ok: false, error: "Not authenticated." };
+
+    // Frozen command → the review is part of the validated content.
+    const { data: frozenTl } = await supabase
+      .from("production_task_lists")
+      .select("id, number, status")
+      .eq("quotation_id", documentId);
+    const frozen = (frozenTl ?? []).find((t: any) => isFrozenStatus(t.status));
+    if (frozen) {
+      return {
+        ok: false,
+        error: `Final Validation freeze — ${(frozen as any).number ?? "the task list"} is immutable. Open a controlled revision first.`,
+      };
+    }
+
+    const { data: setup } = await supabase
+      .from("product_lighting_setups")
+      .select("id, ai_extracted")
+      .eq("document_id", documentId)
+      .maybeSingle();
+    const ai = (setup as any)?.ai_extracted;
+    if (!setup || !ai?.fields) {
+      return { ok: false, error: "No AI extraction on this command yet." };
+    }
+
+    const review = normalizeAiReview(ai.review);
+    review[field] = {
+      state: "confirmed",
+      by: user.id,
+      at: new Date().toISOString(),
+    };
+    const { error } = await supabase
+      .from("product_lighting_setups")
+      .update({ ai_extracted: { ...ai, review } })
+      .eq("document_id", documentId);
+    if (error) return { ok: false, error: error.message };
+
+    for (const t of frozenTl ?? []) revalidatePath(`/task-lists/${(t as any).id}`);
+    return { ok: true };
+  } catch (e: any) {
+    return { ok: false, error: e?.message ?? "Could not confirm the value." };
   }
 }
 

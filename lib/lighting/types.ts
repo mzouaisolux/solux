@@ -86,6 +86,13 @@ export type LightingSetupRow = {
  *  (production configurations). Either half may be absent — the user can run
  *  one assist, both, or neither. */
 export type LightingAiProvenance = {
+  /**
+   * Phase-2 review states (owner spec 2026-07-21): per-field human
+   * acknowledgment — `confirmed` (explicit) or `corrected` (detected at save
+   * when the saved value differs from the AI's). Absent = unreviewed.
+   * Shape owned by lib/lighting/ai-review.ts.
+   */
+  review?: Record<string, unknown>;
   fields?: {
     lighting_power: number | null;
     operating_hours: number | null;

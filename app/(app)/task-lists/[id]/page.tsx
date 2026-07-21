@@ -32,6 +32,7 @@ import {
   type TaskListActionItem,
 } from "@/lib/task-list-action-items";
 import { normalizeRiskFlags } from "@/lib/risks";
+import { normalizeAiReview } from "@/lib/lighting/ai-review";
 import { formatTiltAngle } from "@/lib/industrial-spec";
 import {
   normalizeTiltProvenance,
@@ -722,6 +723,7 @@ export default async function TaskListDetailPage({
           ],
         ]
       : [];
+    const aiReview = normalizeAiReview(ai?.review);
     for (const [label, value, key] of aiFieldRows) {
       if (value == null) continue;
       const conf = Number(ai?.confidence?.[key]);
@@ -729,6 +731,8 @@ export default async function TaskListDetailPage({
         label: `${label} (Energy Study)`,
         value: String(value),
         confidence: Number.isFinite(conf) ? Math.max(0, Math.min(1, conf)) : null,
+        fieldKey: key as "lighting_power" | "operating_hours" | "lighting_program",
+        ack: (aiReview as any)[key]?.state ?? null,
       });
     }
   }
@@ -950,6 +954,8 @@ export default async function TaskListDetailPage({
           isTechnical={technical}
           userId={currentUserId ?? null}
           m178Live={m178Live}
+          documentId={task.quotation_id ?? null}
+          canReviewAi={technical || salesCanEdit}
         />
       )}
 
