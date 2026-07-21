@@ -14,6 +14,11 @@
 
 import { extractPdfText } from "../import/pdf-text.ts";
 import { normalizeLightingProgram } from "./validate.ts";
+import {
+  normalizeTiltCandidate,
+  pickTiltCandidate,
+  type TiltCandidate,
+} from "../tilt-provenance.ts";
 import type { LightingExtraction } from "./types.ts";
 
 const DEFAULT_MODEL = "claude-sonnet-4-6";
@@ -74,15 +79,43 @@ const LIGHTING_TOOL = {
           required: ["output", "duration_hours"],
         },
       },
-      tilt_angle: {
-        type: ["number", "null"],
+      tilt_candidates: {
+        type: "array",
         description:
-          "Solar panel TILT ANGLE in degrees, if the study states it (usually labelled 'Tilt Angle', 'Panel Tilt', 'PV Tilt', 'Tilt', 'inclinaison' or equivalent — e.g. 0, 10, 15, 20, 30, 45). Plain number of degrees, no unit. null when not stated.",
-      },
-      tilt_source_page: {
-        type: ["number", "null"],
-        description:
-          "The 1-based PAGE NUMBER of the document where the tilt angle is printed, when you can tell (page breaks, printed page numbers). null when unknown.",
+          "EVERY solar-panel tilt angle the study states, one entry each — do not pre-select a winner, the caller ranks them. Omit values that are not a panel tilt (latitude, azimuth, luminaire/arm tilt, beam angle, roof slope) and values that are only illustrative (plotted on a comparison graph, part of a rejected simulation scenario, or a generic table of 'what if' angles). Empty array when the study states none.",
+        items: {
+          type: "object",
+          properties: {
+            value: {
+              type: "number",
+              description:
+                "The angle in DEGREES as a plain number (15 for '15°', '15 degrees', '15 deg', 'Tilt = 15°'). Never include the unit.",
+            },
+            basis: {
+              type: "string",
+              enum: [
+                "final_recommended",
+                "product_specific",
+                "project_installation",
+                "simulation_input",
+                "general_default",
+              ],
+              description:
+                "What this value IS in the study: 'final_recommended' = the tilt the study finally recommends for this project; 'product_specific' = tied to one product/model; 'project_installation' = the installation tilt for the project site; 'simulation_input' = an input explicitly used for the FINAL retained calculation; 'general_default' = a generic/default/example angle.",
+            },
+            source_text: {
+              type: "string",
+              description:
+                "The sentence or table row it was read from, transcribed VERBATIM from the document (max ~2 lines). This is the evidence a human reviews — never paraphrase it.",
+            },
+            source_page: {
+              type: ["number", "null"],
+              description:
+                "The 1-based page number, taken from the nearest preceding [[page N]] marker in the supplied text. null when the input carries no markers.",
+            },
+          },
+          required: ["value", "basis", "source_text"],
+        },
       },
       confidence: {
         type: "object",
@@ -115,7 +148,16 @@ const SYSTEM_PROMPT = [
   "- NEVER flatten a presence-detection phase to a single fixed level and NEVER drop the detection — it is essential for manufacturing and controller programming.",
   "- A typical profile: full power for the first hours after dusk → a long presence-detection phase (dimmed baseline + boost on detection) → full power for the last hours before dawn.",
   "",
-  "- tilt_angle is the SOLAR PANEL tilt/inclination angle in degrees when the study states it (labels: 'Tilt Angle', 'Panel Tilt', 'PV Tilt', 'Tilt', 'inclinaison', 'angle d'inclinaison'). It drives the pole drawing in production — transcribe it exactly; never confuse it with latitude, azimuth or the luminaire tilt.",
+  "",
+  "SOLAR PANEL TILT ANGLE (drives the pole drawing in production — read the WHOLE study):",
+  "- Scan every page: body text, tables, figure captions, simulation summaries and annexes.",
+  "- Labels, any language: 'Tilt', 'Tilt Angle', 'Panel Tilt', 'PV Tilt', 'Panel Inclination', 'PV Inclination', 'Solar Panel Angle', 'Installation Angle', 'Mounting Angle', 'Fixed Tilt', 'Array Tilt', 'Module Tilt'; 'Inclinaison', 'Inclinaison du panneau', \"Angle d'inclinaison\", 'Angle du panneau solaire', 'Angle de pose'; '倾角', '光伏板倾角', '太阳能板倾角', '组件倾角', '安装角度'.",
+  "- Formats to normalize to a plain number of degrees: '15°', '15 degrees', '15 deg', '15º', 'Tilt = 15°', 'Panel inclination: 15°', 'Recommended tilt angle: 15 degrees', '倾角15°'. A range ('15-20°') is NOT a single value — emit both endpoints as separate candidates so the ambiguity is visible.",
+  "- Emit ONE candidate per stated value in tilt_candidates, each with its basis, its VERBATIM source sentence, and its page from the nearest preceding [[page N]] marker.",
+  "- NEVER emit: latitude, longitude, azimuth/orientation, the luminaire or arm tilt, the beam/optic angle, a roof pitch, or a temperature. These are not panel tilts.",
+  "- NEVER emit a value that only appears as a point on a comparison graph, inside a scenario the study REJECTS, or in a generic 'angles considered' table — those are not the project's tilt.",
+  "- If the study genuinely states no panel tilt, return an empty tilt_candidates array. Do not infer one from latitude or from rules of thumb.",
+  "",
   "- If a field is not clearly present, return null (or an empty program) and lower its confidence.",
   "- Numbers must be plain numbers (no units, no thousands separators, dot as decimal).",
   "Call the emit_lighting tool with your result. Do not write prose.",
@@ -162,7 +204,9 @@ export async function extractLightingFromEnergyStudy(
     input.pdf instanceof Uint8Array ? input.pdf : new Uint8Array(input.pdf);
   let textLayer = "";
   try {
-    const t = await extractPdfText(bytes);
+    // pageMarkers: the tilt must be traceable to a page, and a merged text
+    // layer has no boundaries left to cite (see PdfTextOptions).
+    const t = await extractPdfText(bytes, { pageMarkers: true });
     if (t.hasUsableText) textLayer = t.text;
   } catch {
     // unpdf not installed / unreadable PDF → fall through to the raw-PDF path.
@@ -172,7 +216,10 @@ export async function extractLightingFromEnergyStudy(
   if (textLayer) {
     userContent.push({
       type: "text",
-      text: `Extract the lighting operating parameters from this Energy Study text layer:\n\n"""\n${textLayer}\n"""`,
+      text:
+        `Extract the lighting operating parameters from this Energy Study text layer. ` +
+        `Lines of the form [[page N]] are PAGE MARKERS inserted by the reader, not document content: ` +
+        `use them for source_page, and never transcribe them into a source_text.\n\n"""\n${textLayer}\n"""`,
     });
   } else {
     const b64 = Buffer.from(bytes).toString("base64");
@@ -208,12 +255,24 @@ export async function extractLightingFromEnergyStudy(
     if (Number.isFinite(v)) confidence[k] = Math.max(0, Math.min(1, v));
   }
 
+  // The model FINDS and classifies tilt values; the source-priority ranking is
+  // ours, in deterministic testable code (lib/tilt-provenance.ts) rather than
+  // hidden inside the model's own choice.
+  const tilt_candidates = (Array.isArray(out.tilt_candidates) ? out.tilt_candidates : [])
+    .map((c: unknown) => normalizeTiltCandidate(c))
+    .filter((c: TiltCandidate | null): c is TiltCandidate => c != null);
+  const { picked, ambiguous } = pickTiltCandidate(tilt_candidates);
+
   return {
     lighting_power: nullableNum(out.lighting_power),
     operating_hours: nullableNum(out.operating_hours),
     lighting_program: normalizeLightingProgram(out.lighting_program),
-    tilt_angle: nullableNum(out.tilt_angle),
-    tilt_source_page: nullableNum(out.tilt_source_page),
+    tilt_angle: picked?.value ?? null,
+    tilt_source_page: picked?.source_page ?? null,
+    tilt_source_text: picked?.source_text ?? null,
+    tilt_basis: picked?.basis ?? null,
+    tilt_ambiguous: ambiguous,
+    tilt_candidates,
     confidence,
     model,
   };

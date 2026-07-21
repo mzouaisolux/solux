@@ -14,6 +14,11 @@ import { StickerRequirementsEditor } from "@/components/documents/StickerRequire
 import { RiskFlagsEditor } from "@/components/documents/RiskFlagsEditor";
 import { IndustrialFileEditor } from "@/components/documents/IndustrialFileEditor";
 import {
+  normalizeTiltProvenance,
+  tiltConflictPending,
+  type TiltProvenance,
+} from "@/lib/tilt-provenance";
+import {
   deriveOrderedFamilies,
   normalizeDictionaryItem,
   type DictionaryItem,
@@ -160,6 +165,8 @@ export default async function TaskListDetailPage({
     verified: boolean;
     verifiedAt: string | null;
     spec: unknown;
+    /** m176 — where the AI read the tilt; null when never extracted. */
+    provenance: TiltProvenance | null;
   } | null = null;
   {
     const { data, error } = await supabase
@@ -170,17 +177,27 @@ export default async function TaskListDetailPage({
       .eq("id", params.id)
       .maybeSingle();
     if (!error && data) {
+      // m176 — read separately so a pre-m176 database keeps the whole section
+      // working (it just has no provenance to show).
+      const { data: prov } = await supabase
+        .from("production_task_lists")
+        .select("tilt_ai_provenance")
+        .eq("id", params.id)
+        .maybeSingle();
       industrial = {
         tilt: (data as any).solar_panel_tilt_angle ?? null,
         verified: (data as any).pole_drawing_tilt_verified === true,
         verifiedAt: (data as any).pole_drawing_tilt_verified_at ?? null,
         spec: (data as any).industrial_spec ?? null,
+        provenance: normalizeTiltProvenance((prov as any)?.tilt_ai_provenance),
       };
     }
   }
   // Blocks Release to Production (evaluateRelease) — mirrored in the modal.
   const tiltCheckpointPending =
     industrial != null && industrial.tilt != null && !industrial.verified;
+  // m176 — an unsettled AI/production disagreement blocks the release too.
+  const tiltConflict = tiltConflictPending(industrial?.provenance ?? null);
 
   // m160 — PRODUCT DICTIONARY for the product-aware spare parts. Try the
   // full m160 shape first; pre-migration (42703) fall back to the m012 base
@@ -784,7 +801,8 @@ export default async function TaskListDetailPage({
         (status === "under_validation" || status === "validated") &&
         (missingMappingCount > 0 ||
           requiredEmptyCount > 0 ||
-          tiltCheckpointPending) && (
+          tiltCheckpointPending ||
+          tiltConflict) && (
           <div className="tl-readiness" role="status">
             <span className="tl-readiness-ico" aria-hidden>
               ⚠
@@ -794,7 +812,8 @@ export default async function TaskListDetailPage({
                 const total =
                   requiredEmptyCount +
                   missingMappingCount +
-                  (tiltCheckpointPending ? 1 : 0);
+                  (tiltCheckpointPending ? 1 : 0) +
+                  (tiltConflict ? 1 : 0);
                 return (
                   <div className="tl-readiness-title">
                     Not ready to release — {total} item{total === 1 ? "" : "s"} to
@@ -816,6 +835,14 @@ export default async function TaskListDetailPage({
                     {missingMappingCount === 1 ? "" : "s"} missing — resolve on the
                     lines below or in{" "}
                     <Link href="/factory-mapping">Admin → Factory mapping</Link>
+                  </li>
+                )}
+                {tiltConflict && (
+                  <li>
+                    The Energy Study states{" "}
+                    <b>{industrial?.provenance?.value}°</b> but this task list
+                    says <b>{industrial?.tilt}°</b> —{" "}
+                    <a href="#tl-industrial">resolve the tilt conflict ↓</a>
                   </li>
                 )}
                 {tiltCheckpointPending && (
@@ -1131,6 +1158,7 @@ export default async function TaskListDetailPage({
             initialTilt={industrial.tilt}
             tiltVerified={industrial.verified}
             tiltVerifiedAt={industrial.verifiedAt}
+            tiltProvenance={industrial.provenance}
             initialSpec={industrial.spec}
             editable={salesCanEdit}
             canVerify={technical && canValidateTaskList}

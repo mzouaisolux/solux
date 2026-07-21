@@ -5,8 +5,14 @@ import { useRouter } from "next/navigation";
 import {
   updateIndustrialFile,
   setPoleDrawingTiltVerified,
+  resolveTiltConflict,
 } from "@/app/(app)/task-lists/[id]/actions";
 import { aiFindTiltAction } from "@/app/(app)/lighting/actions";
+import {
+  TILT_BASIS_LABELS,
+  tiltConflictPending,
+  type TiltProvenance,
+} from "@/lib/tilt-provenance";
 import { InlineLogoUpload } from "@/components/attachments/InlineLogoUpload";
 import {
   TILT_ANGLE_PRESETS,
@@ -42,6 +48,7 @@ export function IndustrialFileEditor({
   initialTilt,
   tiltVerified,
   tiltVerifiedAt,
+  tiltProvenance,
   initialSpec,
   editable,
   canVerify,
@@ -54,6 +61,8 @@ export function IndustrialFileEditor({
   initialTilt: number | null;
   tiltVerified: boolean;
   tiltVerifiedAt: string | null;
+  /** m176 — where the AI read the tilt, and whether it is disputed. */
+  tiltProvenance: TiltProvenance | null;
   initialSpec: unknown;
   /** Sales-editable window (same rule as the header). */
   editable: boolean;
@@ -81,6 +90,8 @@ export function IndustrialFileEditor({
   const [saving, startTransition] = useTransition();
   const [verifying, startVerify] = useTransition();
   const [aiFinding, startAiFind] = useTransition();
+  const [resolving, startResolving] = useTransition();
+  const conflict = tiltConflictPending(tiltProvenance);
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [aiResult, setAiResult] = useState<
@@ -118,17 +129,44 @@ export function IndustrialFileEditor({
         });
         return;
       }
-      setTiltFromNumber(res.tilt);
       const bits = [
-        `✓ AI found: ${res.tilt}°`,
+        `${res.applied ? "✓ AI found" : "AI found"}: ${res.tilt}°`,
         res.sourceName ? `Source: ${res.sourceName}${res.sourcePage ? ` — page ${res.sourcePage}` : ""}` : null,
         res.confidence != null ? `Confidence: ${Math.round(res.confidence * 100)}%` : null,
       ].filter(Boolean);
-      setAiResult({
-        kind: "found",
-        text: `${bits.join(" · ")} — applied to the task list (override anytime).`,
-      });
+      if (res.applied) {
+        setTiltFromNumber(res.tilt);
+        setAiResult({
+          kind: "found",
+          text: `${bits.join(" · ")} — applied to the task list (override anytime).`,
+        });
+      } else {
+        // m176 — ambiguous study: we refuse to guess. The value is on file as a
+        // pending conflict; the banner below is where it gets settled.
+        setAiResult({
+          kind: "empty",
+          text: `${bits.join(" · ")} — but the study states several tilt angles, so nothing was changed. Review the conflict below.`,
+        });
+      }
       router.refresh();
+    });
+  };
+
+  const resolveConflict = (choice: "accept_ai" | "keep_manual") => {
+    setError(null);
+    const fd = new FormData();
+    fd.set("id", taskListId);
+    fd.set("choice", choice);
+    startResolving(async () => {
+      try {
+        await resolveTiltConflict(fd);
+        if (choice === "accept_ai" && tiltProvenance) {
+          setTiltFromNumber(tiltProvenance.value);
+        }
+        router.refresh();
+      } catch (e: any) {
+        setError(e?.message ?? "Failed to resolve the tilt conflict");
+      }
     });
   };
 
@@ -285,6 +323,84 @@ export function IndustrialFileEditor({
           </div>
         )}
 
+        {/* m176 — CONFLICT: the Energy Study and this task list disagree. We
+            never overwrite a production parameter silently, so the stored value
+            stands until someone chooses. Blocks the drawing checkpoint and the
+            release while pending. */}
+        {conflict && tiltProvenance && (
+          <div
+            data-testid="tilt-conflict"
+            className="mt-2 rounded-md border border-amber-400 bg-amber-50 px-3 py-2.5"
+          >
+            <div className="text-xs font-semibold text-amber-900">
+              {tiltProvenance.ambiguous
+                ? "The Energy Study states several tilt angles"
+                : `The Energy Study says ${tiltProvenance.value}°, this task list says ${
+                    tiltNumber != null ? `${tiltNumber}°` : "nothing"
+                  }`}
+            </div>
+            <p className="mt-1 text-xs text-amber-900/80">
+              {tiltProvenance.ambiguous
+                ? "Nothing was changed — confirm which angle applies before the pole drawing is signed off."
+                : "Nothing was changed. Pick the angle production should use — the pole drawing is verified against it."}
+            </p>
+            <TiltEvidence prov={tiltProvenance} />
+            {tiltProvenance.candidates.length > 1 && (
+              <ul className="mt-1.5 space-y-0.5 text-[11px] text-amber-900/80">
+                {tiltProvenance.candidates.map((c, i) => (
+                  <li key={`${c.value}-${i}`}>
+                    <b className="tabular-nums">{c.value}°</b>
+                    {c.basis ? ` — ${TILT_BASIS_LABELS[c.basis]}` : ""}
+                    {c.source_page ? ` (p. ${c.source_page})` : ""}
+                  </li>
+                ))}
+              </ul>
+            )}
+            {editable && (
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => resolveConflict("accept_ai")}
+                  disabled={resolving}
+                  data-testid="tilt-accept-ai"
+                  className="rounded-md border border-solux bg-solux px-3 py-1.5 text-xs font-medium text-white hover:bg-solux/90 disabled:opacity-60"
+                >
+                  Use {tiltProvenance.value}° from the study
+                </button>
+                <button
+                  type="button"
+                  onClick={() => resolveConflict("keep_manual")}
+                  disabled={resolving}
+                  data-testid="tilt-keep-manual"
+                  className="rounded-md border border-neutral-300 bg-white px-3 py-1.5 text-xs font-medium text-neutral-700 hover:bg-neutral-50 disabled:opacity-60"
+                >
+                  Keep {tiltNumber != null ? `${tiltNumber}°` : "the current value"}
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* m176 — settled provenance: where this number came from. */}
+        {!conflict && tiltProvenance && (
+          <div
+            data-testid="tilt-provenance"
+            className="mt-2 rounded-md border border-neutral-200 bg-neutral-50 px-3 py-2"
+          >
+            <div className="text-xs font-medium text-neutral-700">
+              {tiltProvenance.resolution === "kept_manual"
+                ? `Energy Study stated ${tiltProvenance.value}° — not retained`
+                : `AI read ${tiltProvenance.value}° from the Energy Study`}
+              {tiltProvenance.manually_modified_after && (
+                <span className="ml-1 font-normal text-neutral-500">
+                  · edited manually since
+                </span>
+              )}
+            </div>
+            <TiltEvidence prov={tiltProvenance} />
+          </div>
+        )}
+
         <div className="mt-2 flex flex-wrap items-center gap-1.5">
           {TILT_ANGLE_PRESETS.map((a) => {
             const active = tiltChoice === String(a);
@@ -347,7 +463,9 @@ export function IndustrialFileEditor({
             <input
               type="checkbox"
               checked={tiltVerified}
-              disabled={!canVerify || verifying || tiltNumber == null}
+              // m176 — a disputed angle has nothing settled to verify against
+              // (the server refuses too; this keeps the UI honest about why).
+              disabled={!canVerify || verifying || tiltNumber == null || conflict}
               onChange={(e) => toggleVerified(e.target.checked)}
               className="h-4 w-4 mt-0.5 rounded border-neutral-300 shrink-0"
               data-testid="tilt-checkpoint"
@@ -358,9 +476,11 @@ export function IndustrialFileEditor({
               {tiltNumber != null ? ` (${tiltNumber}°)` : ""}.
               {tiltNumber == null
                 ? " Set the tilt angle first."
-                : tiltVerified
-                  ? ` Verified${tiltVerifiedAt ? ` on ${tiltVerifiedAt.slice(0, 10)}` : ""}.`
-                  : " Pending — blocks Release to Production."}
+                : conflict
+                  ? " Resolve the tilt conflict above first."
+                  : tiltVerified
+                    ? ` Verified${tiltVerifiedAt ? ` on ${tiltVerifiedAt.slice(0, 10)}` : ""}.`
+                    : " Pending — blocks Release to Production."}
               {!canVerify && tiltNumber != null && (
                 <span className="text-neutral-400"> (Task List Manager confirms this.)</span>
               )}
@@ -679,6 +799,38 @@ export function IndustrialFileEditor({
         </div>
       )}
     </section>
+  );
+}
+
+/**
+ * m176 — the audit trail for an AI-read tilt: the document, the page, the
+ * sentence it was read from, the model's confidence and when it ran. This is
+ * what makes the number answerable ("where does this 15° come from?") instead
+ * of an unattributable figure in a field.
+ */
+function TiltEvidence({ prov }: { prov: TiltProvenance }) {
+  const meta = [
+    prov.source_document,
+    prov.source_page != null ? `page ${prov.source_page}` : null,
+    prov.basis ? TILT_BASIS_LABELS[prov.basis] : null,
+    prov.confidence != null ? `confidence ${Math.round(prov.confidence * 100)}%` : null,
+    // The epoch stands for "extracted before this was recorded" (legacy blob).
+    prov.extracted_at && !prov.extracted_at.startsWith("1970")
+      ? prov.extracted_at.slice(0, 10)
+      : null,
+  ].filter(Boolean);
+
+  return (
+    <>
+      {prov.source_text && (
+        <blockquote className="mt-1.5 border-l-2 border-neutral-300 pl-2 text-[11px] italic text-neutral-600">
+          “{prov.source_text}”
+        </blockquote>
+      )}
+      {meta.length > 0 && (
+        <div className="mt-1 text-[11px] text-neutral-500">{meta.join(" · ")}</div>
+      )}
+    </>
   );
 }
 

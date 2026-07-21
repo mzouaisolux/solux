@@ -7,6 +7,8 @@
  * installation docs) reads the same structured schedule — never free text.
  */
 
+import type { TiltCandidate, TiltPriorityBasis } from "../tilt-provenance.ts";
+
 /** One dimming period in the lighting program: hold `output`% for `duration_hours`. */
 export type LightingProgramPeriod = {
   /** Output level as a percentage 0..100 held during this period (the baseline). */
@@ -118,6 +120,17 @@ export type LightingExtraction = {
   tilt_angle: number | null;
   /** m160 — page of the study where the tilt was read (1-based), when known. */
   tilt_source_page: number | null;
+  /** m176 — the verbatim sentence the winning value was read from. */
+  tilt_source_text: string | null;
+  /** m176 — what that value IS in the study (source-priority rank). */
+  tilt_basis: TiltPriorityBasis | null;
+  /**
+   * m176 — the study states several equally-authoritative values that
+   * disagree: the caller must NOT auto-apply, it raises a conflict instead.
+   */
+  tilt_ambiguous: boolean;
+  /** m176 — every tilt the study stated, kept so a reviewer can pick another. */
+  tilt_candidates: TiltCandidate[];
   confidence: Record<string, number>;
   model: string;
 };

@@ -32,6 +32,10 @@ import {
   normalizeIndustrialSpec,
   packagingRequiresBranding,
 } from "@/lib/industrial-spec";
+import {
+  normalizeTiltProvenance,
+  tiltConflictPending,
+} from "@/lib/tilt-provenance";
 // NOTE: `requireTaskListManagerOrAdmin()` is kept ONLY for the two
 // content-editing actions (line-level technical/factory overrides)
 // that aren't yet covered by the 19 capabilities catalog. Every
@@ -88,6 +92,26 @@ async function tiltCheckpointPendingFor(
     (data as any).solar_panel_tilt_angle != null &&
     (data as any).pole_drawing_tilt_verified !== true
   );
+}
+
+/**
+ * m176 — does this task list carry an unresolved AI/production tilt
+ * disagreement? The Energy Study states one angle, the task list holds
+ * another, and nobody has settled it. Production must not be released
+ * against a tilt under dispute, so this blocks the release exactly like the
+ * pending drawing checkpoint. Defensive: pre-m176 (column absent) → false.
+ */
+async function tiltConflictPendingFor(
+  supabase: ReturnType<typeof createClient>,
+  id: string
+): Promise<boolean> {
+  const { data, error } = await supabase
+    .from("production_task_lists")
+    .select("tilt_ai_provenance")
+    .eq("id", id)
+    .maybeSingle();
+  if (error || !data) return false;
+  return tiltConflictPending(normalizeTiltProvenance((data as any).tilt_ai_provenance));
 }
 
 /**
@@ -260,6 +284,16 @@ export async function updateIndustrialFile(formData: FormData) {
   const oldTilt = (pre as any)?.solar_panel_tilt_angle ?? null;
   const oldSpec = normalizeIndustrialSpec((pre as any)?.industrial_spec);
 
+  // m176 — the AI provenance is read SEPARATELY and defensively: on a pre-m176
+  // database this column is absent, and folding it into the select above would
+  // surface a misleading "apply m159" error.
+  const { data: provRow } = await supabase
+    .from("production_task_lists")
+    .select("tilt_ai_provenance")
+    .eq("id", id)
+    .maybeSingle();
+  const oldProv = normalizeTiltProvenance((provRow as any)?.tilt_ai_provenance);
+
   // Tilt angle: empty clears it (legacy lists), anything else must be 0–90°.
   const tiltRaw = String(formData.get("solar_panel_tilt_angle") ?? "").trim();
   const newTilt = tiltRaw === "" ? null : cleanTiltAngle(tiltRaw);
@@ -288,10 +322,40 @@ export async function updateIndustrialFile(formData: FormData) {
     patch.pole_drawing_tilt_verified_at = null;
   }
 
-  const { error } = await supabase
+  // m176 — a human typed a tilt: the AI record is no longer the last word.
+  // Mark it superseded, and settle any pending conflict by what they chose
+  // (the AI's value = they accepted it; anything else = they kept their own).
+  if (tiltChanged && oldProv) {
+    patch.tilt_ai_provenance = {
+      ...oldProv,
+      manually_modified_after: true,
+      resolution:
+        oldProv.resolution === "pending"
+          ? newTilt != null && newTilt === oldProv.value
+            ? "accepted_ai"
+            : "kept_manual"
+          : oldProv.resolution,
+      resolved_by:
+        oldProv.resolution === "pending" ? userId ?? null : oldProv.resolved_by,
+      resolved_at:
+        oldProv.resolution === "pending"
+          ? new Date().toISOString()
+          : oldProv.resolved_at,
+    };
+  }
+
+  let { error } = await supabase
     .from("production_task_lists")
     .update(patch)
     .eq("id", id);
+  if (error && /tilt_ai_provenance/i.test(error.message ?? "")) {
+    // Pre-m176 — save the industrial file without the provenance update.
+    delete patch.tilt_ai_provenance;
+    ({ error } = await supabase
+      .from("production_task_lists")
+      .update(patch)
+      .eq("id", id));
+  }
   if (error) {
     if (/industrial_spec|solar_panel_tilt_angle|pole_drawing_tilt/.test(error.message ?? "")) {
       throw new Error(
@@ -357,6 +421,110 @@ export async function updateIndustrialFile(formData: FormData) {
 }
 
 /**
+ * m176 — settle the AI/production tilt disagreement raised by an Energy-Study
+ * extraction. The user either ACCEPTS the study's angle (it becomes the
+ * production value, which resets the pole-drawing checkpoint like any tilt
+ * change) or KEEPS the current one (the study's reading stays on file as
+ * evidence of what was considered and rejected).
+ *
+ * Same edit gate as the manual tilt field — sales locked post-submission.
+ */
+export async function resolveTiltConflict(formData: FormData) {
+  const id = String(formData.get("id"));
+  if (!id) throw new Error("Missing task list id");
+  const choice = String(formData.get("choice") ?? "");
+  if (choice !== "accept_ai" && choice !== "keep_manual") {
+    throw new Error("Invalid resolution choice.");
+  }
+
+  const { role, userId } = await getCurrentUserRole();
+  const supabase = createClient();
+
+  const { data: current } = await supabase
+    .from("production_task_lists")
+    .select("status, number")
+    .eq("id", id)
+    .maybeSingle();
+  if (!current) throw new Error("Task list not found");
+  if (
+    !isTechnicalRole(role) &&
+    TASK_LIST_LOCKED_FOR_SALES.includes(current.status as ProductionTaskListStatus)
+  ) {
+    throw new Error(
+      "This task list is in production validation and can no longer be edited by sales."
+    );
+  }
+
+  const { data: row, error: readErr } = await supabase
+    .from("production_task_lists")
+    .select("solar_panel_tilt_angle, tilt_ai_provenance")
+    .eq("id", id)
+    .maybeSingle();
+  if (readErr) {
+    throw new Error(
+      "Tilt provenance column missing — apply migration m176 (176_tilt_ai_provenance.sql) in Supabase."
+    );
+  }
+  const prov = normalizeTiltProvenance((row as any)?.tilt_ai_provenance);
+  if (!prov || prov.resolution !== "pending") {
+    // Already settled by someone else — treat as a no-op rather than an error
+    // so two reviewers racing on the same banner don't see a failure.
+    revalidatePath(`/task-lists/${id}`);
+    return;
+  }
+
+  const oldTilt = cleanTiltAngle((row as any)?.solar_panel_tilt_angle);
+  const accepted = choice === "accept_ai";
+  const patch: Record<string, any> = {
+    tilt_ai_provenance: {
+      ...prov,
+      resolution: accepted ? "accepted_ai" : "kept_manual",
+      resolved_by: userId ?? null,
+      resolved_at: new Date().toISOString(),
+    },
+  };
+  if (accepted) {
+    patch.solar_panel_tilt_angle = prov.value;
+    if ((oldTilt ?? null) !== prov.value) {
+      patch.pole_drawing_tilt_verified = false;
+      patch.pole_drawing_tilt_verified_by = null;
+      patch.pole_drawing_tilt_verified_at = null;
+    }
+  }
+
+  const { error } = await supabase
+    .from("production_task_lists")
+    .update(patch)
+    .eq("id", id);
+  if (error) throw new Error(error.message);
+
+  await emitEvent({
+    entity_type: "task_list",
+    entity_id: id,
+    event_type: "tl.header_changed",
+    message: accepted
+      ? `Tilt conflict resolved on ${current.number ?? "task list"} — Energy Study value ${prov.value}° accepted${
+          oldTilt != null ? ` (was ${oldTilt}°)` : ""
+        }`
+      : `Tilt conflict resolved on ${current.number ?? "task list"} — kept ${
+          oldTilt != null ? `${oldTilt}°` : "the current value"
+        }, Energy Study stated ${prov.value}°`,
+    payload: {
+      section: "tilt_conflict",
+      number: current.number,
+      choice,
+      ai_value: prov.value,
+      kept_value: accepted ? prov.value : oldTilt,
+      source_document: prov.source_document,
+      confidence: prov.confidence,
+    },
+    bestEffort: true,
+  });
+
+  revalidatePath(`/task-lists/${id}`);
+}
+
+/**
  * m159 — the TLM confirms (or clears) the pole-drawing ↔ tilt-angle
  * checkpoint: "the pole drawing matches the required panel angle". Gated on
  * task_list.validate (it is a production-release checkpoint, not a sales
@@ -377,6 +545,15 @@ export async function setPoleDrawingTiltVerified(formData: FormData) {
     .eq("id", id)
     .maybeSingle();
   if (!current) throw new Error("Task list not found");
+
+  // m176 — never sign a drawing off against a disputed angle. The Energy Study
+  // and the task list disagree; settle that first (Accept / Keep), then verify.
+  if (verified && (await tiltConflictPendingFor(supabase, id))) {
+    throw new Error(
+      "The Energy Study states a different tilt angle than this task list. " +
+        "Resolve the tilt conflict in the Industrial production file before verifying the pole drawing."
+    );
+  }
 
   const { error } = await supabase
     .from("production_task_lists")
@@ -976,7 +1153,13 @@ export async function validateTaskList(formData: FormData) {
     .eq("id", id)
     .maybeSingle();
   if (!row) throw new Error("Task list not found");
-  const [missingCount, hasOpenRevision, lineCount, tiltCheckpointPending] =
+  const [
+    missingCount,
+    hasOpenRevision,
+    lineCount,
+    tiltCheckpointPending,
+    tiltConflictPendingNow,
+  ] =
     await Promise.all([
       countMissingTaskListMappings(id),
       taskListHasOpenRevision(id),
@@ -986,6 +1169,7 @@ export async function validateTaskList(formData: FormData) {
         .eq("task_list_id", id)
         .then((r) => r.count ?? 0),
       tiltCheckpointPendingFor(supabase, id), // m159
+      tiltConflictPendingFor(supabase, id), // m176
     ]);
   const verdict = evaluateRelease({
     statusAllowed: row.status === "under_validation",
@@ -993,6 +1177,7 @@ export async function validateTaskList(formData: FormData) {
     hasOpenRevision,
     lineCount,
     tiltCheckpointPending,
+    tiltConflictPending: tiltConflictPendingNow,
   });
   if (!verdict.ok) {
     throw new Error(verdict.reason ?? "Cannot release to production.");
@@ -1036,7 +1221,13 @@ export async function markProductionReady(formData: FormData) {
     .eq("id", id)
     .maybeSingle();
   if (!row) throw new Error("Task list not found");
-  const [missingCount, hasOpenRevision, lineCount, tiltCheckpointPending] =
+  const [
+    missingCount,
+    hasOpenRevision,
+    lineCount,
+    tiltCheckpointPending,
+    tiltConflictPendingNow,
+  ] =
     await Promise.all([
       countMissingTaskListMappings(id),
       taskListHasOpenRevision(id),
@@ -1046,6 +1237,7 @@ export async function markProductionReady(formData: FormData) {
         .eq("task_list_id", id)
         .then((r) => r.count ?? 0),
       tiltCheckpointPendingFor(supabase, id), // m159
+      tiltConflictPendingFor(supabase, id), // m176
     ]);
   const verdict = evaluateRelease({
     statusAllowed:
@@ -1054,6 +1246,7 @@ export async function markProductionReady(formData: FormData) {
     hasOpenRevision,
     lineCount,
     tiltCheckpointPending,
+    tiltConflictPending: tiltConflictPendingNow,
   });
   if (!verdict.ok) {
     throw new Error(verdict.reason ?? "Cannot release to production.");

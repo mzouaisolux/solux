@@ -20,21 +20,122 @@ import {
 } from "@/lib/types";
 import { ATTACHMENTS_BUCKET } from "@/lib/attachments";
 import { cleanTiltAngle } from "@/lib/industrial-spec";
+import {
+  cleanConfidence,
+  resolveExtraction,
+  type TiltProvenance,
+} from "@/lib/tilt-provenance";
 import { extractLightingFromEnergyStudy } from "@/lib/lighting/extract-energy-study";
 import { extractDialux } from "@/lib/lighting/extract-dialux";
 import { normalizeLightingProgram } from "@/lib/lighting/validate";
 import type { LightingExtraction, DialuxExtraction } from "@/lib/lighting/types";
 
+/**
+ * m176 — what happened to the tilt the study stated, once measured against the
+ * value already in production.
+ *
+ *   none      — the study states no panel tilt.
+ *   applied   — the field was empty (or already equal): the AI value stands.
+ *   conflict  — it disagrees with the stored value, or the study is ambiguous.
+ *               Production is UNCHANGED and a human must settle it; the
+ *               pole-drawing checkpoint stays blocked meanwhile.
+ *   unavailable — pre-m176 database, nothing was recorded.
+ */
+export type TiltOutcome =
+  | { kind: "none" }
+  | { kind: "applied"; tilt: number }
+  | { kind: "conflict"; tilt: number; stored: number | null; ambiguous: boolean }
+  | { kind: "unavailable" };
+
 export type ExtractEnergyStudyResult =
   | {
       ok: true;
       extraction: LightingExtraction;
-      /** m159 — true when the detected tilt angle was written onto the task
-       *  list (its field was still empty). False = field already had a value
-       *  (manual override wins) or the migration isn't applied yet. */
-      tiltApplied: boolean;
+      /** m176 — replaces the m159 `tiltApplied` boolean, which could not
+       *  express "the study disagrees with production". */
+      tilt: TiltOutcome;
     }
   | { ok: false; error: string };
+
+/**
+ * Record a tilt extraction against ONE task list: always persist the
+ * provenance, write the value ONLY when there is nothing to contradict.
+ *
+ * This is the m159 bug's fix. The old auto-fill wrote
+ * `where solar_panel_tilt_angle is null`, but a task list is seeded with the
+ * SR's mandatory tilt at creation — so the guard never matched and every
+ * extracted value was silently dropped. We now compare explicitly and surface
+ * the disagreement instead of discarding it.
+ *
+ * Never throws: a pre-m176 database (no provenance column) degrades to the
+ * m159 behaviour — fill-if-empty, no record.
+ */
+async function recordTiltExtraction(
+  supabase: any,
+  taskList: { id: string; solar_panel_tilt_angle: number | null },
+  extraction: LightingExtraction,
+  sourceName: string | null
+): Promise<TiltOutcome> {
+  const value = cleanTiltAngle(extraction.tilt_angle);
+  if (value == null) return { kind: "none" };
+
+  const stored = cleanTiltAngle(taskList.solar_panel_tilt_angle);
+  const { resolution, writeValue } = resolveExtraction(
+    value,
+    stored,
+    extraction.tilt_ambiguous
+  );
+
+  const provenance: TiltProvenance = {
+    value,
+    unit: "degrees",
+    basis: extraction.tilt_basis,
+    source_document: sourceName,
+    source_page: extraction.tilt_source_page,
+    source_text: extraction.tilt_source_text,
+    confidence: cleanConfidence(extraction.confidence?.tilt_angle),
+    model: extraction.model,
+    extracted_at: new Date().toISOString(),
+    ambiguous: extraction.tilt_ambiguous,
+    candidates: extraction.tilt_candidates,
+    resolution,
+    resolved_by: null,
+    resolved_at: null,
+    manually_modified_after: false,
+  };
+
+  const patch: Record<string, any> = { tilt_ai_provenance: provenance };
+  if (writeValue != null) {
+    patch.solar_panel_tilt_angle = writeValue;
+    // A new production value invalidates the drawing sign-off, exactly like a
+    // manual edit (same contract as updateIndustrialFile).
+    if ((stored ?? null) !== writeValue) {
+      patch.pole_drawing_tilt_verified = false;
+      patch.pole_drawing_tilt_verified_by = null;
+      patch.pole_drawing_tilt_verified_at = null;
+    }
+  }
+
+  const { error } = await supabase
+    .from("production_task_lists")
+    .update(patch)
+    .eq("id", taskList.id);
+
+  if (error) {
+    if (!/tilt_ai_provenance/i.test(error.message ?? "")) return { kind: "unavailable" };
+    // Pre-m176 — keep the m159 behaviour (fill an empty field, no provenance).
+    if (writeValue == null) return { kind: "unavailable" };
+    const { error: legacyErr } = await supabase
+      .from("production_task_lists")
+      .update({ solar_panel_tilt_angle: writeValue })
+      .eq("id", taskList.id);
+    return legacyErr ? { kind: "unavailable" } : { kind: "applied", tilt: writeValue };
+  }
+
+  return resolution === "pending"
+    ? { kind: "conflict", tilt: value, stored, ambiguous: extraction.tilt_ambiguous }
+    : { kind: "applied", tilt: writeValue ?? value };
+}
 
 /**
  * Read the uploaded Energy Study PDF from Storage and extract lighting params.
@@ -68,26 +169,30 @@ export async function extractEnergyStudyAction(
     const bytes = new Uint8Array(await data.arrayBuffer());
     const extraction = await extractLightingFromEnergyStudy({ pdf: bytes });
 
-    // m159 — auto-populate the task list's Solar Panel Tilt Angle when the
-    // Energy Study states it. NEVER overwrites: only fills a still-empty
-    // field (manual values always win — the user can override afterwards).
-    // Defensive: pre-m159 the column doesn't exist → silently skipped.
-    let tiltApplied = false;
+    // m176 — record the Solar Panel Tilt Angle the Energy Study states against
+    // the task list(s) of this command. Replaces the m159 fill-if-empty write,
+    // which never fired (the column is seeded from the SR at creation) and so
+    // discarded every extracted value. We now keep production untouched on a
+    // disagreement and raise a conflict a human settles.
+    let tilt: TiltOutcome = { kind: "none" };
     const documentId = String(formData.get("document_id") ?? "").trim();
     if (documentId && extraction.tilt_angle != null) {
-      const tilt = extraction.tilt_angle;
-      if (tilt >= 0 && tilt <= 90) {
-        const { data: updated, error: tiltErr } = await supabase
-          .from("production_task_lists")
-          .update({ solar_panel_tilt_angle: tilt })
-          .eq("quotation_id", documentId)
-          .is("solar_panel_tilt_angle", null)
-          .select("id");
-        tiltApplied = !tiltErr && (updated?.length ?? 0) > 0;
+      const { data: lists } = await supabase
+        .from("production_task_lists")
+        .select("id, solar_panel_tilt_angle")
+        .eq("quotation_id", documentId);
+      const sourceName =
+        String(formData.get("source_name") ?? "").trim() || basename(path);
+      for (const tl of (lists ?? []) as any[]) {
+        const outcome = await recordTiltExtraction(supabase, tl, extraction, sourceName);
+        // Surface the most actionable outcome across the (normally single)
+        // task lists — a conflict must never be masked by a sibling's success.
+        if (outcome.kind === "conflict" || tilt.kind === "none") tilt = outcome;
+        if (outcome.kind === "conflict") revalidatePath(`/task-lists/${tl.id}`);
       }
     }
 
-    return { ok: true, extraction, tiltApplied };
+    return { ok: true, extraction, tilt };
   } catch (e: any) {
     return {
       ok: false,
@@ -166,11 +271,17 @@ export type AiFindTiltResult =
       ok: true;
       found: true;
       tilt: number;
+      /** m176 — false when the study was ambiguous: the value was recorded as a
+       *  pending conflict rather than written to production. */
+      applied: boolean;
+      ambiguous: boolean;
       /** 0..1 model confidence for the tilt field, when reported. */
       confidence: number | null;
       sourceName: string | null;
       /** 1-based page in the study, when the model could tell. */
       sourcePage: number | null;
+      /** m176 — the verbatim sentence the value was read from. */
+      sourceText: string | null;
     }
   | { ok: true; found: false; sourceName: string | null }
   | { ok: false; error: string };
@@ -200,7 +311,7 @@ export async function aiFindTiltAction(
     if (!tl) return { ok: false, error: "Task list not found." };
 
     // Same edit window as the manual field (sales locked post-submission).
-    const { role } = await getCurrentUserRole();
+    const { role, userId } = await getCurrentUserRole();
     if (
       !isTechnicalRole(role) &&
       TASK_LIST_LOCKED_FOR_SALES.includes(tl.status as ProductionTaskListStatus)
@@ -239,8 +350,6 @@ export async function aiFindTiltAction(
     const tilt = cleanTiltAngle(extraction.tilt_angle);
     if (tilt == null) return { ok: true, found: false, sourceName };
 
-    // Read-modify-write: reset the pole-drawing checkpoint ONLY when the
-    // value actually changes (same contract as updateIndustrialFile).
     const { data: pre, error: preErr } = await supabase
       .from("production_task_lists")
       .select("solar_panel_tilt_angle")
@@ -252,31 +361,73 @@ export async function aiFindTiltAction(
         error: "Tilt column missing — apply migration m159 (159_task_list_industrial_file.sql) first.",
       };
     }
-    const oldTilt = (pre as any)?.solar_panel_tilt_angle ?? null;
-    const patch: Record<string, any> = { solar_panel_tilt_angle: tilt };
-    if ((oldTilt ?? null) !== tilt) {
-      patch.pole_drawing_tilt_verified = false;
-      patch.pole_drawing_tilt_verified_by = null;
-      patch.pole_drawing_tilt_verified_at = null;
+    const oldTilt = cleanTiltAngle((pre as any)?.solar_panel_tilt_angle);
+
+    // This path is an EXPLICIT human click, not a background auto-fill: the
+    // user asked for the study's value and sees exactly what changed, so the
+    // found value replaces the current one (still overridable) and the
+    // provenance is recorded as already accepted.
+    //
+    // The one exception is AMBIGUITY — when the study states several equally
+    // authoritative values the model cannot choose between, we refuse to guess
+    // (owner spec) and raise the same pending conflict as the auto path.
+    const accepted = !extraction.tilt_ambiguous;
+    const now = new Date().toISOString();
+    const provenance: TiltProvenance = {
+      value: tilt,
+      unit: "degrees",
+      basis: extraction.tilt_basis,
+      source_document: sourceName,
+      source_page: extraction.tilt_source_page,
+      source_text: extraction.tilt_source_text,
+      confidence: cleanConfidence(extraction.confidence?.tilt_angle),
+      model: extraction.model,
+      extracted_at: now,
+      ambiguous: extraction.tilt_ambiguous,
+      candidates: extraction.tilt_candidates,
+      resolution: accepted ? "accepted_ai" : "pending",
+      resolved_by: accepted ? userId : null,
+      resolved_at: accepted ? now : null,
+      manually_modified_after: false,
+    };
+
+    const patch: Record<string, any> = { tilt_ai_provenance: provenance };
+    if (accepted) {
+      patch.solar_panel_tilt_angle = tilt;
+      // Read-modify-write: reset the pole-drawing checkpoint ONLY when the
+      // value actually changes (same contract as updateIndustrialFile).
+      if ((oldTilt ?? null) !== tilt) {
+        patch.pole_drawing_tilt_verified = false;
+        patch.pole_drawing_tilt_verified_by = null;
+        patch.pole_drawing_tilt_verified_at = null;
+      }
     }
-    const { error: upErr } = await supabase
+
+    let { error: upErr } = await supabase
       .from("production_task_lists")
       .update(patch)
       .eq("id", taskListId);
+    if (upErr && /tilt_ai_provenance/i.test(upErr.message ?? "")) {
+      // Pre-m176 — write the value alone, exactly as m160 did.
+      delete patch.tilt_ai_provenance;
+      ({ error: upErr } = await supabase
+        .from("production_task_lists")
+        .update(patch)
+        .eq("id", taskListId));
+    }
     if (upErr) return { ok: false, error: upErr.message };
 
     revalidatePath(`/task-lists/${taskListId}`);
-    const conf = extraction.confidence?.tilt_angle;
     return {
       ok: true,
       found: true,
       tilt,
-      confidence: Number.isFinite(conf) ? Math.max(0, Math.min(1, conf)) : null,
+      applied: accepted,
+      ambiguous: extraction.tilt_ambiguous,
+      confidence: cleanConfidence(extraction.confidence?.tilt_angle),
       sourceName,
-      sourcePage:
-        extraction.tilt_source_page != null && extraction.tilt_source_page >= 1
-          ? Math.round(extraction.tilt_source_page)
-          : null,
+      sourcePage: extraction.tilt_source_page,
+      sourceText: extraction.tilt_source_text,
     };
   } catch (e: any) {
     return { ok: false, error: e?.message ?? "AI Find failed — enter the tilt angle manually." };
@@ -371,6 +522,13 @@ export async function saveProductLightingSetup(
 // --- local FormData coercers ----------------------------------------------
 function str(v: FormDataEntryValue | null): string {
   return String(v ?? "").trim();
+}
+
+/** Last path segment of a Storage key — the fallback "source document" name
+ *  when the caller didn't pass the study's display name. */
+function basename(p: string): string | null {
+  const seg = p.split("/").filter(Boolean).pop();
+  return seg && seg.trim() !== "" ? seg : null;
 }
 function num(v: FormDataEntryValue | null): number | null {
   const s = str(v);
