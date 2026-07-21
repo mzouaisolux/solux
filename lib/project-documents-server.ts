@@ -35,6 +35,7 @@ import { hasCapability } from "@/lib/permissions";
 import { PROJECT_FILE_CATEGORY_LABEL } from "@/lib/types";
 import {
   fileSizeLabel,
+  filePreviewFor,
   folderForAttachment,
   folderForOrderDoc,
   folderForRequestFile,
@@ -313,6 +314,36 @@ export async function loadProjectRepositories(
     });
   }
 
+  // ---- Preview support: ONE batched line-count for every commercial doc. --
+  // Lets the list show "5 products" per version so V1/V2/V3 are comparable
+  // without opening them. Soft-fails to "no count" — never breaks the list.
+  const lineCountByDoc = new Map<string, number>();
+  const allDocIds = groups.flatMap((g) => g.documents.map((d) => d.id));
+  if (allDocIds.length > 0) {
+    const { data: lineRows } = await supabase
+      .from("document_lines")
+      .select("document_id")
+      .in("document_id", allDocIds);
+    for (const r of (lineRows ?? []) as { document_id: string }[]) {
+      lineCountByDoc.set(r.document_id, (lineCountByDoc.get(r.document_id) ?? 0) + 1);
+    }
+  }
+  const money = (v: number | null | undefined, cur: string | null | undefined) =>
+    v == null
+      ? null
+      : `${cur ?? ""} ${Number(v).toLocaleString(undefined, {
+          minimumFractionDigits: 2,
+          maximumFractionDigits: 2,
+        })}`.trim();
+  const shortDate = (iso: string | null | undefined) =>
+    iso
+      ? new Date(iso).toLocaleDateString("en-GB", {
+          day: "2-digit",
+          month: "short",
+          year: "numeric",
+        })
+      : null;
+
   // ---- Assemble per affair group. ----------------------------------------
   for (const g of groups) {
     const docs: ProjectDocument[] = [];
@@ -320,6 +351,15 @@ export async function loadProjectRepositories(
     // Commercial — every quotation/proforma version.
     for (const d of g.documents) {
       const kind = documentKindLabel((d as any).type ?? "quotation");
+      const lineCount = lineCountByDoc.get(d.id) ?? null;
+      const facts: Array<{ label: string; value: string }> = [];
+      if (lineCount != null)
+        facts.push({
+          label: "Products",
+          value: String(lineCount),
+        });
+      const dDate = shortDate(d.date);
+      if (dDate) facts.push({ label: "Date", value: dDate });
       docs.push({
         key: `doc:${d.id}`,
         name: `${kind}-V${d.version ?? 1}${d.number ? ` · ${d.number}` : ""}`,
@@ -340,6 +380,12 @@ export async function loadProjectRepositories(
         sourceId: null,
         isCurrent: true,
         share: d.pdf_url ? { source: "quotation", id: d.id } : null,
+        // Free preview: the amount is the fastest way to tell versions apart.
+        preview: {
+          kind: "summary",
+          headline: money(d.total_price, d.currency),
+          facts,
+        },
       });
     }
 
@@ -366,6 +412,9 @@ export async function loadProjectRepositories(
         sourceId: null,
         isCurrent: true,
         share: null,
+        // Legal invoices are records (no file yet) — amount isn't selected
+        // here, so we keep the icon rather than showing a half-empty card.
+        preview: null,
       });
     }
 
@@ -390,6 +439,7 @@ export async function loadProjectRepositories(
       sourceId: null,
       isCurrent: true,
       share: null,
+      preview: null, // in-app record — the row already says what it is
     });
     if (g.taskListId)
       docs.push(record(`rec:tl:${g.taskListId}`, "Task List", `/task-lists/${g.taskListId}`));
@@ -438,6 +488,7 @@ export async function loadProjectRepositories(
         sourceId: isCurrent ? f.attachmentId : null,
         isCurrent,
         share: { source: "attachment", id: f.attachmentId },
+        preview: filePreviewFor(f.name, f.downloadHref ?? f.href),
       });
     }
 
@@ -477,6 +528,7 @@ export async function loadProjectRepositories(
         sourceId: isCurrent ? r.id : null, // only the current version is status-editable
         isCurrent,
         share: { source: "order_document", id: r.id },
+        preview: filePreviewFor(r.name, url),
       });
     }
 
@@ -509,6 +561,7 @@ export async function loadProjectRepositories(
         sourceId: null,
         isCurrent: true,
         share: null,
+        preview: filePreviewFor(r.file_name, url),
       });
     }
 
@@ -547,6 +600,7 @@ export async function loadProjectRepositories(
             id: r.id,
             extra: e.kind === "DIALux report" ? "dialux" : "energy",
           },
+          preview: filePreviewFor(e.name ?? `${e.kind}.pdf`, url),
         });
       }
     }

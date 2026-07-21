@@ -7,6 +7,7 @@
 // plus an inline status switcher. Calm grayscale; status is the only color.
 // =====================================================================
 
+import { useState } from "react";
 import Link from "next/link";
 import { formatMoney, type AffairGroup } from "@/lib/affairs-prototype";
 import type { DocStatus } from "@/lib/types";
@@ -15,10 +16,37 @@ import { freshnessLevel, type ShippingSnapshot, type FreshnessThresholds } from 
 import { fmtDate } from "@/components/affairs/badges";
 import InlineStatusSwitcher from "@/components/InlineStatusSwitcher";
 import { DuplicateQuotationButton } from "@/components/affairs/DuplicateQuotationButton";
+import { PreviewOverlay } from "@/components/documents/PreviewOverlay";
 import { ShippingFreshnessBadge, FreshnessDot } from "@/components/shipping/ShippingFreshnessBadge";
 import { RequestShippingUpdateButton } from "@/components/shipping/RequestShippingUpdateButton";
 
 const ACT = "text-[11px] font-medium text-neutral-500 hover:text-neutral-900";
+
+/**
+ * Preview — read a version's PDF without leaving the workspace.
+ *
+ * This is THE version-comparison shortcut: date + amount are already inline
+ * on the row, and this settles the last doubt without opening the document.
+ * Mounted ON DEMAND only — never one overlay per row (an iframe per row
+ * freezes the renderer, measured 2026-07-16).
+ */
+function QuotationPreviewButton({ id, label }: { id: string; label: string }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <button type="button" onClick={() => setOpen(true)} className={ACT}>
+        Preview
+      </button>
+      {open && (
+        <PreviewOverlay
+          src={`/api/documents/${id}/pdf`}
+          title={label}
+          onClose={() => setOpen(false)}
+        />
+      )}
+    </>
+  );
+}
 
 export function AffairQuotations({
   affair,
@@ -144,6 +172,10 @@ export function AffairQuotations({
                     </>
                   )}
                   <DuplicateQuotationButton id={d.id} className={ACT} />
+                  <QuotationPreviewButton
+                    id={d.id}
+                    label={d.number ?? `V${d.version ?? 1}`}
+                  />
                   <a
                     href={`/api/documents/${d.id}/pdf`}
                     target="_blank"

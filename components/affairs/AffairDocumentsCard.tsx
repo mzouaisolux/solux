@@ -41,12 +41,14 @@ import { AttachmentUploader } from "@/components/attachments/AttachmentUploader"
 import { moveAttachmentToFolder } from "@/app/(app)/_actions/attachments";
 import { AttachmentDeleteButton } from "@/components/attachments/AttachmentDeleteButton";
 import { AttachmentReplaceButton } from "@/components/affairs/AttachmentReplaceButton";
+import { PreviewOverlay } from "@/components/documents/PreviewOverlay";
 import {
   AssignDocumentPanel,
   type AssignableDoc,
 } from "@/components/affairs/AssignDocumentPanel";
 import { SendButton } from "@/components/delivery/SendButton";
 import { NavGlyph, InlineIcon } from "@/components/NavIcons";
+import { DocSummaryPreview, DocThumb } from "@/components/affairs/DocPreview";
 
 const ACT = "text-[11px] font-medium text-neutral-500 hover:text-neutral-900";
 
@@ -136,38 +138,28 @@ function ShareButton({ d }: { d: ProjectDocument }) {
   );
 }
 
-/** Inline preview overlay (PDFs & images render natively in an iframe). */
+/** Inline preview overlay (PDFs & images). */
 function PreviewButton({ d }: { d: ProjectDocument }) {
   const [open, setOpen] = useState(false);
-  if (d.source === "record" || d.source === "quotation") return null;
+  // What to render in the overlay:
+  //   • commercial docs (quotation/proforma/order confirmation) → the
+  //     GENERATED PDF (downloadHref), not the editor page (href);
+  //   • uploads → the signed file URL (href).
+  // Records have no file, and a commercial doc with no PDF yet has no
+  // downloadHref → no button at all (nothing to show).
+  const previewSrc = d.source === "quotation" ? d.downloadHref : d.href;
+  if (d.source === "record" || !previewSrc) return null;
   return (
     <>
       <button type="button" onClick={() => setOpen(true)} className={ACT}>
         Preview
       </button>
       {open && (
-        <div
-          className="fixed inset-0 z-50 flex flex-col bg-black/70 p-4 md:p-8"
-          onClick={(e) => {
-            if (e.target === e.currentTarget) setOpen(false);
-          }}
-        >
-          <div className="mb-2 flex items-center justify-between gap-3">
-            <span className="truncate text-sm font-medium text-white">{d.name}</span>
-            <button
-              type="button"
-              onClick={() => setOpen(false)}
-              className="rounded-md bg-white/10 px-2.5 py-1 text-xs font-semibold text-white hover:bg-white/20"
-            >
-              ✕ Close
-            </button>
-          </div>
-          <iframe
-            src={d.href}
-            title={d.name}
-            className="min-h-0 flex-1 rounded-lg border border-white/20 bg-white"
-          />
-        </div>
+        <PreviewOverlay
+          src={previewSrc}
+          title={d.name}
+          onClose={() => setOpen(false)}
+        />
       )}
     </>
   );
@@ -219,9 +211,14 @@ function DocRow({
       }`}
       title={movable ? "Drag to another category to re-file" : undefined}
     >
-      <span className="sx-doc-ic" aria-hidden>
-        <NavGlyph name="doc" />
-      </span>
+      {/* Thumbnail when we can render the file, else the existing type icon. */}
+      {d.preview && (d.preview.kind === "image" || d.preview.kind === "pdf") ? (
+        <DocThumb d={d} />
+      ) : (
+        <span className="sx-doc-ic" aria-hidden>
+          <NavGlyph name="doc" />
+        </span>
+      )}
       <div className="min-w-0 flex-1">
         <a
           href={d.href}
@@ -232,6 +229,8 @@ function DocRow({
           {d.name}
         </a>
         <div className="truncate text-[10.5px] text-neutral-400">{meta}</div>
+        {/* Commercial docs: amount · products · date — tells V1 from V2. */}
+        <DocSummaryPreview d={d} />
       </div>
       {d.version != null &&
         (d.source === "order_document" || d.source === "attachment") && (

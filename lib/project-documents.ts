@@ -83,6 +83,59 @@ export const DOC_STATUS_TONE: Record<ProjectDocStatus, string> = {
   final: "border-emerald-200 bg-emerald-50 text-emerald-700",
 };
 
+/* ---------------------------------------------------------------------------
+   Inline previews — "recognise a document without opening it".
+
+   Two families:
+     • summary — structured data we ALREADY hold (commercial docs carry
+       total_price / currency / version / status; records carry their state).
+       Costs nothing extra: rendered as a headline + a few facts.
+     • file    — a renderable asset behind a signed URL. The UI draws the
+       thumbnail LAZILY (only rows scrolled into view) and caches it; a
+       failure falls back to the existing type icon.
+   Anything we cannot preview stays `null` → current icon, unchanged.
+   --------------------------------------------------------------------------- */
+export type ProjectDocPreview =
+  | {
+      kind: "summary";
+      /** Big line, e.g. "USD 128,510.39" (null when the doc has no amount). */
+      headline: string | null;
+      /** Compact facts, e.g. [{label:"Products", value:"5"}]. */
+      facts: Array<{ label: string; value: string }>;
+    }
+  | {
+      /** Renderable file: the UI lazily thumbnails `url`. */
+      kind: "image" | "pdf" | "sheet";
+      url: string;
+    };
+
+/** Renderable-file preview for an upload, or null when we can't preview it
+ *  (CAD, .step, archives, unknown) → the UI keeps the existing type icon. */
+export function filePreviewFor(
+  fileName: string | null | undefined,
+  url: string | null | undefined,
+  mimeType?: string | null
+): ProjectDocPreview | null {
+  if (!url) return null;
+  const name = (fileName ?? "").toLowerCase();
+  const mime = (mimeType ?? "").toLowerCase();
+  const ext = name.includes(".") ? name.slice(name.lastIndexOf(".") + 1) : "";
+  if (
+    mime.startsWith("image/") ||
+    ["png", "jpg", "jpeg", "gif", "webp", "bmp", "avif"].includes(ext)
+  )
+    return { kind: "image", url };
+  if (mime === "application/pdf" || ext === "pdf") return { kind: "pdf", url };
+  if (
+    ["xlsx", "xls", "csv"].includes(ext) ||
+    mime.includes("spreadsheet") ||
+    mime.includes("excel") ||
+    mime === "text/csv"
+  )
+    return { kind: "sheet", url };
+  return null;
+}
+
 export type ProjectDocument = {
   /** stable render key, e.g. "att:<id>" */
   key: string;
@@ -116,6 +169,8 @@ export type ProjectDocument = {
   isCurrent: boolean;
   /** Share reference (createDocumentShareLink) — null when not shareable. */
   share: { source: string; id: string; extra?: string } | null;
+  /** Inline preview payload — null = no preview possible, UI keeps the icon. */
+  preview: ProjectDocPreview | null;
 };
 
 /* ===========================================================================
