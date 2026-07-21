@@ -1022,6 +1022,19 @@ export default function ProductLightingSetupForm({
                   {aiProvenance.fields.lighting_program?.some(
                     (p: any) => p.presence_detection
                   ) && <ConfigItem label="Presence detector" value="⚡ Yes" />}
+                  {/* The panel used to list everything the AI read EXCEPT the
+                      solar-panel tilt — so a study that clearly states one
+                      looked like the AI had missed it. The value itself lives
+                      on the task list (it drives the pole drawing), which is
+                      why it is labelled with its destination. */}
+                  <ConfigItem
+                    label="Panel tilt → task list"
+                    value={
+                      aiProvenance.fields.tilt_angle != null
+                        ? `${low(aiProvenance.confidence?.tilt_angle)}${aiProvenance.fields.tilt_angle}°`
+                        : "—"
+                    }
+                  />
                 </ConfigGroup>
               )}
 
