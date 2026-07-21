@@ -421,6 +421,47 @@ test("evaluateRelease (m159): mappings outrank the tilt checkpoint (most blockin
   assert.match(r.reason ?? "", /factory mapping/i);
 });
 
+// ---- m176 — AI/production tilt conflict -----------------------------------
+
+test("evaluateRelease (m176): REFUSES while an Energy-Study tilt conflict is unresolved", () => {
+  const r = evaluateRelease({
+    statusAllowed: true,
+    missingCount: 0,
+    hasOpenRevision: false,
+    lineCount: 3,
+    tiltConflictPending: true,
+  });
+  assert.equal(r.ok, false);
+  assert.match(r.reason ?? "", /tilt angle conflict/i);
+});
+
+test("evaluateRelease (m176): the conflict outranks the drawing checkpoint", () => {
+  // While the angle itself is disputed there is nothing settled to verify a
+  // drawing against — the conflict is the actionable reason of the two.
+  const r = evaluateRelease({
+    statusAllowed: true,
+    missingCount: 0,
+    hasOpenRevision: false,
+    lineCount: 3,
+    tiltCheckpointPending: true,
+    tiltConflictPending: true,
+  });
+  assert.equal(r.ok, false);
+  assert.match(r.reason ?? "", /tilt angle conflict/i);
+});
+
+test("evaluateRelease (m176): PASSES when resolved or absent (undefined pre-migration)", () => {
+  const resolved = evaluateRelease({
+    statusAllowed: true,
+    missingCount: 0,
+    hasOpenRevision: false,
+    lineCount: 1,
+    tiltCheckpointPending: false,
+    tiltConflictPending: false,
+  });
+  assert.equal(resolved.ok, true);
+});
+
 test("evaluateRelease (m159): PASSES when the checkpoint is verified or absent (undefined pre-migration)", () => {
   const verified = evaluateRelease({
     statusAllowed: true,

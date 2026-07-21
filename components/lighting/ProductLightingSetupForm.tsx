@@ -37,6 +37,7 @@ import {
   extractEnergyStudyAction,
   extractDialuxAction,
 } from "@/app/(app)/lighting/actions";
+import type { TiltOutcome } from "@/app/(app)/lighting/actions";
 import { OPTIC_PRESETS } from "@/lib/lighting/types";
 import type {
   LightingProgramPeriod,
@@ -275,8 +276,10 @@ export default function ProductLightingSetupForm({
     setAi({ kind: "extracting" });
     const fd = new FormData();
     fd.set("storage_path", energyStudy.path);
-    // m159 — lets the action auto-fill the task list's tilt angle (empty-only).
+    // m176 — lets the action record the study's tilt angle against the task
+    // list (applying it, or raising a conflict when it disagrees).
     fd.set("document_id", documentId);
+    fd.set("source_name", energyStudy.name);
     const res = await extractEnergyStudyAction(fd);
     if (!res.ok) {
       setAi({
@@ -285,10 +288,10 @@ export default function ProductLightingSetupForm({
       });
       return;
     }
-    applyExtraction(res.extraction, res.tiltApplied);
+    applyExtraction(res.extraction, res.tilt);
   }
 
-  function applyExtraction(ex: LightingExtraction, tiltApplied = false) {
+  function applyExtraction(ex: LightingExtraction, tilt: TiltOutcome = { kind: "none" }) {
     // Manual values always win — only fill fields the user left empty.
     if (power.trim() === "" && ex.lighting_power != null) {
       setPower(String(ex.lighting_power));
@@ -321,16 +324,28 @@ export default function ProductLightingSetupForm({
     const confs = Object.values(ex.confidence ?? {}).filter((n) =>
       Number.isFinite(n)
     );
-    // m159 — surface the detected tilt angle. When it was applied to the task
-    // list, refresh the page so the Industrial file section shows it live.
-    const tiltNote =
-      ex.tilt_angle != null
-        ? tiltApplied
-          ? ` Tilt angle ${ex.tilt_angle}° detected — applied to the task list (override it there if needed).`
-          : ` Tilt angle ${ex.tilt_angle}° detected — the task list already has a value, so it was kept.`
-        : "";
+    // m176 — surface what happened to the tilt. A CONFLICT is the important
+    // case: production was left untouched and someone must settle it in the
+    // Industrial production file, so say that explicitly rather than the old
+    // "it was kept" whisper that hid the disagreement entirely.
+    let tiltNote = "";
+    if (tilt.kind === "applied") {
+      tiltNote = ` Tilt angle ${tilt.tilt}° detected — applied to the task list (override it there if needed).`;
+    } else if (tilt.kind === "conflict") {
+      tiltNote = tilt.ambiguous
+        ? ` The study states several tilt angles (${tilt.tilt}° among them) — the task list keeps ${
+            tilt.stored != null ? `${tilt.stored}°` : "its value"
+          } until someone confirms which applies, in the Industrial production file.`
+        : ` Tilt angle ${tilt.tilt}° detected, but the task list says ${
+            tilt.stored != null ? `${tilt.stored}°` : "something else"
+          } — resolve the conflict in the Industrial production file.`;
+    } else if (tilt.kind === "unavailable" && ex.tilt_angle != null) {
+      tiltNote = ` Tilt angle ${ex.tilt_angle}° detected — it could not be recorded (apply migration m176).`;
+    }
     const minConf = confs.length ? Math.min(...confs) : 0;
-    if (minConf >= AI_CONFIDENCE_MIN) {
+    if (tilt.kind === "conflict") {
+      setAi({ kind: "verify", note: `Successfully extracted — review the values.${tiltNote}` });
+    } else if (minConf >= AI_CONFIDENCE_MIN) {
       setAi({ kind: "ok", note: `Successfully extracted — review the values.${tiltNote}` });
     } else {
       setAi({
@@ -338,7 +353,7 @@ export default function ProductLightingSetupForm({
         note: `Please verify the extracted values before continuing.${tiltNote}`,
       });
     }
-    if (tiltApplied) router.refresh();
+    if (tilt.kind === "applied" || tilt.kind === "conflict") router.refresh();
     setAiDetailsOpen(true); // fresh analysis → open the details for review
   }
 

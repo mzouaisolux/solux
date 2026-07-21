@@ -125,6 +125,13 @@ export function evaluateRelease(args: {
    * set, already verified, or m159 not applied yet).
    */
   tiltCheckpointPending?: boolean;
+  /**
+   * m176 — an Energy-Study extraction disagrees with the tilt angle on the task
+   * list and nobody has settled it. Releasing would send the factory a drawing
+   * built on a disputed angle. Undefined/false = no conflict (or m176 not
+   * applied yet).
+   */
+  tiltConflictPending?: boolean;
 }): { ok: boolean; reason: string | null } {
   if (!args.statusAllowed) {
     return {
@@ -155,6 +162,16 @@ export function evaluateRelease(args: {
       reason: `Factory Mapping is incomplete — ${args.missingCount} required factory mapping${
         args.missingCount === 1 ? "" : "s"
       } still to complete before releasing to production.`,
+    };
+  }
+  // m176 — checked BEFORE the drawing checkpoint: while the study and the task
+  // list disagree there is no settled angle to verify a drawing against, so
+  // this is the more actionable reason of the two.
+  if (args.tiltConflictPending) {
+    return {
+      ok: false,
+      reason:
+        "Tilt angle conflict unresolved — the Energy Study states a different solar panel tilt angle than this task list. Accept or dismiss the AI value in the Industrial production file section before releasing to production.",
     };
   }
   // m159 — the tilt angle drives the pole drawing: a set-but-unverified pair

@@ -19,9 +19,35 @@ export type PdfText = {
   hasUsableText: boolean;
 };
 
+export type PdfTextOptions = {
+  /**
+   * Prefix each page with a `[[page N]]` marker (1-based) instead of merging
+   * the pages into one flat string.
+   *
+   * The default (false) merges and normalizes form-feeds away, which destroys
+   * every page boundary — fine for the invoice import (it never cites a page),
+   * but it made the Energy-Study extractor's `tilt_source_page` unanswerable:
+   * the model was asked for a page number from input with no page markers, so
+   * it could only return null or invent one. Callers that cite a page must
+   * opt in. Off by default so the import path keeps its exact prompt input.
+   */
+  pageMarkers?: boolean;
+};
+
 const MIN_USABLE_CHARS = 40;
 
-export async function extractPdfText(buffer: Uint8Array | Buffer): Promise<PdfText> {
+/** The marker the model is told to cite. Kept in one place so the extractor
+ *  prompt and the parser can never drift apart. */
+export const PAGE_MARKER_RE = /^\[\[page (\d+)\]\]$/;
+
+export function pageMarker(n: number): string {
+  return `[[page ${n}]]`;
+}
+
+export async function extractPdfText(
+  buffer: Uint8Array | Buffer,
+  options: PdfTextOptions = {}
+): Promise<PdfText> {
   let mod: any;
   try {
     // @ts-ignore — optional dependency installed by the owner (`npm i unpdf`).
@@ -39,9 +65,22 @@ export async function extractPdfText(buffer: Uint8Array | Buffer): Promise<PdfTe
   const bytes = new Uint8Array(src.byteLength);
   bytes.set(src);
   const pdf = await mod.getDocumentProxy(bytes);
-  const { text, totalPages } = await mod.extractText(pdf, { mergePages: true });
+  const wantMarkers = options.pageMarkers === true;
+  const { text, totalPages } = await mod.extractText(pdf, {
+    mergePages: !wantMarkers,
+  });
 
-  const merged = Array.isArray(text) ? text.join("\n") : String(text ?? "");
+  let merged: string;
+  if (wantMarkers && Array.isArray(text)) {
+    merged = text
+      .map((p: unknown, i: number) => `${pageMarker(i + 1)}\n${String(p ?? "")}`)
+      .join("\n\n");
+  } else {
+    // mergePages:true still hands back an array on some unpdf versions — and a
+    // marker request can land here when it hands back a single string, in which
+    // case there are no boundaries to mark and the caller simply gets none.
+    merged = Array.isArray(text) ? text.join("\n") : String(text ?? "");
+  }
   // Normalize page-break form-feeds to newlines; keep the rest of the layout.
   const cleaned = merged.replace(/\f/g, "\n").trim();
 
