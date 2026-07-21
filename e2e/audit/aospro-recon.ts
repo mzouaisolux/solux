@@ -146,7 +146,7 @@ async function main() {
 
   // Dump each config select's options + surrounding label precisely.
   const cfg = await page.evaluate(() => {
-    const t = (e: Element | null) => (e?.textContent || "").trim().replace(/\s+/g, " ");
+    const t = (e: Element | null | undefined) => (e?.textContent || "").trim().replace(/\s+/g, " ");
     const root = document.querySelector('[role=dialog]') || document.querySelector("main") || document.body;
     const fieldSelects = [...root.querySelectorAll("select")].map((s) => {
       const wrap = s.closest("div,fieldset,label");
