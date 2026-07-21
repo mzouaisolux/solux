@@ -51,12 +51,27 @@ async function renderPdfThumb(url: string): Promise<string> {
 
   // Dynamic import: keeps pdf.js out of the initial bundle entirely.
   const pdfjs: any = await import("pdfjs-dist");
-  // Static asset, NOT the `new URL(..., import.meta.url)` bundler form: that
-  // makes webpack pull the worker into the bundle, and pdfjs-dist v6's worker
-  // uses syntax the Next 14 build cannot parse — it broke `next build` while
-  // `next dev` kept working. public/pdf.worker.min.mjs is refreshed on every
-  // install and build by scripts/copy-pdf-worker.mjs, so it always matches the
-  // installed pdfjs-dist version.
+  // Static asset, NOT the `new URL(..., import.meta.url)` bundler form.
+  //
+  // Root cause of the `next build` failure that form caused (reproduced and
+  // pinned down 2026-07-21): webpack emits the referenced worker as a RAW
+  // ASSET (static/media/pdf.worker.min.*.mjs), and Next 14's minify plugin
+  // then parses that emitted asset in SCRIPT mode — but the v6 worker is pure
+  // ESM, so its `import.meta` / `export` are syntax errors there:
+  //     static/media/pdf.worker.min.*.mjs from Terser
+  //       x 'import.meta' cannot be used outside of module code.
+  // Production-only by construction: dev never minifies, which is why
+  // `next dev` always worked. The legacy build is equally ESM, so it fails
+  // identically — downgrading solves nothing.
+  //
+  // A `new Worker(new URL(...), {type:"module"})` + workerPort chunk DOES
+  // build (verified) but funnels the MAX_PARALLEL renders through one shared
+  // worker, where the per-thumbnail doc.destroy() below has upstream
+  // one-PDFWorker-per-port footguns. workerSrc keeps pdf.js's own model:
+  // a dedicated worker per document, destroy() isolated.
+  //
+  // public/pdf.worker.min.mjs is refreshed on every install/build by
+  // scripts/copy-pdf-worker.mjs, so it always matches the installed version.
   pdfjs.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs";
 
   const doc = await pdfjs.getDocument({
