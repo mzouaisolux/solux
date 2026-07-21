@@ -132,6 +132,13 @@ export const CAPABILITY_CATALOG = [
   { key: "admin.manage_categories", label: "Manage categories & config fields" },
   { key: "admin.manage_banks", label: "Manage bank accounts" },
   { key: "admin.manage_sales_conditions", label: "Manage sales conditions" },
+  // Terminology (m177) — the centralized fixed translations
+  {
+    key: "terminology.manage",
+    label: "Manage terminology (fixed translations)",
+    description:
+      "Edit the centralized EN/ZH/FR vocabulary used by the Task List, the exports and the factory dossier. A validated term is a fixed controlled value — nothing retranslates it, and a draft falls back to English rather than reaching a factory half-finished.",
+  },
 ] as const satisfies readonly CapabilityDef[];
 
 /**
@@ -172,6 +179,7 @@ const MODULE_LABEL: Record<string, string> = {
   sales_analytics: "Sales & Analytics",
   prospect: "Prospects / CRM",
   admin: "Administration",
+  terminology: "Terminology",
 };
 
 function titleCase(s: string): string {

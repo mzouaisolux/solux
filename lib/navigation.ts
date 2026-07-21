@@ -444,6 +444,15 @@ export const NAVIGATION: NavCategory[] = [
             description: "Commercial ↔ factory references, ERP codes",
           },
           {
+            label: "Terminology",
+            href: "/admin/terminology",
+            visibility: {
+              kind: "capabilityOrAdmin",
+              capabilities: ["terminology.manage"],
+            },
+            description: "Fixed EN / 中文 / FR vocabulary for exports & factory docs",
+          },
+          {
             label: "Templates",
             href: "/admin/categories#templates",
             visibility: { kind: "adminLike" },
