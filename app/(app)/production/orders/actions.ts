@@ -9,6 +9,7 @@ import {
   PRODUCTION_ORDER_STATUSES,
   PRODUCTION_ORDER_STATUS_LABEL,
   PRODUCTION_COMPLETED_STATUSES,
+  reconcilePaymentTranche,
   type ProductionOrderStatus,
 } from "@/lib/types";
 import { addWorkingDays } from "@/lib/working-days";
@@ -588,24 +589,54 @@ export async function updateProductionOrderPayments(formData: FormData) {
   const prevDeposit = Number(existing.deposit_received_amount ?? 0);
   const prevBalance = Number(existing.balance_received_amount ?? 0);
 
-  // Defensive write (same pattern as baseline_locked_at below): if m114
-  // isn't applied yet, drop its two columns from the patch and retry so
-  // recording receipts keeps working on a pre-m114 database.
+  // Bank-charges tolerance (m175): compute the shortfall absorbed per tranche
+  // so it is persisted as a recorded expense — never left as a customer
+  // receivable. A gap ≤ BANK_CHARGES_TOLERANCE becomes bank charges; the
+  // status / outstanding themselves stay derived at read time.
+  {
+    const bcDoc = (existing as any).documents;
+    const bcTotal = Number(bcDoc?.total_price ?? 0);
+    const bcMode = (bcDoc?.payment_mode ?? null) as string | null;
+    const bcExpectedDeposit = computeExpectedDepositForUpdate(
+      bcTotal,
+      bcMode,
+      bcDoc?.payment_terms
+    );
+    const bcExpectedBalance = bcMode
+      ? Math.max(0, bcTotal - bcExpectedDeposit)
+      : 0;
+    patch.deposit_bank_charges = reconcilePaymentTranche(
+      bcExpectedDeposit,
+      patch.deposit_received_amount
+    ).bankCharges;
+    patch.balance_bank_charges = reconcilePaymentTranche(
+      bcExpectedBalance,
+      patch.balance_received_amount
+    ).bankCharges;
+  }
+
+  // Defensive write: strip any optional column group the DB doesn't have yet
+  // and retry, so recording receipts keeps working before a migration lands.
+  // m114 = balance_due_date / lc_expiry_date; m175 = *_bank_charges.
+  const optionalColumnGroups = [
+    ["deposit_bank_charges", "balance_bank_charges"],
+    ["balance_due_date", "lc_expiry_date"],
+  ];
+  const effectivePatch: Record<string, any> = { ...patch };
   let updateAttempt = await supabase
     .from("production_orders")
-    .update(patch)
+    .update(effectivePatch)
     .eq("id", id);
-  if (
-    updateAttempt.error &&
-    /balance_due_date|lc_expiry_date/.test(updateAttempt.error.message ?? "")
-  ) {
-    const { balance_due_date: _d1, lc_expiry_date: _d2, ...fallback } = patch;
-    void _d1;
-    void _d2;
-    updateAttempt = await supabase
-      .from("production_orders")
-      .update(fallback)
-      .eq("id", id);
+  for (const group of optionalColumnGroups) {
+    if (!updateAttempt.error) break;
+    const msg = updateAttempt.error.message ?? "";
+    if (group.some((col) => msg.includes(col))) {
+      for (const col of group) delete effectivePatch[col];
+      updateAttempt = await supabase
+        .from("production_orders")
+        .update(effectivePatch)
+        .eq("id", id);
+    }
   }
   if (updateAttempt.error) throw new Error(updateAttempt.error.message);
 
@@ -643,7 +674,8 @@ export async function updateProductionOrderPayments(formData: FormData) {
     const depositRecorded = patch.deposit_received_amount > 0;
     const thresholdMet =
       expectedDeposit > 0 &&
-      patch.deposit_received_amount + 0.01 >= expectedDeposit;
+      reconcilePaymentTranche(expectedDeposit, patch.deposit_received_amount)
+        .covered;
     const startedOnRecordedDeposit =
       expectedDeposit <= 0 && paymentMode !== "lc" && depositRecorded;
     const shouldStart = thresholdMet || startedOnRecordedDeposit;

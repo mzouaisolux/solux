@@ -13,6 +13,7 @@ import Link from "next/link";
 import { toast } from "@/components/feedback/toast-store";
 import { DELAY_TYPES, DELAY_TYPE_LABEL } from "@/lib/delays";
 import type { QuickUpdateRow } from "@/lib/quick-update-columns";
+import { reconcilePaymentTranche } from "@/lib/types";
 import {
   updateProductionOrderPayments,
   updateProductionOrderDeadline,
@@ -201,7 +202,7 @@ export function PaymentPopoverBody({
         manualDepositPct: pctN,
         expectedDeposit: expDep,
         expectedBalance: expBal,
-        balanceRemaining: Math.max(0, expBal - Number(balAmt || 0)),
+        balanceRemaining: reconcilePaymentTranche(expBal, Number(balAmt || 0)).outstanding,
       };
       const prevDerived = {
         manualTotal: row.manualTotal,
@@ -240,13 +241,13 @@ export function PaymentPopoverBody({
       balanceDueDate: dueDate || null,
       lcExpiryDate: lc || null,
       paymentNotes: notes || null,
-      balanceRemaining: Math.max(0, row.expectedBalance - nextBalance),
+      balanceRemaining: reconcilePaymentTranche(row.expectedBalance, nextBalance).outstanding,
     };
     // Optimistic auto-advance mirror (server does the authoritative flip).
     if (
       row.status === "awaiting_deposit" &&
       row.expectedDeposit > 0 &&
-      nextDeposit + 0.01 >= row.expectedDeposit
+      reconcilePaymentTranche(row.expectedDeposit, nextDeposit).covered
     ) {
       patch.status = "deposit_received";
     }

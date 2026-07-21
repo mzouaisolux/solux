@@ -28,6 +28,7 @@ import {
   PRODUCTION_ORDER_STATUSES,
   PRODUCTION_ORDER_STATUS_LABEL,
   PRODUCTION_PAYMENT_STATE_LABEL,
+  reconcilePaymentTranche,
   type ProductionOrderStatus,
 } from "@/lib/types";
 import { updateOrderCell } from "./actions";
@@ -1231,7 +1232,7 @@ function PaymentTrigger({
   // rose none) — but the exact amounts always stay visible, and the
   // receipt date shows underneath (Ops + Finance need the WHEN).
   const tone =
-    expected <= 0 ? "grey" : amount + 0.01 >= expected ? "green" : amount > 0 ? "amber" : "rose";
+    expected <= 0 ? "grey" : reconcilePaymentTranche(expected, amount).covered ? "green" : amount > 0 ? "amber" : "rose";
   const tip =
     `${row.currency} ${money(amount)} received / ${money(expected)} expected` +
     (receivedAt ? ` · received ${receivedAt}` : "");

@@ -27,20 +27,18 @@ import {
   DelayBadge,
   PaymentStatusBadge,
 } from "@/components/ProductionOrderBadges";
-import WorkflowStepper, {
-  buildLifecycleStages,
-} from "@/components/WorkflowStepper";
+import { buildLifecycleStages } from "@/components/WorkflowStepper";
 import {
-  PRODUCTION_ORDER_STATUSES,
   PRODUCTION_ORDER_STATUS_LABEL,
   PRODUCTION_COMPLETED_STATUSES,
   PRODUCTION_PAYMENT_STATE_LABEL,
-  BALANCE_DUE_SOURCE_LABEL,
   computeEffectiveBalanceDueDate,
   computeExpectedBalance,
   computeExpectedDeposit,
   computeProductionDelay,
   computeProductionPaymentState,
+  reconcilePaymentTranche,
+  BANK_CHARGES_TOLERANCE,
   isTechnicalRole,
   type PaymentMode,
   type PaymentTerms,
@@ -114,7 +112,6 @@ import {
   parseEventSearchParam,
 } from "@/components/dashboard/EventDiscussionPanel";
 import { RoleContextBanner } from "@/components/RoleContextBanner";
-import { OrderConfigSummary } from "@/components/OrderConfigSummary";
 import { ClientBlSummary } from "@/components/clients/ClientBlSummary";
 
 /**
@@ -296,15 +293,6 @@ export default async function ProductionOrderDetailPage({
   const startedWithoutDeposit = isStartedWithoutDeposit(order as any);
   const initialProjectCompletion = getInitialProjectCompletion(order as any);
   const lifecyclePhase = getLifecyclePhase(order as any);
-  // Pre-activation hint: "if production started today, projected
-  // completion would land here". Purely informational — not a
-  // commitment until activation freezes it.
-  const previewCompletionIfStartingNow = !productionActive
-    ? projectCompletionFrom(
-        new Date().toISOString().slice(0, 10),
-        (order as any).production_working_days
-      )
-    : null;
   const operationsAlert = computeOperationsAlert({
     order: order as any,
     totalPrice: Number((order.documents as any)?.total_price ?? 0),
@@ -435,6 +423,11 @@ export default async function ProductionOrderDetailPage({
     depositReceived,
     balanceReceived,
   });
+  // Bank-charges tolerance (m175): a tranche short by ≤ USD 45 counts as paid;
+  // the gap is bank charges absorbed by us, never a customer receivable.
+  const depositRecon = reconcilePaymentTranche(expectedDeposit, depositReceived);
+  const balanceRecon = reconcilePaymentTranche(expectedBalance, balanceReceived);
+  const totalBankCharges = depositRecon.bankCharges + balanceRecon.bankCharges;
   const productionCanStart =
     paymentState === "deposit_received" ||
     paymentState === "partial_balance" ||
@@ -446,8 +439,7 @@ export default async function ProductionOrderDetailPage({
   // The due date is derived at read time (manual override → production
   // deadline → ETA + LC days → ETA) so it follows deadline/ETA changes
   // until someone freezes it in the payment editor below.
-  const balanceOutstanding =
-    expectedBalance > 0 && balanceReceived + 0.01 < expectedBalance;
+  const balanceOutstanding = balanceRecon.outstanding > 0;
   const balanceDue = computeEffectiveBalanceDueDate({
     balanceDueDate: ((order as any).balance_due_date ?? null) as string | null,
     paymentMode,
@@ -583,7 +575,9 @@ export default async function ProductionOrderDetailPage({
     externalDelayDays: delayBreakdown.externalDays,
     latestDelayType: delayBreakdown.latestType,
     paymentState,
-    balanceRemaining: Math.max(0, totalPrice - depositReceived - balanceReceived),
+    // Tolerant per-tranche outstanding (m175): a ≤ USD 45 gap is bank charges,
+    // not a receivable — so the Payment KPI reads 0 when only fees are missing.
+    balanceRemaining: depositRecon.outstanding + balanceRecon.outstanding,
     currency,
     daysToEta: (() => {
       const cur = order.current_production_deadline as string | null;
@@ -964,9 +958,9 @@ export default async function ProductionOrderDetailPage({
   );
 
   return (
-    <div className="po-premium mx-auto max-w-screen-2xl px-6 py-8 space-y-5">
-      {/* ---------- HEADER ---------- */}
-      <div className="flex items-start justify-between gap-4 flex-wrap">
+    <div className="po-premium mx-auto max-w-screen-2xl px-6 py-5 space-y-3">
+      {/* ---------- HEADER (compact) ---------- */}
+      <div className="ops-head">
         <div className="min-w-0">
           <div className="flex items-center gap-3 flex-wrap">
             <div className="eyebrow">Production order</div>
@@ -1051,7 +1045,25 @@ export default async function ProductionOrderDetailPage({
             </div>
           </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="ops-head-right">
+          <div className="ops-stepper" title="Order lifecycle">
+            {lifecycle.map((s, i) => (
+              <span key={i} className="st-node">
+                {i > 0 && (
+                  <span
+                    className={`st-conn ${
+                      s.state === "done" || s.state === "current" ? "on" : ""
+                    }`}
+                  />
+                )}
+                <span className={`st-dot st-${s.state}`} title={s.label} />
+              </span>
+            ))}
+            <span className="st-label">
+              {lifecycle.find((s) => s.state === "current")?.label ??
+                PRODUCTION_ORDER_STATUS_LABEL[status]}
+            </span>
+          </div>
           <Link href="/production/orders" className="btn-secondary">
             ← All orders
           </Link>
@@ -1085,18 +1097,7 @@ export default async function ProductionOrderDetailPage({
         />
       )}
 
-      {/* ---------- LIFECYCLE STEPPER ---------- */}
-      <section className="panel p-4">
-        <div className="flex items-start justify-between gap-3 mb-3 flex-wrap">
-          <div>
-            <div className="eyebrow">Order lifecycle</div>
-            <p className="text-xs text-neutral-500 mt-0.5">
-              From quotation to delivery — click any past stage to jump back.
-            </p>
-          </div>
-        </div>
-        <WorkflowStepper stages={lifecycle} premium />
-      </section>
+      {/* Lifecycle stepper now lives compactly in the header, top-right. */}
 
       {/* ---------- ACTIVATION / DEPOSIT FLASH (loud feedback) ----------
           A production-critical event must never happen silently. When the
@@ -1269,14 +1270,35 @@ export default async function ProductionOrderDetailPage({
       {/* ---------- PRODUCTION (status workflow + baseline) ---------- */}
       <div id="area-production" className="scroll-mt-24">
       <CollapsibleSection
-        title="Production"
+        title="Operational status"
+        flat
         defaultOpen
         attention={status === "production_delayed"}
         attentionLabel="Delayed"
         badge={
-          <PremiumPill variant={poStatusPillVariant(status)}>
-            {PRODUCTION_ORDER_STATUS_LABEL[status]}
-          </PremiumPill>
+          <>
+            <span
+              className="inline-block w-2 h-2 rounded-full"
+              style={{ background: "var(--green)" }}
+              aria-hidden
+            />
+            {technical ? (
+              <StatusSelect
+                orderId={order.id}
+                current={status}
+                action={updateProductionOrderStatus}
+              />
+            ) : (
+              <PremiumPill variant={poStatusPillVariant(status)}>
+                {PRODUCTION_ORDER_STATUS_LABEL[status]}
+              </PremiumPill>
+            )}
+            <span className="text-xs text-neutral-500">
+              {technical
+                ? "You'll confirm before it's applied."
+                : "Read-only — production team only."}
+            </span>
+          </>
         }
         summary={
           <SummaryRow>
@@ -1315,18 +1337,7 @@ export default async function ProductionOrderDetailPage({
             />
           </SummaryRow>
         }
-      >
-        {/* --- Operational status --- */}
-        <div className="rounded-lg border border-neutral-200 p-4">
-        <div className="flex items-start justify-between gap-3 flex-wrap mb-4">
-          <div>
-            <div className="eyebrow">Operational status</div>
-            <p className="text-xs text-neutral-500 mt-0.5">
-              {technical
-                ? "Pick a status — you'll confirm before it's applied."
-                : "Read-only — only the production team can change status."}
-            </p>
-          </div>
+        headerRight={
           <div className="text-[11px] text-neutral-500 text-right">
             Created{" "}
             <b className="text-neutral-700">
@@ -1337,82 +1348,80 @@ export default async function ProductionOrderDetailPage({
               {new Date(order.updated_at).toLocaleString()}
             </b>
           </div>
-        </div>
-        {technical ? (
-          <StatusSelect
-            orderId={order.id}
-            current={status}
-            action={updateProductionOrderStatus}
-          />
-        ) : (
-          <div className="flex flex-wrap gap-2">
-            {PRODUCTION_ORDER_STATUSES.map((s) => (
-              <span
-                key={s}
-                className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[11px] font-medium ${
-                  s === status
-                    ? "bg-neutral-900 text-white border border-neutral-900"
-                    : "border border-neutral-200 bg-neutral-50 text-neutral-400"
-                }`}
-              >
-                {PRODUCTION_ORDER_STATUS_LABEL[s]}
-              </span>
-            ))}
-          </div>
-        )}
-        </div>
-
-        {/* --- Production Baseline --- */}
-        <div className="rounded-lg border border-neutral-200 p-4 space-y-4 mt-4">
-        {/* Production Baseline — factory commitment + frozen completion. */}
-        <div className="flex items-start justify-between gap-3 flex-wrap">
-          <div>
-            <div className="eyebrow">Production Baseline</div>
-            <p className="text-xs text-neutral-500 mt-0.5 max-w-2xl">
-              Factory commitment. Working days are editable until
-              production activates (deposit received or override). At
-              activation, the Initial Project Completion freezes and
-              becomes the immutable reference for delay tracking.
-            </p>
-          </div>
-          {baselineLocked && (
-            <div className="flex items-center gap-2 flex-wrap">
-              <span
-                className="inline-flex items-center gap-1.5 rounded-md border border-neutral-300 bg-neutral-50 px-2 py-1 text-[10px] font-semibold uppercase tracking-widerx text-neutral-700"
-                title={
-                  (order as any).baseline_locked_at
-                    ? `Locked at ${new Date(
-                        (order as any).baseline_locked_at
-                      ).toLocaleString()}`
-                    : undefined
-                }
-              >
-                <svg
-                  className="h-3 w-3"
-                  viewBox="0 0 20 20"
-                  fill="currentColor"
-                  aria-hidden
-                >
-                  <path
-                    fillRule="evenodd"
-                    d="M10 1a4 4 0 00-4 4v3H5a2 2 0 00-2 2v7a2 2 0 002 2h10a2 2 0 002-2v-7a2 2 0 00-2-2h-1V5a4 4 0 00-4-4zm2 7V5a2 2 0 10-4 0v3h4z"
-                    clipRule="evenodd"
-                  />
-                </svg>
-                Locked
-                {(order as any).baseline_locked_at && (
-                  <span className="ml-1 font-mono normal-case tracking-normal text-neutral-500">
-                    {new Date(
-                      (order as any).baseline_locked_at
-                    ).toLocaleDateString("en-GB")}
-                  </span>
+        }
+      >
+        {/* --- Baseline: single borderless row (mockup) --- */}
+        <div className="mt-3 pt-3 border-t border-[color:var(--line)] space-y-2.5">
+          <div className="po-baserow">
+            <div className="po-basecell">
+              <div className="po-ck">Due completion</div>
+              <div className="po-bv">
+                {fmtDate(liveStatus.productionDue)}
+                {baselineLocked && (
+                  <span className="po-bsub"> · baseline locked</span>
                 )}
-              </span>
-              {adminLike && (
-                /* Placeholder unlock button — actual action lands in
-                   Deliverable D (capability + admin RPC + audit event).
-                   For now it's a disabled affordance so the UX is
-                   discoverable and admins know the path will open up. */
+              </div>
+            </div>
+            <div className="po-basecell">
+              <div className="po-ck">Validation</div>
+              <div className="po-bv">
+                {fmtDate((order as any).production_validation_date)}
+              </div>
+            </div>
+            <div className="po-basecell">
+              <div className="po-ck">Working days</div>
+              <div className="po-bv">
+                {(order as any).production_working_days ?? "—"}
+                {(order as any).production_working_days != null && (
+                  <span className="po-bsub"> weekends excl.</span>
+                )}
+              </div>
+            </div>
+            <div className="po-basecell">
+              <div className="po-ck">Start</div>
+              {productionStartDate ? (
+                <div className="po-bv">
+                  {new Date(productionStartDate).toLocaleDateString("en-GB")}
+                  <span className="po-bsub">
+                    {" "}
+                    {startedWithoutDeposit ? "override" : "deposit received"}
+                  </span>
+                </div>
+              ) : (
+                <div className="po-bv" style={{ color: "#b7791f" }}>
+                  Pending<span className="po-bsub"> awaiting deposit</span>
+                </div>
+              )}
+            </div>
+            <div
+              className={`po-basecell ${
+                productionActive ? "po-frozen" : "po-pendingcell"
+              }`}
+            >
+              <div className="po-ck">
+                Initial completion{" "}
+                {productionActive ? "· Frozen" : "· Pending"}
+              </div>
+              {initialProjectCompletion ? (
+                <div className="po-bv">
+                  {new Date(initialProjectCompletion).toLocaleDateString(
+                    undefined,
+                    {
+                      weekday: "short",
+                      day: "numeric",
+                      month: "short",
+                      year: "numeric",
+                    }
+                  )}
+                </div>
+              ) : (
+                <div className="po-bv" style={{ color: "#8a6d1f" }}>
+                  Awaiting deposit
+                </div>
+              )}
+            </div>
+            {baselineLocked && adminLike && (
+              <div className="po-basecell po-baseunlock">
                 <button
                   type="button"
                   disabled
@@ -1421,121 +1430,9 @@ export default async function ProductionOrderDetailPage({
                 >
                   Unlock baseline
                 </button>
-              )}
-            </div>
-          )}
-        </div>
-
-        {/* Row 1 — Validation Date · Working Days · Production Start Date.
-            The first two are the locked commitment; the third reflects
-            REAL operational activation. Production Start Date stays
-            null/pending until deposit received OR override fires. */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          <DeadlineCell
-            label="Validation date"
-            value={(order as any).production_validation_date}
-            muted
-          />
-          <div className="rounded-lg border border-neutral-200/80 bg-white px-3 py-2.5">
-            <div className="text-[10px] uppercase tracking-widerx font-semibold text-neutral-500">
-              Working days
-            </div>
-            <div className="text-base font-bold tabular-nums text-neutral-900 mt-1">
-              {(order as any).production_working_days ?? "—"}
-            </div>
-            {(order as any).production_working_days != null && (
-              <div className="text-[10px] text-neutral-500 mt-0.5">
-                weekends excluded
               </div>
             )}
           </div>
-          <div className="rounded-lg border border-neutral-200/80 bg-white px-3 py-2.5">
-            <div className="text-[10px] uppercase tracking-widerx font-semibold text-neutral-500">
-              Production start date
-            </div>
-            {productionStartDate ? (
-              <>
-                <div className="text-base font-bold tabular-nums text-neutral-900 mt-1">
-                  {new Date(productionStartDate).toLocaleDateString("en-GB")}
-                </div>
-                <div className="text-[10px] text-neutral-500 mt-0.5">
-                  {startedWithoutDeposit
-                    ? "Started without deposit (admin override)"
-                    : "Deposit received"}
-                </div>
-              </>
-            ) : (
-              <>
-                <div className="text-sm font-semibold text-amber-700 mt-1 flex items-center gap-1.5">
-                  <span className="inline-block w-1.5 h-1.5 rounded-full bg-amber-500" />
-                  Pending
-                </div>
-                <div className="text-[10px] text-neutral-500 mt-0.5">
-                  awaiting deposit or override
-                </div>
-              </>
-            )}
-          </div>
-        </div>
-
-        {/* Row 2 — Initial Project Completion (large prominent cell).
-            This is the FROZEN reference used by delay calculations.
-            Pre-activation: explicit "Pending" state with a hint about
-            what would happen today. Post-activation: the stamped
-            value with a locked badge. */}
-        <div
-          className={`rounded-lg border px-4 py-3 ${
-            productionActive
-              ? "border-emerald-200 bg-emerald-50/40"
-              : "border-amber-200 bg-amber-50/40"
-          }`}
-        >
-          <div className="flex items-baseline justify-between gap-3 flex-wrap">
-            <div className="text-[10px] uppercase tracking-widerx font-semibold text-neutral-500">
-              Initial project completion
-            </div>
-            {productionActive ? (
-              <span className="text-[10px] uppercase tracking-widerx font-semibold text-emerald-700">
-                ● Frozen at activation
-              </span>
-            ) : (
-              <span className="text-[10px] uppercase tracking-widerx font-semibold text-amber-700">
-                ◌ Pending activation
-              </span>
-            )}
-          </div>
-          {initialProjectCompletion ? (
-            <div className="text-xl font-bold tabular-nums text-neutral-900 mt-1">
-              {new Date(initialProjectCompletion).toLocaleDateString(
-                undefined,
-                {
-                  weekday: "short",
-                  day: "numeric",
-                  month: "long",
-                  year: "numeric",
-                }
-              )}
-            </div>
-          ) : (
-            <div className="mt-1">
-              <p className="text-sm font-semibold text-amber-900">
-                Waiting for deposit to activate production timeline.
-              </p>
-              {previewCompletionIfStartingNow && (
-                <p className="text-[11px] text-neutral-600 mt-1">
-                  If production started today, completion would land
-                  around{" "}
-                  <b className="text-neutral-800">
-                    {new Date(
-                      previewCompletionIfStartingNow
-                    ).toLocaleDateString("en-GB")}
-                  </b>{" "}
-                  — purely informational, not committed until activation.
-                </p>
-              )}
-            </div>
-          )}
-        </div>
 
         {!baselineLocked && technical && (
           /* Working days edit form — visible until production activates.
@@ -1590,29 +1487,42 @@ export default async function ProductionOrderDetailPage({
       </CollapsibleSection>
       </div>
 
-      {/* ---------- PRODUCT LIGHTING SETUP (m144) ---------- */}
-      {/* Read-only handoff of the lighting config Sales approved at Launch
-          Production. Renders nothing when the order has no setup (additive). */}
-      <ProductLightingSetupCard documentId={order.quotation_id} />
+      {/* Product Lighting Setup moved to the Order details tab (owner). */}
 
       {/* ---------- DELAY & TIMELINE (m075) ---------- */}
       <CollapsibleSection
-        title="Delay & timeline"
+        title="Delay tracking"
+        flat
         defaultOpen
         attention={delayBreakdown.factoryDays + delayBreakdown.externalDays > 0}
         attentionLabel="Behind schedule"
         badge={
-          delay == null ? (
-            <PremiumPill variant="line" dot={false}>
-              —
-            </PremiumPill>
-          ) : delay > 0 ? (
-            <PremiumPill variant="ink">
-              ▲ +{delay} day{delay === 1 ? "" : "s"}
-            </PremiumPill>
-          ) : (
-            <PremiumPill variant="pos">On time</PremiumPill>
-          )
+          <>
+            {totalDelayDays > 0 ? (
+              <span className="dt-big">+{totalDelayDays}d</span>
+            ) : (
+              <span className="dt-ok">On schedule</span>
+            )}
+            {delayBreakdown.factoryDays > 0 && (
+              <span className="dt-sub">+{delayBreakdown.factoryDays}d factory</span>
+            )}
+            {delayBreakdown.externalDays > 0 && (
+              <span className="dt-sub">
+                +{delayBreakdown.externalDays}d external
+              </span>
+            )}
+          </>
+        }
+        headerRight={
+          <div className="dt-meta">
+            Baseline <b>{fmtDate(liveStatus.initialDeadline)}</b> · Due{" "}
+            <b>{fmtDate(liveStatus.productionDue)}</b> · Actual{" "}
+            <b>
+              {liveStatus.actualCompletion
+                ? fmtDate(liveStatus.actualCompletion)
+                : "—"}
+            </b>
+          </div>
         }
         summary={
           <SummaryRow>
@@ -1672,10 +1582,7 @@ export default async function ProductionOrderDetailPage({
       )}
       <DelayTimelineCard
         orderId={order.id}
-        initialDeadline={order.initial_production_deadline ?? null}
         productionDue={order.current_production_deadline ?? null}
-        actualCompletion={order.actual_completion_date ?? null}
-        breakdown={delayBreakdown}
         events={((history ?? []) as any[]).map((h) => ({
           id: h.id,
           days_added: h.days_added ?? null,
@@ -1703,6 +1610,7 @@ export default async function ProductionOrderDetailPage({
       <div id="area-payment" className="scroll-mt-24">
       <CollapsibleSection
         title="Payment"
+        flat
         defaultOpen
         attention={!productionCanStart && !(order as any).deposit_override_at}
         attentionLabel="Deposit due"
@@ -1727,14 +1635,14 @@ export default async function ProductionOrderDetailPage({
               label="Deposit"
               value={
                 expectedDeposit > 0
-                  ? depositReceived + 0.01 >= expectedDeposit
+                  ? depositRecon.covered
                     ? "Received"
                     : "Pending"
                   : "None"
               }
               tone={
                 expectedDeposit > 0
-                  ? depositReceived + 0.01 >= expectedDeposit
+                  ? depositRecon.covered
                     ? "success"
                     : "warn"
                   : "muted"
@@ -1835,129 +1743,144 @@ export default async function ProductionOrderDetailPage({
           </div>
         )}
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          {/* DEPOSIT BLOCK */}
-          <div className="rounded-md border border-neutral-200/80 bg-neutral-50/40 p-4 space-y-3">
-            <div className="flex items-center justify-between">
-              <div className="text-[11px] font-semibold uppercase tracking-widerx text-neutral-700">
+        {/* Copie conforme — mockup "Payment": tranche table. */}
+        <table className="od-table pay-table">
+          <thead>
+            <tr>
+              <th>Tranche</th>
+              <th className="r">Expected</th>
+              <th className="r">Received</th>
+              <th>Received on</th>
+              <th>Due</th>
+              <th className="r">Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td className="od-item">
                 Deposit
-              </div>
-              {expectedDeposit > 0 ? (
-                <ReceiptCoveragePill
-                  received={depositReceived}
-                  expected={expectedDeposit}
-                />
-              ) : (
-                <span className="text-[10px] uppercase tracking-widerx text-neutral-500 font-semibold">
-                  None expected
-                </span>
-              )}
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <PaymentCell
-                label="Expected"
-                value={`${currency} ${fmtMoney(expectedDeposit)}`}
-                muted
-              />
-              <PaymentCell
-                label="Received"
-                value={`${currency} ${fmtMoney(depositReceived)}`}
-                success={depositReceived + 0.01 >= expectedDeposit && expectedDeposit > 0}
-              />
-            </div>
-            <div className="text-[11px] text-neutral-500">
-              Received on:{" "}
-              <b className="font-mono text-neutral-700">
-                {fmtDate(order.deposit_received_at)}
-              </b>
-            </div>
-          </div>
-
-          {/* BALANCE BLOCK */}
-          <div className="rounded-md border border-neutral-200/80 bg-neutral-50/40 p-4 space-y-3">
-            <div className="flex items-center justify-between">
-              <div className="text-[11px] font-semibold uppercase tracking-widerx text-neutral-700">
-                Balance
-              </div>
-              {expectedBalance > 0 ? (
-                <ReceiptCoveragePill
-                  received={balanceReceived}
-                  expected={expectedBalance}
-                />
-              ) : (
-                <span className="text-[10px] uppercase tracking-widerx text-neutral-500 font-semibold">
-                  None expected
-                </span>
-              )}
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <PaymentCell
-                label="Expected"
-                value={`${currency} ${fmtMoney(expectedBalance)}`}
-                muted
-              />
-              <PaymentCell
-                label="Received"
-                value={`${currency} ${fmtMoney(balanceReceived)}`}
-                success={
-                  balanceReceived + 0.01 >= expectedBalance && expectedBalance > 0
-                }
-              />
-            </div>
-            <div className="text-[11px] text-neutral-500">
-              Received on:{" "}
-              <b className="font-mono text-neutral-700">
-                {fmtDate(order.balance_received_at)}
-              </b>
-            </div>
-            {/* m114 — effective due date (derived unless overridden). */}
-            <div className="text-[11px] text-neutral-500">
-              Due:{" "}
-              <b
-                className={`font-mono ${
-                  balanceDueIsLate ? "text-rose-700" : "text-neutral-700"
+                {totalPrice > 0
+                  ? ` (${Math.round((expectedDeposit / totalPrice) * 100)}%)`
+                  : ""}
+              </td>
+              <td className="r">
+                {currency} {fmtMoney(expectedDeposit)}
+              </td>
+              <td
+                className={`r ${
+                  depositRecon.covered && expectedDeposit > 0 ? "pay-ok" : ""
                 }`}
               >
-                {fmtDate(balanceDue.date)}
-              </b>
-              {balanceDue.source && (
-                <span className="text-neutral-400">
-                  {" "}
-                  · {BALANCE_DUE_SOURCE_LABEL[balanceDue.source]}
-                </span>
-              )}
-              {balanceDueIsLate && (
-                <b className="text-rose-700"> · {balanceDueDaysLate}d late</b>
-              )}
-            </div>
-            {/* m114 — LC expiry. Shown when an LC is in play (mode or date). */}
-            {(lcExpiryDate ||
-              paymentMode === "lc" ||
-              paymentMode === "hybrid") && (
-              <div className="text-[11px] text-neutral-500">
-                LC expiry:{" "}
-                <b
-                  className={`font-mono ${
-                    lcCritical ? "text-rose-700" : "text-neutral-700"
-                  }`}
-                >
-                  {fmtDate(lcExpiryDate)}
-                </b>
-                {lcCritical && lcDaysToExpiry !== null && (
-                  <b className="text-rose-700">
-                    {" "}
-                    ·{" "}
-                    {lcDaysToExpiry < 0
-                      ? `expired ${Math.abs(lcDaysToExpiry)}d ago`
-                      : lcDaysToExpiry === 0
-                      ? "expires today"
-                      : `${lcDaysToExpiry}d left`}
-                  </b>
+                {currency} {fmtMoney(depositReceived)}
+              </td>
+              <td>{fmtDate(order.deposit_received_at)}</td>
+              <td>—</td>
+              <td className="r">
+                {expectedDeposit > 0 ? (
+                  <ReceiptCoveragePill
+                    received={depositReceived}
+                    expected={expectedDeposit}
+                  />
+                ) : (
+                  <span className="pay-none">None</span>
                 )}
-              </div>
+              </td>
+            </tr>
+            <tr>
+              <td className="od-item">
+                Balance
+                {totalPrice > 0
+                  ? ` (${Math.round((expectedBalance / totalPrice) * 100)}%)`
+                  : ""}
+              </td>
+              <td className="r">
+                {currency} {fmtMoney(expectedBalance)}
+              </td>
+              <td
+                className={`r ${
+                  balanceRecon.covered && expectedBalance > 0 ? "pay-ok" : ""
+                }`}
+              >
+                {currency} {fmtMoney(balanceReceived)}
+              </td>
+              <td>{fmtDate(order.balance_received_at)}</td>
+              <td className={balanceDueIsLate ? "pay-late" : ""}>
+                {liveStatus.balanceRemaining > 0 &&
+                liveStatus.daysToEta != null
+                  ? `due in ${liveStatus.daysToEta}d`
+                  : fmtDate(balanceDue.date)}
+                {balanceDueIsLate ? ` · ${balanceDueDaysLate}d late` : ""}
+              </td>
+              <td className="r">
+                {expectedBalance > 0 ? (
+                  <ReceiptCoveragePill
+                    received={balanceReceived}
+                    expected={expectedBalance}
+                  />
+                ) : (
+                  <span className="pay-none">None</span>
+                )}
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        {(depositRecon.bankCharges > 0 ||
+          balanceRecon.bankCharges > 0 ||
+          (depositReceived > 0 && depositRecon.outstanding > 0) ||
+          (balanceReceived > 0 && balanceRecon.outstanding > 0)) && (
+          <div className="mt-2 flex flex-col gap-1">
+            {[
+              { label: "Deposit", recon: depositRecon, received: depositReceived },
+              { label: "Balance", recon: balanceRecon, received: balanceReceived },
+            ].map(({ label, recon, received }) =>
+              recon.bankCharges > 0 ? (
+                <div
+                  key={label}
+                  className="text-[11px] text-emerald-800 bg-emerald-50 border border-emerald-200 rounded px-2 py-1"
+                >
+                  <b className="font-semibold">{label}</b> · Bank charges
+                  absorbed by Solux:{" "}
+                  <b className="tabular-nums">
+                    {currency} {fmtMoney(recon.bankCharges)}
+                  </b>{" "}
+                  <span className="text-emerald-700/70">
+                    (expected {fmtMoney(recon.expected)} − received{" "}
+                    {fmtMoney(recon.received)})
+                  </span>
+                </div>
+              ) : received > 0 && recon.outstanding > 0 ? (
+                <div
+                  key={label}
+                  className="text-[11px] text-amber-900 bg-amber-50 border border-amber-200 rounded px-2 py-1"
+                >
+                  <b className="font-semibold">{label}</b> · Outstanding
+                  customer payment:{" "}
+                  <b className="tabular-nums">
+                    {currency} {fmtMoney(recon.outstanding)}
+                  </b>{" "}
+                  <span className="text-amber-800/70">
+                    (over the {currency} {BANK_CHARGES_TOLERANCE} tolerance)
+                  </span>
+                </div>
+              ) : null
             )}
           </div>
-        </div>
+        )}
+        {(lcExpiryDate || paymentMode === "lc" || paymentMode === "hybrid") && (
+          <div className="od-note">
+            LC expiry:{" "}
+            <b className={lcCritical ? "pay-late" : ""}>
+              {fmtDate(lcExpiryDate)}
+            </b>
+            {lcCritical && lcDaysToExpiry !== null
+              ? lcDaysToExpiry < 0
+                ? ` · expired ${Math.abs(lcDaysToExpiry)}d ago`
+                : lcDaysToExpiry === 0
+                ? " · expires today"
+                : ` · ${lcDaysToExpiry}d left`
+              : ""}
+          </div>
+        )}
 
         {/* Editor — TLM/admin only */}
         {technical && (
@@ -1966,7 +1889,8 @@ export default async function ProductionOrderDetailPage({
             className="border-t border-neutral-200 mt-4 pt-4 space-y-3"
           >
             <input type="hidden" name="id" value={order.id} />
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div className="pay-form-h">Record receipts</div>
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
               <label className="block">
                 <span className="label">Deposit received ({currency})</span>
                 <input
@@ -2121,6 +2045,7 @@ export default async function ProductionOrderDetailPage({
       <div id="area-shipping" className="scroll-mt-24">
       <CollapsibleSection
         title="Shipping & logistics"
+        flat
         defaultOpen
         attention={status === "production_completed" && !order.shipment_booked}
         attentionLabel="Book shipment"
@@ -2196,12 +2121,9 @@ export default async function ProductionOrderDetailPage({
         </p>
 
         {technical ? (
-          <form
-            action={updateProductionOrderShipment}
-            className="grid grid-cols-1 md:grid-cols-3 gap-3"
-          >
+          <form action={updateProductionOrderShipment} className="space-y-3">
             <input type="hidden" name="id" value={order.id} />
-            <label className="block md:col-span-3 flex items-center gap-2 cursor-pointer select-none text-sm text-neutral-700">
+            <label className="flex items-center gap-2 cursor-pointer select-none text-sm text-neutral-700">
               <input
                 type="checkbox"
                 name="shipment_booked"
@@ -2210,82 +2132,63 @@ export default async function ProductionOrderDetailPage({
               />
               Shipment booked
             </label>
-            <label className="block">
-              <span className="label">ETD (departure)</span>
-              <input
-                type="date"
-                name="etd"
-                defaultValue={order.etd ?? undefined}
-                className="input"
-              />
-            </label>
-            <label className="block">
-              <span className="label">ETA (arrival)</span>
-              <input
-                type="date"
-                name="eta"
-                defaultValue={order.eta ?? undefined}
-                className="input"
-              />
-            </label>
-
-            {/* ---- Bill of Lading details (m070) ---- */}
-            <div className="md:col-span-3 mt-1 pt-2 border-t border-neutral-100">
-              <span className="text-[10px] font-semibold uppercase tracking-widerx text-neutral-500">
-                Bill of Lading
-              </span>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <label className="block">
+                <span className="label">ETD (departure)</span>
+                <input type="date" name="etd" defaultValue={order.etd ?? undefined} className="input" />
+              </label>
+              <label className="block">
+                <span className="label">ETA (arrival)</span>
+                <input type="date" name="eta" defaultValue={order.eta ?? undefined} className="input" />
+              </label>
+              <label className="block">
+                <span className="label">Forwarder</span>
+                <input name="forwarder" defaultValue={ship.forwarder ?? ""} placeholder="Freight agent" className="input" />
+              </label>
             </div>
-            <label className="block">
-              <span className="label">BL number</span>
-              <input name="bl_number" defaultValue={ship.bl_number ?? ""} placeholder="e.g. MEDUXX123456" className="input" />
-              <span className="text-[10px] text-neutral-500 mt-1 block">
-                Issued by the carrier after the vessel sails — leave blank until then.
-              </span>
-            </label>
-            <label className="block">
-              <span className="label">Forwarder</span>
-              <input name="forwarder" defaultValue={ship.forwarder ?? ""} placeholder="Freight agent" className="input" />
-            </label>
-            <label className="block">
-              <span className="label">HS code</span>
-              <input name="hs_code" defaultValue={ship.hs_code ?? ""} placeholder="e.g. 9405.40" className="input" />
-            </label>
-            <label className="block">
-              <span className="label">Vessel</span>
-              <input name="vessel" defaultValue={ship.vessel ?? ""} placeholder="Vessel name" className="input" />
-            </label>
-            <label className="block">
-              <span className="label">Voyage</span>
-              <input name="voyage" defaultValue={ship.voyage ?? ""} placeholder="Voyage no." className="input" />
-            </label>
-            <label className="block">
-              <span className="label">Packages</span>
-              <input type="number" min="0" name="packages" defaultValue={ship.packages ?? ""} placeholder="cartons" className="input" />
-            </label>
-            <label className="block">
-              <span className="label">Gross weight (kg)</span>
-              <input type="number" min="0" step="0.01" name="gross_weight" defaultValue={ship.gross_weight ?? ""} className="input" />
-            </label>
-            <label className="block">
-              <span className="label">Net weight (kg)</span>
-              <input type="number" min="0" step="0.01" name="net_weight" defaultValue={ship.net_weight ?? ""} className="input" />
-            </label>
-            <label className="block">
-              <span className="label">Volume (CBM)</span>
-              <input type="number" min="0" step="0.001" name="cbm" defaultValue={ship.cbm ?? ""} className="input" />
-            </label>
-
-            <label className="block md:col-span-3">
-              <span className="label">Logistics notes</span>
-              <textarea
-                name="shipping_notes"
-                defaultValue={order.shipping_notes ?? ""}
-                rows={2}
-                placeholder="Container number, forwarder, milestones, etc."
-                className="input"
-              />
-            </label>
-            <div className="md:col-span-3 flex items-center justify-end">
+            <div className="pay-form-h">Bill of lading</div>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <label className="block">
+                <span className="label">BL number</span>
+                <input name="bl_number" defaultValue={ship.bl_number ?? ""} placeholder="e.g. MEDUXX123456" className="input" />
+              </label>
+              <label className="block">
+                <span className="label">Vessel</span>
+                <input name="vessel" defaultValue={ship.vessel ?? ""} placeholder="Vessel name" className="input" />
+              </label>
+              <label className="block">
+                <span className="label">Voyage</span>
+                <input name="voyage" defaultValue={ship.voyage ?? ""} placeholder="Voyage no." className="input" />
+              </label>
+              <label className="block">
+                <span className="label">HS code</span>
+                <input name="hs_code" defaultValue={ship.hs_code ?? ""} placeholder="e.g. 9405.40" className="input" />
+              </label>
+            </div>
+            <div className="pay-form-h">Cargo</div>
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+              <label className="block">
+                <span className="label">Packages</span>
+                <input type="number" min="0" name="packages" defaultValue={ship.packages ?? ""} placeholder="cartons" className="input" />
+              </label>
+              <label className="block">
+                <span className="label">Gross wt (kg)</span>
+                <input type="number" min="0" step="0.01" name="gross_weight" defaultValue={ship.gross_weight ?? ""} className="input" />
+              </label>
+              <label className="block">
+                <span className="label">Net wt (kg)</span>
+                <input type="number" min="0" step="0.01" name="net_weight" defaultValue={ship.net_weight ?? ""} className="input" />
+              </label>
+              <label className="block">
+                <span className="label">Volume (CBM)</span>
+                <input type="number" min="0" step="0.001" name="cbm" defaultValue={ship.cbm ?? ""} className="input" />
+              </label>
+              <label className="block">
+                <span className="label">Logistics notes</span>
+                <input name="shipping_notes" defaultValue={order.shipping_notes ?? ""} placeholder="Container no., milestones…" className="input" />
+              </label>
+            </div>
+            <div className="flex items-center justify-end">
               <SubmitButton variant="primary" pendingLabel="Saving…">
                 Save shipment
               </SubmitButton>
@@ -2341,6 +2244,7 @@ export default async function ProductionOrderDetailPage({
       <div id="area-documents" className="scroll-mt-24">
       <CollapsibleSection
         title="Shipping documents"
+        flat
         defaultOpen
         attention={
           !docsReadiness.allRequiredReady &&
@@ -2420,6 +2324,7 @@ export default async function ProductionOrderDetailPage({
       {/* ---------- ORDER DETAILS (value + configuration) ---------- */}
       <CollapsibleSection
         title="Order details"
+        flat
         defaultOpen
         summary={
           <SummaryRow>
@@ -2446,45 +2351,82 @@ export default async function ProductionOrderDetailPage({
           </SummaryRow>
         }
       >
-        <section className="grid grid-cols-1 md:grid-cols-3 gap-3">
-        <KpiTile
-          label="Quotation value"
-          value={`${(order.documents as any)?.currency ?? "USD"} ${Number(
-            (order.documents as any)?.total_price ?? 0
-          ).toLocaleString(undefined, {
-            minimumFractionDigits: 2,
-            maximumFractionDigits: 2,
-          })}`}
-        />
-        <KpiTile
-          label="Quotation status"
-          value={
-            ((order.documents as any)?.status ?? "—")
-              .toString()
-              .toUpperCase()
-          }
-        />
-        <KpiTile
-          label="Task list status"
-          value={
-            ((order.task_lists as any)?.status ?? "—")
-              .toString()
+        {/* Copie conforme — mockup "Order details": facts row + item table. */}
+        <div className="od-head">
+          <span className="od-fact">
+            <b>Value</b>
+            {(order.documents as any)?.currency ?? "USD"}{" "}
+            {Number((order.documents as any)?.total_price ?? 0).toLocaleString(
+              undefined,
+              { minimumFractionDigits: 2, maximumFractionDigits: 2 }
+            )}
+          </span>
+          <span className="od-fact">
+            <b>Quotation</b>
+            {String((order.documents as any)?.status ?? "—").toUpperCase()}
+          </span>
+          <span className="od-fact">
+            <b>Task list</b>
+            {String((order.task_lists as any)?.status ?? "—")
               .replace(/_/g, " ")
-              .toUpperCase()
-          }
-        />
-      </section>
-
-      {/* ---------- ORDER CONFIGURATION SUMMARY ----------
-          Read-only "what was ordered" card. Sales (and any tracker)
-          can see CCT / optic / bracket / quantities at a glance
-          without bouncing to the task-list editor. Hides itself
-          when there are no lines to show. */}
-      <OrderConfigSummary
-        lines={configLines}
-        taskListId={order.task_list_id}
-        taskListNumber={(order.task_lists as any)?.number ?? null}
-      />
+              .toUpperCase()}
+          </span>
+          {order.task_list_id && (
+            <Link href={`/task-lists/${order.task_list_id}`} className="od-link">
+              View full task list {(order.task_lists as any)?.number ?? ""} →
+            </Link>
+          )}
+        </div>
+        {configLines.length === 0 ? (
+          <p className="od-note">No configured lines on this order.</p>
+        ) : (
+          <table className="od-table">
+            <thead>
+              <tr>
+                <th>Item</th>
+                <th>Ref</th>
+                <th>Configuration</th>
+                <th>Qty</th>
+              </tr>
+            </thead>
+            <tbody>
+              {configLines.map((l) => (
+                <tr key={l.id}>
+                  <td className="od-item">{l.productName}</td>
+                  <td className="od-ref">{l.productSku ?? "—"}</td>
+                  <td className="od-cfg">
+                    {l.configEntries
+                      .map((e) => {
+                        const raw = String(e.value ?? "")
+                          .replace(/[[\]"]/g, "")
+                          .trim();
+                        if (/^__custom__$/i.test(raw))
+                          return `Custom ${e.label.toLowerCase()}`;
+                        if (
+                          !raw ||
+                          raw.toUpperCase() === e.label.toUpperCase() ||
+                          /^(yes|true|on)$/i.test(raw)
+                        )
+                          return e.label;
+                        return `${e.label} ${raw}`;
+                      })
+                      .filter(Boolean)
+                      .join(" · ") || "—"}
+                  </td>
+                  <td className="od-qty">{l.quantity}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+        <p className="od-note">
+          Read-only summary of the validated task list — full configuration
+          lives on the task list page.
+        </p>
+        {/* Product Lighting Setup (m144) — moved here from Production (owner). */}
+        <div className="mt-3">
+          <ProductLightingSetupCard documentId={order.quotation_id} />
+        </div>
       </CollapsibleSection>
 
       </div>{/* /panel Order details */}
@@ -2493,7 +2435,8 @@ export default async function ProductionOrderDetailPage({
       <div className="space-y-6">
       {/* ---------- ACTIVITY TIMELINE ---------- */}
       <CollapsibleSection
-        title="Activity timeline"
+        title="Activity"
+        flat
         defaultOpen
         badge={
           <span className="inline-flex items-center rounded-full border border-neutral-200 bg-neutral-50 px-2 py-0.5 text-[11px] font-medium text-neutral-600 tabular-nums">
@@ -2562,49 +2505,6 @@ function poStatusPillVariant(
   }
 }
 
-function DeadlineCell({
-  label,
-  value,
-  muted,
-  warn,
-  success,
-}: {
-  label: string;
-  value: string | null;
-  muted?: boolean;
-  warn?: boolean;
-  success?: boolean;
-}) {
-  const valueClass = warn
-    ? "text-red-700"
-    : success
-    ? "text-emerald-700"
-    : muted
-    ? "text-neutral-600"
-    : "text-neutral-900";
-  return (
-    <div className="rounded-md border border-neutral-200/80 bg-neutral-50/50 px-3 py-2">
-      <div className="text-[10px] uppercase tracking-widerx text-neutral-500 font-semibold">
-        {label}
-      </div>
-      <div className={`mt-1 text-sm font-mono font-semibold ${valueClass}`}>
-        {fmtDate(value)}
-      </div>
-    </div>
-  );
-}
-
-function KpiTile({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="panel p-4">
-      <div className="eyebrow">{label}</div>
-      <div className="mt-1 text-lg font-bold tabular-nums tracking-tight text-neutral-900">
-        {value}
-      </div>
-    </div>
-  );
-}
-
 function ReadOnlyField({
   label,
   value,
@@ -2637,34 +2537,6 @@ function fmtMoney(v: number): string {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   });
-}
-
-function PaymentCell({
-  label,
-  value,
-  muted,
-  success,
-}: {
-  label: string;
-  value: string;
-  muted?: boolean;
-  success?: boolean;
-}) {
-  const valueClass = success
-    ? "text-emerald-700"
-    : muted
-    ? "text-neutral-700"
-    : "text-neutral-900";
-  return (
-    <div className="rounded border border-neutral-200/80 bg-white px-3 py-2">
-      <div className="text-[10px] uppercase tracking-widerx text-neutral-500 font-semibold">
-        {label}
-      </div>
-      <div className={`mt-1 text-sm font-bold tabular-nums ${valueClass}`}>
-        {value}
-      </div>
-    </div>
-  );
 }
 
 /**
@@ -2720,18 +2592,20 @@ function ReceiptCoveragePill({
   expected: number;
 }) {
   if (expected <= 0) return null;
+  // Tolerance-aware (m175): a shortfall ≤ USD 45 is absorbed as bank charges,
+  // so the tranche reads as fully paid rather than "99% received".
+  const recon = reconcilePaymentTranche(expected, received);
   const pct = Math.min(100, Math.round((received / expected) * 100));
-  const tone =
-    pct >= 100
-      ? "bg-emerald-50 border-emerald-200 text-emerald-700"
-      : pct > 0
-      ? "bg-amber-50 border-amber-200 text-amber-800"
-      : "bg-neutral-50 border-neutral-200 text-neutral-500";
+  const tone = recon.covered
+    ? "bg-emerald-50 border-emerald-200 text-emerald-700"
+    : received > 0
+    ? "bg-amber-50 border-amber-200 text-amber-800"
+    : "bg-neutral-50 border-neutral-200 text-neutral-500";
   return (
     <span
       className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-semibold tabular-nums ${tone}`}
     >
-      {pct}% received
+      {recon.covered ? "Paid" : `${pct}% received`}
     </span>
   );
 }

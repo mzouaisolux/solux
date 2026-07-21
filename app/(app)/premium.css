@@ -886,7 +886,7 @@
   margin-top: 12px;
 }
 .po-premium .ops-kpi {
-  padding: 10px 14px;
+  padding: 8px 13px;
   border-right: 1px solid var(--line-2);
   min-width: 0;
 }
@@ -933,7 +933,7 @@
   display: flex;
   gap: 7px;
   overflow-x: auto;
-  margin-top: 14px;
+  margin-top: 10px;
   scrollbar-width: thin;
 }
 .po-premium .ws-tab {
@@ -1122,4 +1122,377 @@
   .po-premium .ws-tab {
     transition: none;
   }
+}
+
+/* ---- compact header + inline mini lifecycle stepper ---- */
+.po-premium .ops-head-right {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 9px;
+  flex: 0 0 auto;
+}
+.po-premium .ops-stepper {
+  display: flex;
+  align-items: center;
+}
+.po-premium .st-node {
+  display: inline-flex;
+  align-items: center;
+}
+.po-premium .st-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #fff;
+  border: 1.5px solid var(--mute-2);
+  box-sizing: border-box;
+}
+.po-premium .st-dot.st-done {
+  background: var(--ink);
+  border-color: var(--ink);
+}
+.po-premium .st-dot.st-current {
+  background: var(--green);
+  border-color: var(--green);
+  box-shadow: 0 0 0 3px var(--green-tint);
+}
+.po-premium .st-dot.st-skipped {
+  background: var(--line-2);
+  border-color: var(--line-2);
+}
+.po-premium .st-conn {
+  width: 15px;
+  height: 1.5px;
+  background: var(--line-2);
+}
+.po-premium .st-conn.on {
+  background: var(--ink);
+}
+.po-premium .st-label {
+  margin-left: 9px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+/* ---- density: compress the REUSED section content inside the workspace so
+   the active panel + rail fit one screen (owner: "les menus plus compacts") ---- */
+.po-premium .ops-main .panel > button {
+  padding: 8px 13px;
+}
+.po-premium .ops-main .po-sec-title {
+  font-size: 13px;
+}
+.po-premium .ops-main .panel > div:last-child {
+  padding: 2px 13px 12px;
+}
+.po-premium .ops-main .space-y-6 > * + * {
+  margin-top: 10px;
+}
+.po-premium .ops-main .space-y-5 > * + * {
+  margin-top: 9px;
+}
+.po-premium .ops-main .space-y-4 > * + * {
+  margin-top: 7px;
+}
+.po-premium .ops-main .space-y-3 > * + * {
+  margin-top: 6px;
+}
+.po-premium .ops-main :is(.input, .input-sm, .select) {
+  padding-top: 5px;
+  padding-bottom: 5px;
+  min-height: 0;
+  font-size: 12.5px;
+}
+.po-premium .ops-main label {
+  font-size: 11px;
+  margin-bottom: 2px;
+}
+.po-premium .ops-main .po-cell {
+  padding: 7px 10px;
+}
+.po-premium .ops-main .po-ck {
+  font-size: 9.5px;
+  margin-bottom: 2px;
+}
+.po-premium .ops-main .po-cv {
+  font-size: 12px;
+}
+.po-premium .ops-main :is(.btn-primary, .btn-secondary) {
+  padding: 6px 12px;
+  font-size: 12px;
+}
+.po-premium .ops-main .p-4 {
+  padding: 11px;
+}
+.po-premium .ops-main .p-5 {
+  padding: 12px;
+}
+.po-premium .ops-main :is(.py-4, .py-5) {
+  padding-top: 9px;
+  padding-bottom: 9px;
+}
+.po-premium .ops-main :is(.mt-4, .mt-5) {
+  margin-top: 9px;
+}
+.po-premium .ops-main :is(.mb-4, .mb-5) {
+  margin-bottom: 9px;
+}
+.po-premium .ops-main .gap-4 {
+  gap: 9px;
+}
+.po-premium .ops-main .text-sm {
+  font-size: 12px;
+}
+
+/* ---- compact header sizing (mockup: smaller title, tight meta) ---- */
+.po-premium .ops-head .po-order-id {
+  font-size: 27px;
+  margin-top: 3px;
+}
+.po-premium .ops-head .po-metarow {
+  margin-top: 7px;
+  gap: 4px 20px;
+}
+.po-premium .ops-head .po-metarow .po-k {
+  font-size: 10px;
+}
+.po-premium .ops-head .po-metarow .po-v {
+  font-size: 12.5px;
+}
+
+/* ---- second density pass: shrink big display numbers, helper text, section
+   chrome so a 3-section panel (Production) approaches one screen ---- */
+.po-premium .ops-main .panel > button {
+  padding: 6px 12px;
+}
+.po-premium .ops-main .panel > div:last-child {
+  padding: 0 12px 10px;
+}
+.po-premium .ops-main :is(.text-2xl, .text-xl, .text-lg) {
+  font-size: 15px;
+  line-height: 1.2;
+}
+.po-premium .ops-main p {
+  font-size: 11px;
+  line-height: 1.35;
+}
+.po-premium .ops-main :is(h2, h3):not(.po-sec-title) {
+  font-size: 11.5px;
+}
+.po-premium .ops-main :is(.p-3, .px-3) {
+  padding: 8px;
+}
+.po-premium .ops-main :is(.py-3) {
+  padding-top: 6px;
+  padding-bottom: 6px;
+}
+.po-premium .ops-main .gap-3 {
+  gap: 7px;
+}
+.po-premium .ops-main :is(.mt-3, .mb-3) {
+  margin-top: 6px;
+  margin-bottom: 6px;
+}
+/* the "Initial project completion" showcase box → a tight strip */
+.po-premium .ops-main .bg-emerald-50\/40,
+.po-premium .ops-main .bg-emerald-50 {
+  padding: 8px 11px !important;
+}
+
+/* ===== per-tab copie-conforme layouts (owner mockup) ===== */
+/* --- Order details: facts row + compact item table --- */
+.po-premium .od-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 5px 20px;
+  margin-bottom: 9px;
+  font-size: 12px;
+}
+.po-premium .od-head .od-fact b {
+  color: var(--mute);
+  font-weight: 700;
+  text-transform: uppercase;
+  font-size: 10px;
+  letter-spacing: 0.05em;
+  margin-right: 6px;
+}
+.po-premium .od-head .od-fact {
+  color: var(--ink);
+  font-weight: 600;
+}
+.po-premium .od-head .od-link {
+  margin-left: auto;
+  color: var(--green-deep);
+  font-weight: 600;
+  font-size: 12px;
+}
+.po-premium table.od-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+}
+.po-premium table.od-table th {
+  text-align: left;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--mute);
+  padding: 6px 9px;
+  border-bottom: 1px solid var(--line-2);
+  background: #f6f6f7;
+}
+.po-premium table.od-table th:last-child,
+.po-premium table.od-table td.od-qty {
+  text-align: right;
+}
+.po-premium table.od-table td {
+  padding: 8px 9px;
+  border-bottom: 1px solid var(--line);
+  vertical-align: top;
+}
+.po-premium table.od-table .od-item {
+  font-weight: 600;
+  color: var(--ink);
+}
+.po-premium table.od-table .od-ref {
+  color: var(--mute);
+  font-variant-numeric: tabular-nums;
+}
+.po-premium table.od-table .od-cfg {
+  color: var(--ink-soft);
+}
+.po-premium table.od-table .od-qty {
+  font-weight: 700;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+.po-premium .od-note {
+  font-size: 10.5px;
+  color: var(--mute);
+  margin-top: 7px;
+}
+.po-premium table.od-table .r {
+  text-align: right;
+}
+/* --- Payment: tranche table --- */
+.po-premium table.pay-table td,
+.po-premium table.pay-table th {
+  white-space: nowrap;
+}
+.po-premium table.pay-table .pay-ok {
+  color: var(--green-deep);
+  font-weight: 600;
+}
+.po-premium table.pay-table .pay-late {
+  color: #b4433a;
+  font-weight: 600;
+}
+.po-premium .pay-none {
+  color: var(--mute);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.po-premium .pay-form-h {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--mute);
+  margin: 12px 0 6px;
+}
+/* --- flat workspace cards (mockup): prominent title, no collapse chrome --- */
+.po-premium .po-card-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ink);
+  letter-spacing: 0.01em;
+  line-height: 1.2;
+}
+.po-premium .panel.po-flat-attn {
+  border-left: 3px solid var(--ops-amber);
+}
+/* --- borderless baseline row (mockup) --- */
+.po-premium .po-baserow {
+  display: flex;
+  flex-wrap: wrap;
+  border: 1px solid var(--line-2);
+}
+.po-premium .po-baserow .po-basecell {
+  flex: 1 1 0;
+  min-width: 118px;
+  padding: 8px 12px;
+  border-left: 1px solid var(--line);
+}
+.po-premium .po-baserow .po-basecell:first-child {
+  border-left: 0;
+}
+.po-premium .po-baserow .po-ck {
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--mute);
+}
+.po-premium .po-baserow .po-bv {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+  margin-top: 2px;
+}
+.po-premium .po-baserow .po-bsub {
+  font-size: 10px;
+  font-weight: 400;
+  color: var(--mute);
+}
+.po-premium .po-baserow .po-lockchip {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.po-premium .po-baserow .po-basecell.po-frozen {
+  background: var(--green-tint);
+}
+.po-premium .po-baserow .po-basecell.po-frozen .po-ck {
+  color: var(--green-deep);
+}
+.po-premium .po-baserow .po-basecell.po-pendingcell {
+  background: var(--ops-amber-bg);
+}
+.po-premium .po-baserow .po-basecell.po-baseunlock {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+}
+/* --- Delay tracking compact summary (mockup) --- */
+.po-premium .dt-big {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--ops-amber);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+  line-height: 1;
+}
+.po-premium .dt-ok {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--green-deep);
+}
+.po-premium .dt-sub {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ops-amber);
+}
+.po-premium .dt-meta {
+  font-size: 11.5px;
+  color: var(--mute);
+}
+.po-premium .dt-meta b {
+  color: var(--ink);
+  font-weight: 600;
 }

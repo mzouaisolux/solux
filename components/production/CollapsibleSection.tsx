@@ -24,6 +24,8 @@ export function CollapsibleSection({
   icon,
   attention = false,
   attentionLabel = "Action needed",
+  flat = false,
+  headerRight,
 }: {
   title: string;
   badge?: ReactNode;
@@ -33,8 +35,32 @@ export function CollapsibleSection({
   icon?: ReactNode;
   attention?: boolean;
   attentionLabel?: string;
+  /** Flat card (mockup): prominent title, no collapse toggle, always open. */
+  flat?: boolean;
+  /** Right-aligned content in the flat header (e.g. created/updated meta). */
+  headerRight?: ReactNode;
 }) {
   const [open, setOpen] = useState(defaultOpen);
+  if (flat) {
+    return (
+      <section
+        className={`panel overflow-hidden ${attention ? "po-flat-attn" : ""}`}
+      >
+        <div
+          className="flex items-center justify-between gap-3 flex-wrap"
+          style={{ padding: "12px 14px 9px" }}
+        >
+          <div className="flex items-center gap-2.5 flex-wrap min-w-0">
+            {icon && <span className="text-[color:var(--mute)]">{icon}</span>}
+            <h2 className="po-card-title">{title}</h2>
+            {badge}
+          </div>
+          {headerRight}
+        </div>
+        <div style={{ padding: "0 14px 14px" }}>{children}</div>
+      </section>
+    );
+  }
   return (
     <section
       className={`panel overflow-hidden ${attention ? "po-attention" : ""}`}

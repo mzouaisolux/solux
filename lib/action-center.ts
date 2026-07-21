@@ -32,6 +32,7 @@ import {
   DOC_ACTIVE_STATUSES,
   PRODUCTION_COMPLETED_STATUSES,
   computeExpectedBalance,
+  reconcilePaymentTranche,
   type PaymentMode,
   type PaymentTerms,
   type Role,
@@ -803,8 +804,8 @@ async function gatherSignals(
         ((doc.payment_terms ?? o.documents?.payment_terms ?? null) as PaymentTerms | null)
       );
       const balanceReceived = Number(o.balance_received_amount ?? 0);
-      if (expectedBalance > 0 && balanceReceived + 0.01 < expectedBalance) {
-        const remaining = expectedBalance - balanceReceived;
+      if (expectedBalance > 0 && !reconcilePaymentTranche(expectedBalance, balanceReceived).covered) {
+        const remaining = reconcilePaymentTranche(expectedBalance, balanceReceived).outstanding;
         const balanceChips: ActionContextChip[] = [
           {
             label: "Outstanding",

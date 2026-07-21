@@ -34,19 +34,21 @@ export function DelayEventForm({
   /** Production Due (`current_production_deadline`) as ISO YYYY-MM-DD, or null. */
   productionDue: string | null;
 }) {
-  const [days, setDays] = useState("");
+  const [newDate, setNewDate] = useState("");
   const [type, setType] = useState<DelayType | "">("");
 
-  const daysNum = parseInt(days, 10);
+  // The TLM picks the NEW production due date; the immutable event still
+  // records the signed day delta (days_added) the action expects.
+  const daysNum =
+    productionDue && newDate
+      ? Math.round(
+          (Date.parse(newDate + "T00:00:00Z") -
+            Date.parse(productionDue + "T00:00:00Z")) /
+            86_400_000
+        )
+      : NaN;
   const daysValid = Number.isFinite(daysNum) && daysNum !== 0;
-  const previewDue =
-    productionDue && daysValid
-      ? (() => {
-          const d = new Date(productionDue + "T00:00:00Z");
-          d.setUTCDate(d.getUTCDate() + daysNum);
-          return d.toISOString().slice(0, 10);
-        })()
-      : null;
+  const previewDue = daysValid ? newDate : null;
 
   return (
     <form
@@ -54,33 +56,38 @@ export function DelayEventForm({
       className="border-t border-neutral-100 pt-4 space-y-3"
     >
       <input type="hidden" name="id" value={orderId} />
+      {/* The action contract stays days_added (signed int); we derive it from
+          the picked date so the immutable audit event is identical. */}
+      <input
+        type="hidden"
+        name="days_added"
+        value={daysValid ? String(daysNum) : ""}
+      />
       <div>
         <div className="text-[11px] uppercase tracking-widerx text-neutral-500 font-semibold">
           Add a delay event
         </div>
         <p className="text-[11px] text-neutral-500 mt-0.5 max-w-xl">
           Independent, additive events — log each cause separately so
-          attribution stays honest. Use <b>negative days</b> to record a
-          recovery (e.g. <code>-3</code> if the factory caught up). Only{" "}
-          <b>Production</b> events count toward the factory KPI; all others
-          push the production due date without affecting factory metrics.
+          attribution stays honest. Pick an <b>earlier date</b> to record a
+          recovery (the factory caught up). Only <b>Production</b> events count
+          toward the factory KPI; all others push the due date without
+          affecting factory metrics.
         </p>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-[120px_1fr_1fr] gap-3">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
         <label className="block">
-          <span className="label">Days *</span>
+          <span className="label">New completion due date *</span>
           <input
-            type="number"
-            name="days_added"
-            value={days}
-            onChange={(e) => setDays(e.target.value)}
-            placeholder="+5"
+            type="date"
+            value={newDate}
+            onChange={(e) => setNewDate(e.target.value)}
             required
-            className="input tabular-nums text-right"
+            className="input"
           />
           <span className="text-[10px] text-neutral-500 mt-1 block">
-            Signed. Negative = recovery.
+            Earlier than current due = recovery.
           </span>
         </label>
         <label className="block">
@@ -180,7 +187,7 @@ function PreviewAndSubmit({
       </span>
       <button
         type="submit"
-        disabled={pending}
+        disabled={pending || !daysValid}
         className="btn-secondary disabled:opacity-50"
       >
         {pending ? "Saving…" : "Add delay event"}

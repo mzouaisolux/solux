@@ -19,6 +19,8 @@ import AccessDenied from "@/components/AccessDenied";
 import {
   computeExpectedDeposit,
   computeExpectedBalance,
+  reconcilePaymentTranche,
+  BANK_CHARGES_TOLERANCE,
   computeEffectiveBalanceDueDate,
   BALANCE_DUE_SOURCE_LABEL,
   PRODUCTION_TERMINAL_STATUSES,
@@ -83,17 +85,39 @@ export default async function FinancePage({
 
   const today = todayISO();
   const rows: Row[] = [];
+  // Bank charges absorbed by us (m175), summed across ALL orders — including
+  // fully-settled ones that drop out of the outstanding rows below.
+  const bankChargesByCurrency = new Map<string, number>();
   for (const o of (orders ?? []) as any[]) {
     if (o.archived_at) continue;
     const doc = o.documents as any;
     const total = Number(doc?.total_price ?? 0);
     const paymentMode = (doc?.payment_mode ?? null) as PaymentMode | null;
     const paymentTerms = (doc?.payment_terms ?? null) as PaymentTerms | null;
+    const currency = (doc?.currency as string) ?? "USD";
     const expectedDeposit = computeExpectedDeposit(total, paymentMode, paymentTerms);
     const expectedBalance = computeExpectedBalance(total, paymentMode, paymentTerms);
-    const depositRemaining = Math.max(0, expectedDeposit - Number(o.deposit_received_amount ?? 0));
-    const balanceRemaining = Math.max(0, expectedBalance - Number(o.balance_received_amount ?? 0));
+    // Bank-charges tolerance (m175): a shortfall ≤ USD 45 is NOT an outstanding
+    // receivable — it is absorbed as a bank-charges expense. `remaining` uses
+    // the tolerant outstanding; the absorbed gap is tallied separately.
+    const depositRecon = reconcilePaymentTranche(
+      expectedDeposit,
+      Number(o.deposit_received_amount ?? 0)
+    );
+    const balanceRecon = reconcilePaymentTranche(
+      expectedBalance,
+      Number(o.balance_received_amount ?? 0)
+    );
+    const depositRemaining = depositRecon.outstanding;
+    const balanceRemaining = balanceRecon.outstanding;
     const outstanding = depositRemaining + balanceRemaining;
+    const bankChargesAbsorbed = depositRecon.bankCharges + balanceRecon.bankCharges;
+    if (bankChargesAbsorbed > 0.01) {
+      bankChargesByCurrency.set(
+        currency,
+        (bankChargesByCurrency.get(currency) ?? 0) + bankChargesAbsorbed
+      );
+    }
     const terminal = PRODUCTION_TERMINAL_STATUSES.includes(o.status);
     // Finance cares about MONEY: keep every order with money outstanding
     // (even delivered ones — shipped-but-unpaid is the worst case), plus
@@ -233,6 +257,23 @@ export default async function FinancePage({
           </div>
         </div>
       </div>
+
+      {bankChargesByCurrency.size > 0 && (
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-emerald-800">
+          <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider">
+            Bank charges absorbed
+          </span>
+          <span className="tabular-nums font-semibold">
+            {[...bankChargesByCurrency.entries()]
+              .map(([c, v]) => `${fmtMoney(v)} ${c}`)
+              .join(" · ")}
+          </span>
+          <span className="text-emerald-700/70">
+            — intermediary wire fees (≤ {BANK_CHARGES_TOLERANCE}/tranche) booked
+            as expense, never customer debt
+          </span>
+        </div>
+      )}
 
       {/* ---- filters ---- */}
       <div className="flex flex-wrap items-center gap-1.5">

@@ -6,6 +6,7 @@ import {
   computeExpectedDeposit,
   computeExpectedBalance,
   computeProductionDelay,
+  reconcilePaymentTranche,
   PRODUCTION_ORDER_STATUS_LABEL,
   type ProductionOrder,
   type ProductionOrderStatus,
@@ -277,10 +278,10 @@ export default async function OperationsPage({
       paymentTerms,
       expectedDeposit,
       expectedBalance,
-      balanceRemaining: Math.max(
-        0,
-        expectedBalance - row.balance_received_amount
-      ),
+      balanceRemaining: reconcilePaymentTranche(
+        expectedBalance,
+        row.balance_received_amount
+      ).outstanding,
       delay: computeProductionDelay(row as ProductionOrder),
       alert: computeOperationsAlert({
         order: row as ProductionOrder,
@@ -917,7 +918,7 @@ function CompactRow({
   const critical = e.alert.highPriority;
   const depositCovered =
     e.expectedDeposit > 0
-      ? o.deposit_received_amount + 0.01 >= e.expectedDeposit
+      ? reconcilePaymentTranche(e.expectedDeposit, o.deposit_received_amount).covered
       : null;
   const showBalance = e.balanceRemaining > 0;
   const original = o.initial_production_deadline;

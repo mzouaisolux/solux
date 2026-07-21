@@ -24,6 +24,7 @@ import {
   computeExpectedBalance,
   computeEffectiveBalanceDueDate,
   computeProductionDelay,
+  reconcilePaymentTranche,
   PRODUCTION_ACTIVE_STATUSES,
   PRODUCTION_COMPLETED_STATUSES,
   PRODUCTION_TERMINAL_STATUSES,
@@ -192,11 +193,11 @@ export function computeOperationsAlert(input: OperationsAlertInput): OperationsA
   if (
     overrideAt &&
     expectedDeposit > 0 &&
-    order.deposit_received_amount + 0.01 < expectedDeposit
+    !reconcilePaymentTranche(expectedDeposit, order.deposit_received_amount).covered
   ) {
     const age = calendarDaysBetween(String(overrideAt).slice(0, 10), today);
     if (age !== null && age >= DEPOSIT_OVERRIDE_UNPAID_DAYS) {
-      const remaining = expectedDeposit - order.deposit_received_amount;
+      const remaining = reconcilePaymentTranche(expectedDeposit, order.deposit_received_amount).outstanding;
       return alert(
         "awaiting_deposit",
         `Deposit missing ${age}d`,
@@ -212,8 +213,8 @@ export function computeOperationsAlert(input: OperationsAlertInput): OperationsA
   // Shared by 1c + 2: is there balance money still missing?
   const balanceOutstanding =
     expectedBalance > 0 &&
-    order.balance_received_amount + 0.01 < expectedBalance;
-  const balanceRemaining = expectedBalance - order.balance_received_amount;
+    !reconcilePaymentTranche(expectedBalance, order.balance_received_amount).covered;
+  const balanceRemaining = reconcilePaymentTranche(expectedBalance, order.balance_received_amount).outstanding;
   // Date-based money alerts only make sense once the deposit gate is
   // behind us — while awaiting_deposit, alert #5 is the truthful one.
   const pastDepositGate = order.status !== "awaiting_deposit";
@@ -335,9 +336,9 @@ export function computeOperationsAlert(input: OperationsAlertInput): OperationsA
   if (
     order.status === "awaiting_deposit" &&
     expectedDeposit > 0 &&
-    order.deposit_received_amount + 0.01 < expectedDeposit
+    !reconcilePaymentTranche(expectedDeposit, order.deposit_received_amount).covered
   ) {
-    const remaining = expectedDeposit - order.deposit_received_amount;
+    const remaining = reconcilePaymentTranche(expectedDeposit, order.deposit_received_amount).outstanding;
     return alert(
       "awaiting_deposit",
       "Awaiting deposit",

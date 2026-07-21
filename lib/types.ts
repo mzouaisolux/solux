@@ -1140,9 +1140,61 @@ export function computeExpectedBalance(
 }
 
 /**
+ * USD threshold at/below which a customer underpayment on a wire transfer is
+ * absorbed by Solux as BANK CHARGES (intermediary bank fees deducted in
+ * transit) instead of staying an outstanding customer receivable. Business
+ * rule (2026-07-16): shortfall ≤ this → tranche is "paid", the gap is a bank
+ * charge; above → normal outstanding balance, production stays gated.
+ * Expressed in the order's own currency (orders are USD-dominant).
+ */
+export const BANK_CHARGES_TOLERANCE = 45;
+
+export type TrancheReconciliation = {
+  expected: number;
+  received: number;
+  /** expected − received, 0 when fully/over-paid (2-dp, ≥ 0). */
+  shortfall: number;
+  /** part of the shortfall absorbed by us as bank charges (≤ tolerance). */
+  bankCharges: number;
+  /** part still owed by the customer (only when shortfall exceeds tolerance). */
+  outstanding: number;
+  /** true when the tranche is settled: paid, over-paid, or short ≤ tolerance. */
+  covered: boolean;
+};
+
+/**
+ * Reconciles ONE payment tranche (deposit or balance) against its expected
+ * amount, applying the bank-charges tolerance:
+ *   shortfall ≤ 0.01   → paid / over-paid (covered, no charge, no debt)
+ *   0 < shortfall ≤ 45 → bank charges     (covered; gap = bankCharges, ours)
+ *   shortfall > 45     → outstanding      (NOT covered; gap = outstanding, theirs)
+ * An expected of 0 (no deposit / no balance due) is trivially covered.
+ */
+export function reconcilePaymentTranche(
+  expected: number,
+  received: number
+): TrancheReconciliation {
+  const exp = Number(expected) || 0;
+  const rec = Number(received) || 0;
+  if (exp <= 0) {
+    return { expected: exp, received: rec, shortfall: 0, bankCharges: 0, outstanding: 0, covered: true };
+  }
+  const rawShortfall = exp - rec;
+  if (rawShortfall <= 0.01) {
+    // Fully or over paid (1-cent rounding grace).
+    return { expected: exp, received: rec, shortfall: 0, bankCharges: 0, outstanding: 0, covered: true };
+  }
+  const shortfall = Math.round((rawShortfall + Number.EPSILON) * 100) / 100;
+  if (shortfall <= BANK_CHARGES_TOLERANCE) {
+    return { expected: exp, received: rec, shortfall, bankCharges: shortfall, outstanding: 0, covered: true };
+  }
+  return { expected: exp, received: rec, shortfall, bankCharges: 0, outstanding: shortfall, covered: false };
+}
+
+/**
  * Computes the high-level payment state for a production order.
- * Tolerant of small rounding (1 cent) so receipts saved against
- * computed amounts don't fall just short of "fully paid".
+ * A tranche short by ≤ BANK_CHARGES_TOLERANCE counts as fully paid (the gap
+ * is absorbed as bank charges — see reconcilePaymentTranche).
  */
 export function computeProductionPaymentState(args: {
   totalPrice: number;
@@ -1164,9 +1216,8 @@ export function computeProductionPaymentState(args: {
     paymentMode,
     paymentTerms
   );
-  const epsilon = 0.01;
-  const depositFull = depositReceived + epsilon >= expectedDeposit;
-  const balanceFull = balanceReceived + epsilon >= expectedBalance;
+  const depositFull = reconcilePaymentTranche(expectedDeposit, depositReceived).covered;
+  const balanceFull = reconcilePaymentTranche(expectedBalance, balanceReceived).covered;
 
   if (expectedDeposit <= 0) {
     // No deposit required. Move straight to balance state.
