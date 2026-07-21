@@ -24,8 +24,16 @@ export type BiTitle = { zh: string; en: string };
 
 /**
  * Section title catalog. Natural manufacturing Chinese (as validated by the
- * owner's spec), never machine-literal. Keys are stable identifiers used by
- * the PDF component; adding a section = adding a row here.
+ * owner's spec), never machine-literal.
+ *
+ * ⚠ m177 — EDITING THE STRINGS BELOW NO LONGER CHANGES THE DOSSIER. The PDF
+ * resolves every section title through the centralized terminology catalog
+ * (lib/terminology.ts, keys `section.<key>`), which is editable in
+ * Admin → Terminology; this map is now consumed for its KEYS and its
+ * `DossierSectionKey` type. The values are kept in sync as the built-in
+ * fallback — change lib/terminology.ts first, and mirror it here.
+ *
+ * Adding a section = a row here AND a `section.<key>` term in the catalog.
  */
 export const DOSSIER_SECTIONS = {
   dossier: { zh: "生产档案", en: "Production Dossier" },
@@ -65,33 +73,12 @@ export type DossierSectionKey = keyof typeof DOSSIER_SECTIONS;
    because the Chinese vocabulary is a DOSSIER concern.
    --------------------------------------------------------------------------- */
 
-export const PACKAGING_VERSION_TITLES: Record<PackagingVersion, BiTitle> = {
-  neutral: { zh: "中性包装（无标识）", en: "Neutral version (no logo)" },
-  solux_standard: { zh: "SOLUX 标准包装", en: "Standard SOLUX version" },
-  french_branch: {
-    zh: "法国分公司专用包装",
-    en: "French Branch Exclusive version",
-  },
-  custom_client: {
-    zh: "客户定制包装（需客户标识及设计文件）",
-    en: "Customized Client version (customer logo + design files)",
-  },
-};
-
-export const MANUAL_BRAND_TITLES: Record<UserManualBrand, BiTitle> = {
-  solux: { zh: "SOLUX 品牌手册", en: "SOLUX branded manual" },
-  neutral: { zh: "中性手册（无品牌）", en: "Neutral manual (no brand)" },
-  custom: {
-    zh: "客户定制手册（客户提供图稿）",
-    en: "Customized customer manual (customer artwork)",
-  },
-};
-
-export const MANUAL_LANGUAGE_TITLES: Record<ManualLanguage, BiTitle> = {
-  en: { zh: "英文", en: "English" },
-  fr: { zh: "法文", en: "French" },
-  ar: { zh: "阿拉伯文", en: "Arabic" },
-};
+/* The bilingual enum labels that used to live here (PACKAGING_VERSION_TITLES,
+   MANUAL_BRAND_TITLES, MANUAL_LANGUAGE_TITLES) moved to the centralized
+   terminology catalog in m177 — lib/terminology.ts, keys `enum.packaging.*`,
+   `enum.manual_brand.*` and `enum.manual_language.*`. They are editable in
+   Admin → Terminology; keeping a second copy here is exactly the duplication
+   m177 removed. */
 
 /* ---------------------------------------------------------------------------
    Battery detection — the Battery section aggregates every battery-bearing

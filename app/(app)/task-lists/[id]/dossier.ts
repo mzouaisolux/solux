@@ -14,6 +14,7 @@
 import { createClient } from "@/lib/supabase/client";
 import { ATTACHMENTS_BUCKET } from "@/lib/attachments";
 import { planAppendix, type AppendixItem } from "@/lib/production-dossier";
+import { fetchTermDict } from "@/lib/terminology-client";
 import { buildPdfFilename } from "@/lib/pdf-filename";
 import { fetchExportData, type ExportData } from "./exportData";
 import type { AppendixPayload } from "@/lib/pdf-merge";
@@ -41,13 +42,21 @@ export async function generateProductionDossier(
 
   // Render the dossier body. Dynamic imports keep the PDF/font stack out of
   // the page's server module graph (the F3 regression class).
-  const [{ pdf }, { default: ProductionDossierPDF }, React] = await Promise.all([
-    import("@react-pdf/renderer"),
-    import("@/components/ProductionDossierPDF"),
-    import("react"),
-  ]);
+  const [{ pdf }, { default: ProductionDossierPDF }, React, terms] =
+    await Promise.all([
+      import("@react-pdf/renderer"),
+      import("@/components/ProductionDossierPDF"),
+      import("react"),
+      // m177 — the centralized vocabulary. Falls back to the built-in catalog
+      // when the table is absent, so the dossier renders identically pre-m177.
+      fetchTermDict(),
+    ]);
   const mainBlob = await pdf(
-    React.createElement(ProductionDossierPDF, { data, appendix: plan }) as any
+    React.createElement(ProductionDossierPDF, {
+      data,
+      appendix: plan,
+      terms,
+    }) as any
   ).toBlob();
 
   // Download the embeddable appendix files. A failed download must never

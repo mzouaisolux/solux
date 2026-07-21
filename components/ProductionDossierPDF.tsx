@@ -10,12 +10,15 @@ import {
   BATTERY_CELL_KEY,
   DOSSIER_SECTIONS,
   isBatteryLabel,
-  MANUAL_BRAND_TITLES,
-  MANUAL_LANGUAGE_TITLES,
-  PACKAGING_VERSION_TITLES,
   type AppendixItem,
   type BiTitle,
 } from "@/lib/production-dossier";
+import {
+  makeTerms,
+  DEFAULT_TERM_DICT,
+  type TermDict,
+  type Terms,
+} from "@/lib/terminology";
 import { formatTiltAngle } from "@/lib/industrial-spec";
 import {
   BrandHeader,
@@ -554,21 +557,21 @@ function NotesBlock({
 
 /* ------------------------------- line blocks ------------------------------- */
 
-function LineConfigTable({ line }: { line: ExportLine }) {
+function LineConfigTable({ line, T }: { line: ExportLine; T: Terms }) {
   if (line.rows.length === 0) {
     return (
       <Text style={s.emptyNote}>
         {line.is_manual
-          ? "非标准产品 — 无目录配置 · Manual item — no catalog configuration."
-          : "无销售配置记录 · No sales fields recorded for this line."}
+          ? T.dot("notice.manual_item_no_catalog")
+          : T.dot("notice.no_sales_fields")}
       </Text>
     );
   }
   return (
     <View style={s.table}>
       <View style={s.tHead} fixed>
-        <Text style={[s.tHeadCell, { flex: 2 }]}>配置项 · Field</Text>
-        <Text style={[s.tHeadCell, { flex: 3 }]}>参数值 · Value</Text>
+        <Text style={[s.tHeadCell, { flex: 2 }]}>{T.dot("table.field")}</Text>
+        <Text style={[s.tHeadCell, { flex: 3 }]}>{T.dot("table.value")}</Text>
       </View>
       {line.rows.map((r, i) => (
         <View
@@ -586,7 +589,7 @@ function LineConfigTable({ line }: { line: ExportLine }) {
   );
 }
 
-function LineInstructionCards({ line }: { line: ExportLine }) {
+function LineInstructionCards({ line, T }: { line: ExportLine; T: Terms }) {
   // Instruction cards for every row that carries a factory resolution
   // (mapping / preset / override / missing). Plain informational sales
   // fields are already in the configuration table above.
@@ -596,7 +599,7 @@ function LineInstructionCards({ line }: { line: ExportLine }) {
   if (rows.length === 0) {
     return (
       <Text style={s.emptyNote}>
-        无需工厂映射 · No factory-mapped fields on this line.
+        {T.dot("notice.no_factory_mapped_fields")}
       </Text>
     );
   }
@@ -627,18 +630,17 @@ function LineInstructionCards({ line }: { line: ExportLine }) {
 
             {r.factory_code && (
               <Text style={s.factoryCodeRow}>
-                工厂代码 · Factory code: {r.factory_code}
+                {T.dot("field.factory_code")}: {r.factory_code}
               </Text>
             )}
 
             <View style={s.instructionLabelRow}>
-              <Text style={s.notesLabelZh}>最终生产指令</Text>
-              <Text style={s.notesLabelEn}>Final factory instruction</Text>
+              <Text style={s.notesLabelZh}>{T.zh("factory_instruction.final")}</Text>
+              <Text style={s.notesLabelEn}>{T.en("factory_instruction.final")}</Text>
             </View>
             {r.source === "missing" ? (
               <Text style={s.instructionMuted}>
-                缺少工厂映射 · Missing factory mapping — resolve in Admin →
-                Factory mapping or set a line override.
+                {T.dot("notice.missing_factory_mapping")}
               </Text>
             ) : (
               <Text style={s.instructionText}>
@@ -649,9 +651,9 @@ function LineInstructionCards({ line }: { line: ExportLine }) {
             {r.source === "override" && r.factory_mapping_instruction && (
               <>
                 <View style={s.instructionLabelRow}>
-                  <Text style={s.notesLabelZh}>标准映射（已被覆盖）</Text>
+                  <Text style={s.notesLabelZh}>{T.zh("factory_instruction.standard_overridden")}</Text>
                   <Text style={s.notesLabelEn}>
-                    Standard mapping (replaced by override)
+                    {T.en("factory_instruction.standard_overridden")}
                   </Text>
                 </View>
                 <Text style={s.mappingText}>
@@ -666,7 +668,7 @@ function LineInstructionCards({ line }: { line: ExportLine }) {
   );
 }
 
-function LineBatteryBlock({ line }: { line: ExportLine }) {
+function LineBatteryBlock({ line, T }: { line: ExportLine; T: Terms }) {
   const batteryRows = line.rows.filter((r) => isBatteryLabel(r.field_name));
   const batteryTech = line.technical_entries.filter(
     (e) => isBatteryLabel(e.label) && e.label !== BATTERY_CELL_KEY
@@ -683,12 +685,12 @@ function LineBatteryBlock({ line }: { line: ExportLine }) {
 
   return (
     <>
-      <BiSub title={DOSSIER_SECTIONS.battery} />
+      <BiSub title={T.bi("section.battery")} />
       <View style={s.batteryBox} wrap={false}>
         {line.battery_cell_type && (
           <View style={s.batteryTypeRow}>
-            <Text style={s.notesLabelZh}>电池类型</Text>
-            <Text style={s.notesLabelEn}>Battery Type</Text>
+            <Text style={s.notesLabelZh}>{T.zh("field.battery_type")}</Text>
+            <Text style={s.notesLabelEn}>{T.en("field.battery_type")}</Text>
             <Text style={s.batteryTypeValue}>{line.battery_cell_type}</Text>
           </View>
         )}
@@ -724,12 +726,25 @@ function LineBatteryBlock({ line }: { line: ExportLine }) {
 export default function ProductionDossierPDF({
   data,
   appendix,
+  terms,
 }: {
   data: ExportData;
   /** Planned appendix (labels assigned) — pages merged post-render by pdf-lib. */
   appendix: AppendixItem[];
+  /**
+   * m177 — the centralized vocabulary. Optional so an older caller still
+   * renders: omitted, every term resolves from the built-in catalog, which is
+   * exactly what this document printed before the terminology table existed.
+   */
+  terms?: TermDict;
 }) {
-  const S = DOSSIER_SECTIONS;
+  const T = makeTerms(terms ?? DEFAULT_TERM_DICT);
+  // Section titles resolve through the dictionary too — the built-in catalog
+  // carries the same values, so this is identical output until someone edits
+  // a title in Admin → Terminology.
+  const S = Object.fromEntries(
+    Object.keys(DOSSIER_SECTIONS).map((k) => [k, T.bi(`section.${k}`)])
+  ) as Record<keyof typeof DOSSIER_SECTIONS, BiTitle>;
   const generatedAt = fmtDate(new Date().toISOString());
 
   // Dynamic section numbering — sections only count when they render.
@@ -797,7 +812,7 @@ export default function ProductionDossierPDF({
           <Text style={s.coverTitleEn}>{S.dossier.en}</Text>
           <Text style={s.coverNumber}>{data.number}</Text>
           <Text style={s.coverCaption}>
-            Complete production package · 工厂完整生产文件
+            {T.en("notice.complete_package")} · {T.zh("notice.complete_package")}
           </Text>
         </View>
 
@@ -814,15 +829,14 @@ export default function ProductionDossierPDF({
           <BiSub title={S.customer} />
           <View style={s.kvGrid}>
             <KV
-              zh="客户"
-              en="Client"
+              {...T.kv("field.client")}
               value={
                 data.client.company_name +
                 (data.client.client_code ? ` · ${data.client.client_code}` : "")
               }
             />
-            <KV zh="国家" en="Country" value={data.client.country ?? "—"} />
-            <KV zh="联系人" en="Contact" value={data.client.contact_name ?? "—"} />
+            <KV {...T.kv("field.country")} value={data.client.country ?? "—"} />
+            <KV {...T.kv("field.contact")} value={data.client.contact_name ?? "—"} />
           </View>
         </View>
 
@@ -832,34 +846,29 @@ export default function ProductionDossierPDF({
           <BiSub title={S.project} />
           <View style={s.kvGrid}>
             <KV
-              zh="订单编号"
-              en="Order reference"
+              {...T.kv("field.order_reference")}
               value={data.quotation_number ?? "—"}
             />
-            <KV zh="任务单编号" en="Task list" value={data.number} />
+            <KV {...T.kv("field.task_list")} value={data.number} />
             <KV
-              zh="状态"
-              en="Status"
+              {...T.kv("field.status")}
               value={data.status.replace(/_/g, " ").toUpperCase()}
             />
-            <KV zh="创建日期" en="Created" value={fmtDate(data.created_at)} />
-            <KV zh="创建人" en="Created by" value={data.created_by_label} />
+            <KV {...T.kv("field.created")} value={fmtDate(data.created_at)} />
+            <KV {...T.kv("field.created_by")} value={data.created_by_label} />
             <KV
-              zh="审核人"
-              en="Validated by"
+              {...T.kv("field.validated_by")}
               value={data.validated_by_label}
             />
             <KV
-              zh="审核日期"
-              en="Validated on"
+              {...T.kv("field.validated_on")}
               value={fmtDate(data.validated_at)}
             />
             <KV
-              zh="运输方式"
-              en="Shipping"
+              {...T.kv("field.shipping_method")}
               value={data.shipping_method ?? "—"}
             />
-            <KV zh="生成日期" en="Generated" value={generatedAt} />
+            <KV {...T.kv("field.generated")} value={generatedAt} />
           </View>
         </View>
 
@@ -868,7 +877,7 @@ export default function ProductionDossierPDF({
         {/* Document map — what this dossier contains (no page numbers:
             sections are numbered, the reader follows the running order). */}
         <View>
-          <BiSub title={{ zh: "文件目录", en: "Contents" }} />
+          <BiSub title={T.bi("section.contents")} />
           {[
             `${nSummary}. ${S.order_summary.zh} · ${S.order_summary.en}`,
             ...(showNotes
@@ -921,14 +930,10 @@ export default function ProductionDossierPDF({
         <BiSection n={nSummary} title={S.order_summary} />
         <View style={s.table}>
           <View style={s.tHead} fixed>
-            <Text style={[s.tHeadCell, { flex: 3 }]}>产品 · Product</Text>
-            <Text style={[s.tHeadCell, { flex: 2 }]}>系列 · Category</Text>
-            <Text style={[s.tHeadCell, { width: 44, textAlign: "right" }]}>
-              数量 · Qty
-            </Text>
-            <Text style={[s.tHeadCell, { flex: 4, paddingLeft: 8 }]}>
-              主要配置 · Main configuration
-            </Text>
+            <Text style={[s.tHeadCell, { flex: 3 }]}>{T.dot("table.product")}</Text>
+            <Text style={[s.tHeadCell, { flex: 2 }]}>{T.dot("table.category")}</Text>
+            <Text style={[s.tHeadCell, { width: 44, textAlign: "right" }]}>{T.dot("table.qty")}</Text>
+            <Text style={[s.tHeadCell, { flex: 4, paddingLeft: 8 }]}>{T.dot("table.main_configuration")}</Text>
           </View>
           {data.lines.length === 0 ? (
             <View style={s.tRow}>
@@ -974,15 +979,13 @@ export default function ProductionDossierPDF({
             <BiSection n={nNotes} title={S.production_notes} />
             {data.original_sales_request && (
               <NotesBlock
-                zh="客户原始需求"
-                en="Original sales request"
+                {...T.kv("field.original_sales_request")}
                 text={data.original_sales_request}
               />
             )}
             {data.production_notes && (
               <NotesBlock
-                zh="销售生产说明"
-                en="Production notes (from sales)"
+                {...T.kv("field.production_notes_sales")}
                 text={data.production_notes}
               />
             )}
@@ -1012,20 +1015,19 @@ export default function ProductionDossierPDF({
                 </Text>
               </View>
               <View style={{ alignItems: "flex-end" }}>
-                <Text style={s.lineQtyLabel}>数量 · Quantity</Text>
+                <Text style={s.lineQtyLabel}>{T.dot("table.qty")}</Text>
                 <Text style={s.lineQtyValue}>× {l.quantity}</Text>
               </View>
             </View>
 
             {l.is_manual && l.manual_specs && (
               <NotesBlock
-                zh="产品规格（非标准件）"
-                en="Specifications (manual item)"
+                {...T.kv("field.manual_specs")}
                 text={l.manual_specs}
               />
             )}
 
-            <LineConfigTable line={l} />
+            <LineConfigTable line={l} T={T} />
 
             <BiSub
               title={{
@@ -1033,9 +1035,9 @@ export default function ProductionDossierPDF({
                 en: `${S.factory_mapping.en} · ${S.factory_instructions.en}`,
               }}
             />
-            <LineInstructionCards line={l} />
+            <LineInstructionCards line={l} T={T} />
 
-            <LineBatteryBlock line={l} />
+            <LineBatteryBlock line={l} T={T} />
 
             {l.technical_entries.filter(
               (e) => !isBatteryLabel(e.label)
@@ -1077,8 +1079,7 @@ export default function ProductionDossierPDF({
 
             {l.internal_notes && (
               <NotesBlock
-                zh="产线备注"
-                en="Line notes"
+                {...T.kv("field.line_notes")}
                 text={l.internal_notes}
               />
             )}
@@ -1105,18 +1106,14 @@ export default function ProductionDossierPDF({
                   </View>
                   {industrial.pole_drawing_tilt_verified ? (
                     <Text style={s.notesText}>
-                      灯杆图纸倾角已核对 · Pole drawing checked against the
-                      required tilt angle
+                      {T.dot("notice.tilt_checked")}
                       {industrial.pole_drawing_tilt_verified_at
                         ? ` (${fmtDate(industrial.pole_drawing_tilt_verified_at)})`
                         : ""}
                       .
                     </Text>
                   ) : (
-                    <Text style={s.instructionMuted}>
-                      灯杆图纸倾角未核对 · Pole drawing NOT yet checked against
-                      the required tilt angle — confirm before production.
-                    </Text>
+                    <Text style={s.instructionMuted}>{T.dot("notice.tilt_not_checked")}</Text>
                   )}
                 </View>
               </>
@@ -1129,13 +1126,9 @@ export default function ProductionDossierPDF({
                 <BiSub title={S.pole_accessories} />
                 <View style={s.table}>
                   <View style={s.tHead} fixed>
-                    <Text style={[s.tHeadCell, { flex: 2.4 }]}>
-                      配件 · Accessory
-                    </Text>
-                    <Text style={[s.tHeadCell, { flex: 1.6 }]}>
-                      是否包含 · Included
-                    </Text>
-                    <Text style={[s.tHeadCell, { flex: 3 }]}>备注 · Note</Text>
+                    <Text style={[s.tHeadCell, { flex: 2.4 }]}>{T.dot("table.accessory")}</Text>
+                    <Text style={[s.tHeadCell, { flex: 1.6 }]}>{T.dot("table.included")}</Text>
+                    <Text style={[s.tHeadCell, { flex: 3 }]}>{T.dot("table.note")}</Text>
                   </View>
                   {industrial.spec.pole_accessories.items.map((it, i) => (
                     <View
@@ -1153,7 +1146,7 @@ export default function ProductionDossierPDF({
                           it.included ? {} : { color: COLORS.dangerText },
                         ]}
                       >
-                        {it.included ? "包含 · Included" : "不包含 · EXCLUDED"}
+                        {it.included ? T.dot("status.included") : T.dot("status.excluded")}
                       </Text>
                       <Text style={[s.tCell, { flex: 3 }]}>{it.note ?? "—"}</Text>
                     </View>
@@ -1162,8 +1155,7 @@ export default function ProductionDossierPDF({
                 {industrial.spec.pole_accessories.notes && (
                   <View style={{ marginTop: 6 }}>
                     <NotesBlock
-                      zh="配件备注"
-                      en="Accessory notes"
+                      {...T.kv("field.accessory_notes")}
                       text={industrial.spec.pole_accessories.notes}
                     />
                   </View>
@@ -1176,26 +1168,21 @@ export default function ProductionDossierPDF({
                     <BiSub title={S.packaging} />
                     <View style={s.kvGrid}>
                       <KV
-                        zh="包装版本"
-                        en="Packaging version"
+                        {...T.kv("field.packaging_version")}
                         value={
                           industrial.spec.packaging.version
-                            ? `${PACKAGING_VERSION_TITLES[industrial.spec.packaging.version].zh} · ${PACKAGING_VERSION_TITLES[industrial.spec.packaging.version].en}`
+                            ? T.dot(`enum.packaging.${industrial.spec.packaging.version}`)
                             : "—"
                         }
                         wide
                       />
                     </View>
                     {industrial.spec.packaging.version === "custom_client" && (
-                      <Text style={[s.emptyNote, { marginBottom: 6 }]}>
-                        客户包装图稿见附录 · Customer packaging artwork, if
-                        uploaded, is included in the Appendix.
-                      </Text>
+                      <Text style={[s.emptyNote, { marginBottom: 6 }]}>{T.dot("notice.packaging_artwork_appendix")}</Text>
                     )}
                     {industrial.spec.packaging.notes && (
                       <NotesBlock
-                        zh="包装备注"
-                        en="Packaging notes"
+                        {...T.kv("field.packaging_notes")}
                         text={industrial.spec.packaging.notes}
                       />
                     )}
@@ -1210,24 +1197,22 @@ export default function ProductionDossierPDF({
                     <BiSub title={S.user_manual} />
                     <View style={s.kvGrid}>
                       <KV
-                        zh="手册版本"
-                        en="Manual version"
+                        {...T.kv("field.manual_version")}
                         value={
                           industrial.spec.user_manual.brand
-                            ? `${MANUAL_BRAND_TITLES[industrial.spec.user_manual.brand].zh} · ${MANUAL_BRAND_TITLES[industrial.spec.user_manual.brand].en}`
+                            ? T.dot(`enum.manual_brand.${industrial.spec.user_manual.brand}`)
                             : "—"
                         }
                         wide
                       />
                       <KV
-                        zh="语言"
-                        en="Languages"
+                        {...T.kv("field.languages")}
                         value={
                           industrial.spec.user_manual.languages.length > 0
                             ? industrial.spec.user_manual.languages
                                 .map(
                                   (l) =>
-                                    `${MANUAL_LANGUAGE_TITLES[l].zh} ${MANUAL_LANGUAGE_TITLES[l].en}`
+                                    `${T.zh(`enum.manual_language.${l}`)} ${T.en(`enum.manual_language.${l}`)}`
                                 )
                                 .join(", ")
                             : "—"
@@ -1235,15 +1220,11 @@ export default function ProductionDossierPDF({
                       />
                     </View>
                     {industrial.spec.user_manual.brand === "custom" && (
-                      <Text style={[s.emptyNote, { marginBottom: 6 }]}>
-                        客户手册图稿见附录 · Customer manual artwork, if
-                        uploaded, is included in the Appendix.
-                      </Text>
+                      <Text style={[s.emptyNote, { marginBottom: 6 }]}>{T.dot("notice.manual_artwork_appendix")}</Text>
                     )}
                     {industrial.spec.user_manual.notes && (
                       <NotesBlock
-                        zh="手册备注"
-                        en="Manual notes"
+                        {...T.kv("field.manual_notes")}
                         text={industrial.spec.user_manual.notes}
                       />
                     )}
@@ -1257,23 +1238,13 @@ export default function ProductionDossierPDF({
                     <BiSub title={S.spare_parts} />
                     <View style={s.table}>
                       <View style={s.tHead} fixed>
-                        <Text style={[s.tHeadCell, { flex: 2 }]}>
-                          部件 · Part
-                        </Text>
-                        <Text style={[s.tHeadCell, { flex: 2 }]}>
-                          型号 · Model
-                        </Text>
+                        <Text style={[s.tHeadCell, { flex: 2 }]}>{T.dot("table.part")}</Text>
+                        <Text style={[s.tHeadCell, { flex: 2 }]}>{T.dot("table.model")}</Text>
                         <Text
                           style={[s.tHeadCell, { width: 44, textAlign: "right" }]}
-                        >
-                          数量 · Qty
-                        </Text>
-                        <Text style={[s.tHeadCell, { flex: 2, paddingLeft: 8 }]}>
-                          工厂命名 · Factory name
-                        </Text>
-                        <Text style={[s.tHeadCell, { flex: 2.4 }]}>
-                          备注 · Notes
-                        </Text>
+                        >{T.dot("table.qty")}</Text>
+                        <Text style={[s.tHeadCell, { flex: 2, paddingLeft: 8 }]}>{T.dot("table.factory_name")}</Text>
+                        <Text style={[s.tHeadCell, { flex: 2.4 }]}>{T.dot("table.note")}</Text>
                       </View>
                       {industrial.spec.spare_parts.map((p, i) => (
                         <View
@@ -1287,7 +1258,7 @@ export default function ProductionDossierPDF({
                               <Text
                                 style={[s.tCell, { fontSize: 7, color: COLORS.muted }]}
                               >
-                                客户命名 Customer: {p.customer_name}
+                                {T.zh("field.customer_naming")} {T.en("field.customer_naming")}: {p.customer_name}
                               </Text>
                             )}
                           </View>
@@ -1346,8 +1317,7 @@ export default function ProductionDossierPDF({
             <BiSub title={S.energy} />
             <View style={s.kvGrid}>
               <KV
-                zh="额定功率"
-                en="Lighting power"
+                {...T.kv("field.lighting_power")}
                 value={
                   data.lighting.lighting_power != null
                     ? `${data.lighting.lighting_power} W`
@@ -1355,8 +1325,7 @@ export default function ProductionDossierPDF({
                 }
               />
               <KV
-                zh="每晚工作时长"
-                en="Operating hours / night"
+                {...T.kv("field.operating_hours")}
                 value={
                   data.lighting.operating_hours != null
                     ? `${data.lighting.operating_hours} h`
@@ -1364,19 +1333,16 @@ export default function ProductionDossierPDF({
                 }
               />
               <KV
-                zh="配光透镜"
-                en="Approved optics"
+                {...T.kv("field.approved_optics")}
                 value={data.lighting.approved_optics ?? "—"}
               />
               <KV
-                zh="能耗报告"
-                en="Energy study"
+                {...T.kv("field.energy_study")}
                 value={data.lighting.energy_study_name ?? "—"}
                 wide
               />
               <KV
-                zh="DIALux 报告"
-                en="DIALux report"
+                {...T.kv("field.dialux_report")}
                 value={data.lighting.dialux_name ?? "—"}
               />
             </View>
@@ -1384,22 +1350,14 @@ export default function ProductionDossierPDF({
             {data.lighting.lighting_program.length > 0 && (
               <>
                 <BiSub
-                  title={{ zh: "调光程序", en: "Dimming schedule" }}
+                  title={T.bi("section.dimming_schedule")}
                 />
                 <View style={s.table}>
                   <View style={s.tHead} fixed>
-                    <Text style={[s.tHeadCell, { width: 70 }]}>
-                      时段 · Period
-                    </Text>
-                    <Text style={[s.tHeadCell, { width: 70, textAlign: "right" }]}>
-                      输出 · Output
-                    </Text>
-                    <Text style={[s.tHeadCell, { width: 76, textAlign: "right" }]}>
-                      时长 · Duration
-                    </Text>
-                    <Text style={[s.tHeadCell, { flex: 1, paddingLeft: 10 }]}>
-                      感应模式 · Motion sensor
-                    </Text>
+                    <Text style={[s.tHeadCell, { width: 70 }]}>{T.dot("table.period")}</Text>
+                    <Text style={[s.tHeadCell, { width: 70, textAlign: "right" }]}>{T.dot("table.output")}</Text>
+                    <Text style={[s.tHeadCell, { width: 76, textAlign: "right" }]}>{T.dot("table.duration")}</Text>
+                    <Text style={[s.tHeadCell, { flex: 1, paddingLeft: 10 }]}>{T.dot("table.motion_sensor")}</Text>
                   </View>
                   {data.lighting.lighting_program.map((p, i) => (
                     <View
@@ -1418,7 +1376,7 @@ export default function ProductionDossierPDF({
                       </Text>
                       <Text style={[s.tCell, { flex: 1, paddingLeft: 10 }]}>
                         {p.presence_detection
-                          ? `感应加亮至 ${p.detection_output ?? "—"}% · boost to ${
+                          ? `${T.zh("status.motion_boost")} ${p.detection_output ?? "—"}% · ${T.en("status.motion_boost")} ${
                               p.detection_output ?? "—"
                             }%${
                               p.detection_hold_seconds
@@ -1429,7 +1387,7 @@ export default function ProductionDossierPDF({
                                 ? `, ~${p.estimated_detections} detections/night`
                                 : ""
                             }`
-                          : "固定输出 · Fixed level"}
+                          : T.dot("status.fixed_level")}
                       </Text>
                     </View>
                   ))}
@@ -1441,28 +1399,17 @@ export default function ProductionDossierPDF({
               <>
                 <BiSub
                   title={{
-                    zh: "DIALux 生产配置",
-                    en: "DIALux production configurations",
+                    ...T.bi("section.dialux_configs"),
                   }}
                 />
                 <View style={s.table}>
                   <View style={s.tHead} fixed>
-                    <Text style={[s.tHeadCell, { flex: 2 }]}>区域 · Zone</Text>
-                    <Text style={[s.tHeadCell, { width: 50, textAlign: "right" }]}>
-                      功率 · W
-                    </Text>
-                    <Text style={[s.tHeadCell, { width: 60, textAlign: "right" }]}>
-                      安装高度 · H (m)
-                    </Text>
-                    <Text style={[s.tHeadCell, { flex: 2, paddingLeft: 8 }]}>
-                      光学 · Optic
-                    </Text>
-                    <Text style={[s.tHeadCell, { width: 54, textAlign: "right" }]}>
-                      色温 · CCT
-                    </Text>
-                    <Text style={[s.tHeadCell, { width: 44, textAlign: "right" }]}>
-                      数量 · Qty
-                    </Text>
+                    <Text style={[s.tHeadCell, { flex: 2 }]}>{T.dot("table.zone")}</Text>
+                    <Text style={[s.tHeadCell, { width: 50, textAlign: "right" }]}>{T.dot("table.power_w")}</Text>
+                    <Text style={[s.tHeadCell, { width: 60, textAlign: "right" }]}>{T.dot("table.mounting_height")}</Text>
+                    <Text style={[s.tHeadCell, { flex: 2, paddingLeft: 8 }]}>{T.dot("table.optic")}</Text>
+                    <Text style={[s.tHeadCell, { width: 54, textAlign: "right" }]}>{T.dot("table.cct")}</Text>
+                    <Text style={[s.tHeadCell, { width: 44, textAlign: "right" }]}>{T.dot("table.qty")}</Text>
                   </View>
                   {data.lighting.dialux_configurations.map((c, i) => (
                     <View
@@ -1503,23 +1450,15 @@ export default function ProductionDossierPDF({
           <View break>
             <BiSection n={nStickers} title={S.stickers} />
             {requiredStickers.length === 0 ? (
-              <Text style={s.emptyNote}>
-                无标签要求 · No sticker requirements.
-              </Text>
+              <Text style={s.emptyNote}>{T.dot("notice.no_stickers")}</Text>
             ) : (
               <View style={s.table}>
                 <View style={s.tHead} fixed>
-                  <Text style={[s.tHeadCell, { flex: 2 }]}>标签 · Item</Text>
-                  <Text style={[s.tHeadCell, { flex: 1.4 }]}>
-                    工艺 · Method
-                  </Text>
-                  <Text style={[s.tHeadCell, { flex: 1.6 }]}>
-                    品牌 · Branding
-                  </Text>
-                  <Text style={[s.tHeadCell, { flex: 1.6 }]}>
-                    位置 · Position
-                  </Text>
-                  <Text style={[s.tHeadCell, { flex: 3 }]}>备注 · Note</Text>
+                  <Text style={[s.tHeadCell, { flex: 2 }]}>{T.dot("table.sticker_item")}</Text>
+                  <Text style={[s.tHeadCell, { flex: 1.4 }]}>{T.dot("table.method")}</Text>
+                  <Text style={[s.tHeadCell, { flex: 1.6 }]}>{T.dot("table.branding")}</Text>
+                  <Text style={[s.tHeadCell, { flex: 1.6 }]}>{T.dot("table.position")}</Text>
+                  <Text style={[s.tHeadCell, { flex: 3 }]}>{T.dot("table.note")}</Text>
                 </View>
                 {requiredStickers.map((it, i) => (
                   <View
@@ -1532,16 +1471,16 @@ export default function ProductionDossierPDF({
                     </Text>
                     <Text style={[s.tCell, { flex: 1.4 }]}>
                       {it.method === "laser"
-                        ? "激光 Laser"
+                        ? `${T.zh("status.laser")} ${T.en("status.laser")}`
                         : it.method === "sticker"
-                        ? "贴纸 Sticker"
+                        ? `${T.zh("status.sticker")} ${T.en("status.sticker")}`
                         : "—"}
                     </Text>
                     <Text style={[s.tCell, { flex: 1.6 }]}>
                       {it.branding_source === "solux"
                         ? "Solux"
                         : it.branding_source === "customer"
-                        ? "客户 Customer"
+                        ? `${T.zh("status.branding_customer")} ${T.en("status.branding_customer")}`
                         : "—"}
                     </Text>
                     <Text style={[s.tCell, { flex: 1.6 }]}>
@@ -1555,16 +1494,12 @@ export default function ProductionDossierPDF({
             {data.stickers.notes && (
               <View style={{ marginTop: 8 }}>
                 <NotesBlock
-                  zh="标签总备注"
-                  en="Sticker notes"
+                  {...T.kv("field.sticker_notes")}
                   text={data.stickers.notes}
                 />
               </View>
             )}
-            <Text style={[s.emptyNote, { marginTop: 4 }]}>
-              标签图稿见附录 · Sticker artwork files, if uploaded, are included
-              in the Appendix.
-            </Text>
+            <Text style={[s.emptyNote, { marginTop: 4 }]}>{T.dot("notice.sticker_artwork_appendix")}</Text>
           </View>
         )}
 
@@ -1574,33 +1509,27 @@ export default function ProductionDossierPDF({
             <BiSection n={nTransport} title={S.transport} />
             <View style={s.kvGrid}>
               <KV
-                zh="贸易条款"
-                en="Incoterm"
+                {...T.kv("field.incoterm")}
                 value={data.logistics?.incoterm ?? "—"}
               />
               <KV
-                zh="运输方式"
-                en="Shipping method"
+                {...T.kv("field.shipping_method")}
                 value={data.shipping_method ?? data.logistics?.freight_type ?? "—"}
               />
               <KV
-                zh="货运类型"
-                en="Freight type"
+                {...T.kv("field.freight_type")}
                 value={data.logistics?.freight_type ?? "—"}
               />
               <KV
-                zh="装运港"
-                en="Port of loading"
+                {...T.kv("field.port_of_loading")}
                 value={data.logistics?.port_of_loading ?? "—"}
               />
               <KV
-                zh="目的港"
-                en="Port of destination"
+                {...T.kv("field.port_of_destination")}
                 value={data.logistics?.port_of_destination ?? "—"}
               />
               <KV
-                zh="生产周期"
-                en="Production time"
+                {...T.kv("field.production_time")}
                 value={
                   data.logistics?.production_days != null
                     ? `${data.logistics.production_days} days`
@@ -1627,8 +1556,7 @@ export default function ProductionDossierPDF({
             ))}
             {data.risks.notes && (
               <NotesBlock
-                zh="质量与风险备注"
-                en="Quality & risk notes"
+                {...T.kv("field.quality_risk_notes")}
                 text={data.risks.notes}
                 warn
               />
@@ -1641,8 +1569,7 @@ export default function ProductionDossierPDF({
           <View break>
             <BiSection n={nInternal} title={S.internal_notes} />
             <NotesBlock
-              zh="内部技术备注"
-              en="Technical notes (internal)"
+              {...T.kv("field.technical_notes_internal")}
               text={data.technical_notes}
               warn
             />
@@ -1653,18 +1580,14 @@ export default function ProductionDossierPDF({
         <View break>
           <BiSection n={nUploads} title={S.uploads} />
           {appendix.length === 0 ? (
-            <Text style={s.emptyNote}>
-              本项目无上传文件 · No documents uploaded for this project.
-            </Text>
+            <Text style={s.emptyNote}>{T.dot("notice.no_uploads")}</Text>
           ) : (
             <View style={s.table}>
               <View style={s.tHead} fixed>
-                <Text style={[s.tHeadCell, { width: 44 }]}>编号 · Ref</Text>
-                <Text style={[s.tHeadCell, { flex: 3 }]}>文件 · File</Text>
-                <Text style={[s.tHeadCell, { flex: 2 }]}>类型 · Type</Text>
-                <Text style={[s.tHeadCell, { flex: 2.4 }]}>
-                  状态 · Status
-                </Text>
+                <Text style={[s.tHeadCell, { width: 44 }]}>{T.dot("table.ref")}</Text>
+                <Text style={[s.tHeadCell, { flex: 3 }]}>{T.dot("table.file")}</Text>
+                <Text style={[s.tHeadCell, { flex: 2 }]}>{T.dot("table.type")}</Text>
+                <Text style={[s.tHeadCell, { flex: 2.4 }]}>{T.dot("table.status")}</Text>
               </View>
               {appendix.map((a, i) => (
                 <View
@@ -1688,8 +1611,8 @@ export default function ProductionDossierPDF({
                   <Text style={[s.tCell, { flex: 2 }]}>{a.type_label}</Text>
                   <Text style={[s.tCell, { flex: 2.4 }]}>
                     {a.label
-                      ? "已合并至附录 · Included in appendix"
-                      : "另行提供 · Provided separately"}
+                      ? T.dot("status.in_appendix")
+                      : T.dot("status.provided_separately")}
                   </Text>
                 </View>
               ))}
@@ -1700,10 +1623,8 @@ export default function ProductionDossierPDF({
             <View style={{ marginTop: GAP_S }}>
               <BiSub title={S.appendix} />
               <Text style={s.notesText}>
-                以下附录页为项目上传文件的完整内容，按编号顺序排列（A1、A2…）。
-                The following appendix pages contain the uploaded project
-                documents in full, in reference order (A1, A2…). 本档案为工厂
-                唯一生产依据 · This dossier is the complete production package.
+                {T.zh("notice.appendix_preamble")}{" "}
+                {T.en("notice.appendix_preamble")}
               </Text>
             </View>
           )}
