@@ -24,6 +24,7 @@ import {
   openRevisionRecord,
   recordValidationRevision,
 } from "@/lib/task-list-revisions-server";
+import { missingRequiredProgrammingFor } from "@/lib/lighting/programming-rules-server";
 import {
   countMissingTaskListMappings,
   taskListHasOpenRevision,
@@ -1206,6 +1207,7 @@ export async function validateTaskList(formData: FormData) {
     tiltCheckpointPending,
     tiltConflictPendingNow,
     openBlockingActionItems,
+    missingRequiredProgramming,
   ] =
     await Promise.all([
       countMissingTaskListMappings(id),
@@ -1218,6 +1220,7 @@ export async function validateTaskList(formData: FormData) {
       tiltCheckpointPendingFor(supabase, id), // m159
       tiltConflictPendingFor(supabase, id), // m176
       openBlockingActionItemsFor(supabase, id), // m178
+      missingRequiredProgrammingFor(supabase, id), // m180
     ]);
   const verdict = evaluateRelease({
     statusAllowed: row.status === "under_validation",
@@ -1227,6 +1230,7 @@ export async function validateTaskList(formData: FormData) {
     tiltCheckpointPending,
     tiltConflictPending: tiltConflictPendingNow,
     openBlockingActionItems,
+    missingRequiredProgramming,
   });
   if (!verdict.ok) {
     throw new Error(verdict.reason ?? "Cannot release to production.");
@@ -1283,6 +1287,7 @@ export async function markProductionReady(formData: FormData) {
     tiltCheckpointPending,
     tiltConflictPendingNow,
     openBlockingActionItems,
+    missingRequiredProgramming,
   ] =
     await Promise.all([
       countMissingTaskListMappings(id),
@@ -1295,6 +1300,7 @@ export async function markProductionReady(formData: FormData) {
       tiltCheckpointPendingFor(supabase, id), // m159
       tiltConflictPendingFor(supabase, id), // m176
       openBlockingActionItemsFor(supabase, id), // m178
+      missingRequiredProgrammingFor(supabase, id), // m180
     ]);
   const verdict = evaluateRelease({
     statusAllowed:
@@ -1305,6 +1311,7 @@ export async function markProductionReady(formData: FormData) {
     tiltCheckpointPending,
     tiltConflictPending: tiltConflictPendingNow,
     openBlockingActionItems,
+    missingRequiredProgramming,
   });
   if (!verdict.ok) {
     throw new Error(verdict.reason ?? "Cannot release to production.");

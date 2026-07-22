@@ -132,6 +132,13 @@ export const CAPABILITY_CATALOG = [
   { key: "admin.manage_categories", label: "Manage categories & config fields" },
   { key: "admin.manage_banks", label: "Manage bank accounts" },
   { key: "admin.manage_sales_conditions", label: "Manage sales conditions" },
+  // Lighting programming rules (m180)
+  {
+    key: "lighting_rules.manage",
+    label: "Manage lighting programming rules",
+    description:
+      "Edit the rules deciding which product lines require factory programming (Lighting Setup). One shared resolver drives the task-list UI, validation gates, exports and AI population.",
+  },
   // Terminology (m177) — the centralized fixed translations
   {
     key: "terminology.manage",
@@ -180,6 +187,7 @@ const MODULE_LABEL: Record<string, string> = {
   prospect: "Prospects / CRM",
   admin: "Administration",
   terminology: "Terminology",
+  lighting_rules: "Lighting Rules",
 };
 
 function titleCase(s: string): string {

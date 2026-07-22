@@ -170,6 +170,11 @@ export const TERM_DEFAULTS = {
   "field.battery_type": { zh: "电池类型", en: "Battery Type", category: "field" },
   "field.factory_code": { zh: "工厂代码", en: "Factory code", category: "field" },
   "field.customer_naming": { zh: "客户命名", en: "Customer", category: "field" },
+  // m180 — per-line programming block on the dossier.
+  "section.line_programming": { zh: "本产品程序设定", en: "Programming (this line)", category: "section" },
+  "field.dusk_to_dawn": { zh: "黄昏至黎明", en: "Dusk-to-dawn", category: "field" },
+  "field.autonomous_mode": { zh: "自主模式", en: "Autonomous mode", category: "field" },
+  "field.controller": { zh: "控制器", en: "Controller", category: "field" },
 
   // --- Table headers --------------------------------------------------------
   // Canonical: 数量 was "Qty" three times and "Quantity" once; 备注 was

@@ -444,6 +444,15 @@ export const NAVIGATION: NavCategory[] = [
             description: "Commercial ↔ factory references, ERP codes",
           },
           {
+            label: "Programming rules",
+            href: "/admin/lighting-rules",
+            visibility: {
+              kind: "capabilityOrAdmin",
+              capabilities: ["lighting_rules.manage"],
+            },
+            description: "Which product lines require factory programming",
+          },
+          {
             label: "Terminology",
             href: "/admin/terminology",
             visibility: {

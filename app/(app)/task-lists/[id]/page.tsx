@@ -33,6 +33,17 @@ import {
 } from "@/lib/task-list-action-items";
 import { normalizeRiskFlags } from "@/lib/risks";
 import { normalizeAiReview } from "@/lib/lighting/ai-review";
+import { LineLightingPanel, type PanelLine } from "@/components/LineLightingPanel";
+import {
+  hasNewerStudy,
+  lineLightingStatus,
+  normalizeLineLighting,
+} from "@/lib/lighting/line-setup";
+import {
+  resolveProgrammingRequirement,
+  ruleSubjectFromLine,
+} from "@/lib/lighting/programming-rules";
+import { loadRules } from "@/lib/lighting/programming-rules-server";
 import { formatTiltAngle } from "@/lib/industrial-spec";
 import {
   normalizeTiltProvenance,
@@ -743,6 +754,43 @@ export default async function TaskListDetailPage({
         .map((r) => r.label)
     : [];
 
+  // ---- m180 — PER-LINE PROGRAMMING ----------------------------------------
+  // The lighting column + rules are fetched DEFENSIVELY (pre-m180 → no rules,
+  // no per-line setups; the resolver defaults to optional so nothing blocks).
+  const programmingRules = await loadRules(supabase);
+  let lineLightingById = new Map<string, unknown>();
+  {
+    const { data: ll } = await supabase
+      .from("production_task_list_lines")
+      .select("id, lighting")
+      .eq("task_list_id", params.id);
+    if (ll) lineLightingById = new Map((ll as any[]).map((r) => [r.id, r.lighting]));
+  }
+  const studyExtractedAt: string | null =
+    typeof (lightingRow?.ai_extracted as any)?.extracted_at === "string"
+      ? (lightingRow!.ai_extracted as any).extracted_at
+      : null;
+  const panelLines: PanelLine[] = ((lines ?? []) as any[]).map((l) => {
+    const setup = normalizeLineLighting(lineLightingById.get(l.id));
+    const { requirement } = resolveProgrammingRequirement(
+      ruleSubjectFromLine(l),
+      programmingRules
+    );
+    return {
+      id: l.id as string,
+      name: (l.product_name ?? l.products?.name ?? "Line") as string,
+      sku: (l.product_sku ?? l.products?.sku ?? null) as string | null,
+      quantity: Number(l.quantity ?? 1),
+      requirement,
+      status: lineLightingStatus(requirement, setup),
+      setup,
+      newerStudy: hasNewerStudy(setup, studyExtractedAt),
+    };
+  });
+  const missingRequiredProgramming = panelLines.filter(
+    (l) => l.requirement === "required" && (l.status === "missing" || l.status === "needs_review")
+  ).length;
+
   // ---- m179 — FINAL VALIDATION freeze + revision lineage ------------------
   // Defensive: pre-m179 fetchRevisions returns [] and the panel stays hidden
   // (unless frozen, where it renders the freeze banner without lineage).
@@ -946,6 +994,7 @@ export default async function TaskListDetailPage({
             tiltConflictPending: tiltConflict,
             hasOpenRevision: !!revisionThread.request && !revisionThread.request.resolved,
             lineCount: (lines ?? []).length,
+            missingRequiredProgramming,
           }}
           aiFields={boardAiFields}
           warnings={boardWarnings}
@@ -1306,6 +1355,18 @@ export default async function TaskListDetailPage({
               clientId={task.client_id ?? null}
               initial={lightingRow ?? null}
               editable={salesCanEdit}
+            />
+          </div>
+
+          {/* m180 — programming PER PRODUCT LINE: the study above is the
+              source; each eligible line owns its own final program. */}
+          <div className="prod-shell" style={{ marginTop: 12 }}>
+            <LineLightingPanel
+              taskListId={task.id}
+              lines={panelLines}
+              editable={salesCanEdit && !frozen}
+              studyAvailable={studyExtractedAt != null}
+              studyName={lightingRow?.energy_study_name ?? null}
             />
           </div>
         </>

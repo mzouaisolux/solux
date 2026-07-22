@@ -139,6 +139,12 @@ export function evaluateRelease(args: {
    * Undefined/0 = not blocking (no items, or m178 not applied yet).
    */
   openBlockingActionItems?: number;
+  /**
+   * m180 — lines whose programming rules say REQUIRED but whose Lighting
+   * Setup is missing or still needs review. The factory cannot program what
+   * nobody defined. Undefined/0 = nothing missing (or m180 not applied).
+   */
+  missingRequiredProgramming?: number;
 }): { ok: boolean; reason: string | null } {
   if (!args.statusAllowed) {
     return {
@@ -200,6 +206,14 @@ export function evaluateRelease(args: {
       ok: false,
       reason:
         "Pole drawing checkpoint pending — a solar panel tilt angle is set but the pole drawing hasn't been verified against it. Confirm the checkpoint in the Industrial production file section before releasing to production.",
+    };
+  }
+  // m180 — required factory programming must exist and be reviewed.
+  if ((args.missingRequiredProgramming ?? 0) > 0) {
+    const n = args.missingRequiredProgramming!;
+    return {
+      ok: false,
+      reason: `${n} product line${n === 1 ? "" : "s"} require${n === 1 ? "s" : ""} factory programming that is missing or unreviewed — complete the Lighting Setup${n === 1 ? "" : "s"} before Final Validation.`,
     };
   }
   return { ok: true, reason: null };

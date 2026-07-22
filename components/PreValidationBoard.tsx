@@ -35,6 +35,8 @@ export type BoardSignals = {
   tiltConflictPending: boolean;
   hasOpenRevision: boolean;
   lineCount: number;
+  /** m180 — required-programming lines still missing/unreviewed. */
+  missingRequiredProgramming: number;
 };
 
 export type BoardAiField = {
@@ -121,6 +123,13 @@ export function PreValidationBoard({
     blockers.push({
       text: "Pole drawing not yet verified against the tilt angle",
       anchor: "#tl-industrial",
+    });
+  if (signals.missingRequiredProgramming > 0)
+    blockers.push({
+      text: `${signals.missingRequiredProgramming} product line${
+        signals.missingRequiredProgramming === 1 ? "" : "s"
+      } missing required factory programming`,
+      anchor: "#tl-line-programming",
     });
 
   const aiNeedingReview = aiFields.filter(

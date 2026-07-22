@@ -29,6 +29,17 @@ import {
   type IndustrialSpec,
 } from "@/lib/industrial-spec";
 import type { LightingProgram, DialuxConfiguration } from "@/lib/lighting/types";
+import {
+  normalizeLineLighting,
+  type LineLightingSetup,
+  type ProgrammingRequirement,
+} from "@/lib/lighting/line-setup";
+import {
+  normalizeRule,
+  resolveProgrammingRequirement,
+  ruleSubjectFromLine,
+  type ProgrammingRule,
+} from "@/lib/lighting/programming-rules";
 
 /**
  * Fully-resolved data for the factory export (PDF + Excel).
@@ -76,6 +87,10 @@ export type ExportLine = {
   /** m135 — manual item (pole/mast/non-catalog): tag + free-text specs. */
   is_manual: boolean;
   manual_specs: string | null;
+  /** m180 — this line's own factory programming (final values), when set. */
+  lighting: LineLightingSetup | null;
+  /** m180 — required / optional / not_applicable per the central rules. */
+  programming_requirement: ProgrammingRequirement;
   /**
    * m071 — additional factory attributes (controller, BMS ref, cable…),
    * resolved client preset + order override, exactly as shown on the line.
@@ -245,6 +260,31 @@ export async function fetchExportData(taskListId: string): Promise<ExportData> {
           manual_specs: r.manual_specs ?? null,
         });
       }
+    }
+  }
+
+  // m180 — per-line programming + the central applicability rules, fetched
+  // DEFENSIVELY (pre-m180 → no setups, resolver defaults apply).
+  const lightingByLine = new Map<string, LineLightingSetup | null>();
+  let programmingRules: ProgrammingRule[] = [];
+  {
+    const { data, error } = await supabase
+      .from("production_task_list_lines")
+      .select("id, lighting")
+      .eq("task_list_id", taskListId);
+    if (!error) {
+      for (const r of (data ?? []) as any[]) {
+        lightingByLine.set(r.id, normalizeLineLighting(r.lighting));
+      }
+    }
+    const { data: ruleRows, error: rulesErr } = await supabase
+      .from("lighting_programming_rules")
+      .select("id, outcome, priority, category_id, product_id, sku_pattern, controller, config_match, active, notes")
+      .order("priority", { ascending: false });
+    if (!rulesErr) {
+      programmingRules = ((ruleRows ?? []) as unknown[])
+        .map(normalizeRule)
+        .filter((r): r is ProgrammingRule => r != null);
     }
   }
 
@@ -660,6 +700,16 @@ export async function fetchExportData(taskListId: string): Promise<ExportData> {
       rows,
       technical_entries,
       internal_notes: l.internal_notes ?? null,
+      lighting: lightingByLine.get(l.id) ?? null,
+      programming_requirement: resolveProgrammingRequirement(
+        ruleSubjectFromLine({
+          product_id: l.product_id,
+          category_id: l.category_id ?? l.products?.category_id ?? null,
+          product_sku: l.product_sku ?? l.products?.sku ?? null,
+          config_values: l.config_values,
+        }),
+        programmingRules
+      ).requirement,
       is_manual: manualByLine.get(l.id)?.is_manual ?? false,
       manual_specs: manualByLine.get(l.id)?.manual_specs ?? null,
       factory_extras: resolveFactoryExtras(

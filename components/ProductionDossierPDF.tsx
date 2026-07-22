@@ -636,6 +636,44 @@ function LineBuild({ line }: { line: ExportLine }) {
         </Text>
       ) : null}
 
+      {/* m180 — the line's OWN factory programming (final values). Same rule
+          engine as the task-list UI: not_applicable lines print nothing. */}
+      {line.programming_requirement !== "not_applicable" &&
+      line.lighting &&
+      (line.lighting.final.program.length > 0 ||
+        line.lighting.final.operating_hours != null ||
+        line.lighting.final.dusk_to_dawn ||
+        line.lighting.final.factory_instructions) ? (
+        <View style={s.note} wrap={false}>
+          <Text style={s.noteLabel}>本产品程序设定 · Programming (this line)</Text>
+          <Text style={s.noteText}>
+            {[
+              line.lighting.final.operating_hours != null
+                ? `每晚 ${line.lighting.final.operating_hours}h/night`
+                : null,
+              line.lighting.final.dusk_to_dawn ? "黄昏至黎明 · dusk-to-dawn" : null,
+              line.lighting.final.autonomous ? "自主模式 · autonomous" : null,
+              line.lighting.final.controller.type
+                ? `控制器 controller: ${line.lighting.final.controller.type}`
+                : null,
+            ]
+              .filter(Boolean)
+              .join(" · ")}
+          </Text>
+          {line.lighting.final.program.map((p, i) => (
+            <Text key={i} style={s.noteText}>
+              {i + 1}. {p.duration_hours}h @ {p.output}%
+              {p.presence_detection
+                ? ` · 感应 PIR → ${p.detection_output ?? 100}%`
+                : ""}
+            </Text>
+          ))}
+          {line.lighting.final.factory_instructions ? (
+            <Text style={s.noteText}>{line.lighting.final.factory_instructions}</Text>
+          ) : null}
+        </View>
+      ) : null}
+
       {line.internal_notes ? (
         <View style={s.note}>
           <Text style={s.noteLabel}>产线备注 · Line notes</Text>
