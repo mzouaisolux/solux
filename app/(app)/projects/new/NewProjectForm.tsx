@@ -9,6 +9,26 @@ import { TRANSPORT_MODES, TRANSPORT_MODE_LABEL } from "@/lib/types";
 import { ACTIVE_SERVICE_TYPES } from "@/lib/service-types";
 import { SOLAR_PANEL_FALLBACK_OPTIONS } from "@/lib/transport-request";
 import { TILT_ANGLE_PRESETS, cleanTiltAngle } from "@/lib/industrial-spec";
+import {
+  emptyPoleSpec,
+  normalizePoleSpec,
+  POLE_FINISHES,
+  POLE_FINISH_LABELS,
+  SURFACE_TREATMENTS,
+  SURFACE_TREATMENT_LABELS,
+  type PoleSpec,
+} from "@/lib/pole-spec";
+
+/** m181 — one per-category sales option (same engine as the quotation). */
+export type SrSalesField = {
+  id: string;
+  category_id: string;
+  field_name: string;
+  field_type: string;
+  required: boolean;
+  allow_custom_value: boolean;
+  options: string[];
+};
 
 function isNavError(e: any): boolean {
   const d = e?.digest;
@@ -22,6 +42,10 @@ type AffairOption = { id: string; name: string; clientId: string | null };
 /** m109 — pre-fill payload built server-side from a tender or an
  *  opportunity (?tender= / ?affair= on /projects/new). */
 export type ProjectFormInitial = {
+  /** m181 — per-category sales options (quotation vocabulary). */
+  configValues?: Record<string, string>;
+  /** m181 — pole finish spec blob (lib/pole-spec.ts shape). */
+  poleSpec?: unknown;
   name: string;
   clientId: string;
   affairId: string;
@@ -69,6 +93,7 @@ export default function NewProjectForm({
   categories,
   affairs,
   initial,
+  salesFields = [],
   lockClient = false,
   editId = null,
 }: {
@@ -77,6 +102,8 @@ export default function NewProjectForm({
   affairs: AffairOption[];
   /** m109 — pre-fill from a tender / opportunity. Null = blank form. */
   initial?: ProjectFormInitial | null;
+  /** m181 — per-category sales options (config_fields), quotation vocabulary. */
+  salesFields?: SrSalesField[];
   /** CRM refactor: opened from a Client Workspace — client fixed & hidden. */
   lockClient?: boolean;
   /** BUG-2 — editing an existing DRAFT request; saves via updateProjectRequest. */
@@ -116,6 +143,14 @@ export default function NewProjectForm({
   // checkbox stops every request silently including poles. Edit mode keeps the
   // stored value (initial?.poleRequired wins when defined).
   const [poleRequired, setPoleRequired] = useState(initial?.poleRequired ?? false);
+  // m181 — complete cost configuration: per-category product options (same
+  // vocabulary as quotation lines) + the pole finish spec.
+  const [configValues, setConfigValues] = useState<Record<string, string>>(
+    () => (initial as any)?.configValues ?? {}
+  );
+  const [poleSpec, setPoleSpec] = useState<PoleSpec>(
+    () => normalizePoleSpec((initial as any)?.poleSpec) ?? emptyPoleSpec()
+  );
   const [poleQuantity, setPoleQuantity] = useState(initial?.poleQuantity ?? "");
   const [poleHeight, setPoleHeight] = useState(initial?.poleHeight ?? "");
   const [armLength, setArmLength] = useState(initial?.armLength ?? "");
@@ -447,6 +482,83 @@ export default function NewProjectForm({
             <span style={{ fontSize: 13, color: "var(--sx-ink-soft)" }}>IoT required</span>
           </div>
         </div>
+          {/* m181 — the SAME per-category options the quotation exposes, so
+              Operations receives the complete cost configuration first time.
+              Scoped to the selected family; empty = nothing configured yet. */}
+          {categoryId && salesFields.some((f) => f.category_id === categoryId) && (
+            <>
+              <h3 style={{ marginTop: 14 }}>Product options <span style={{ color: "var(--sx-mute-2)", fontWeight: 400, fontSize: 12 }}>— cost-impacting, same options as the quotation</span></h3>
+              <div className="fgrid">
+                {salesFields
+                  .filter((f) => f.category_id === categoryId)
+                  .map((f) => (
+                    <div className="fcol" key={f.id}>
+                      <span className="fl">{f.field_name}{f.required ? " *" : ""}</span>
+                      {f.field_type === "checkbox" ? (
+                        <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
+                          <input
+                            type="checkbox"
+                            checked={configValues[f.field_name] === "Yes"}
+                            onChange={(e) =>
+                              setConfigValues((v) => ({ ...v, [f.field_name]: e.target.checked ? "Yes" : "" }))
+                            }
+                          />
+                          Yes
+                        </label>
+                      ) : f.options.length > 0 ? (
+                        <>
+                          <select
+                            value={
+                              f.options.includes(configValues[f.field_name] ?? "")
+                                ? configValues[f.field_name]
+                                : configValues[f.field_name]
+                                  ? "__custom__"
+                                  : ""
+                            }
+                            onChange={(e) =>
+                              setConfigValues((v) => ({
+                                ...v,
+                                [f.field_name]: e.target.value === "__custom__" ? (v[f.field_name] && !f.options.includes(v[f.field_name]) ? v[f.field_name] : " ") : e.target.value,
+                              }))
+                            }
+                          >
+                            <option value="">— Not set —</option>
+                            {f.options.map((o) => (
+                              <option key={o} value={o}>{o}</option>
+                            ))}
+                            {f.allow_custom_value && <option value="__custom__">Custom…</option>}
+                          </select>
+                          {f.allow_custom_value &&
+                            configValues[f.field_name] != null &&
+                            configValues[f.field_name] !== "" &&
+                            !f.options.includes(configValues[f.field_name]) && (
+                              <input
+                                style={{ marginTop: 6 }}
+                                value={configValues[f.field_name].trim()}
+                                placeholder="Custom value"
+                                onChange={(e) => setConfigValues((v) => ({ ...v, [f.field_name]: e.target.value || " " }))}
+                              />
+                            )}
+                        </>
+                      ) : (
+                        <input
+                          value={configValues[f.field_name] ?? ""}
+                          onChange={(e) => setConfigValues((v) => ({ ...v, [f.field_name]: e.target.value }))}
+                        />
+                      )}
+                    </div>
+                  ))}
+              </div>
+              <input
+                type="hidden"
+                name="config_values"
+                value={JSON.stringify(
+                  Object.fromEntries(Object.entries(configValues).map(([k, v]) => [k, v.trim()]).filter(([, v]) => v !== ""))
+                )}
+              />
+            </>
+          )}
+
       </div>
 
       {/* POLE CONFIGURATION */}
@@ -464,6 +576,52 @@ export default function NewProjectForm({
             <div className="fcol"><span className="fl">Overall pole height <span style={{ color: "var(--sx-mute-2)", fontWeight: 400 }}>(if applicable)</span></span><input name="pole_height" value={poleHeight} onChange={(e) => setPoleHeight(e.target.value)} placeholder="e.g. 8m" /></div>
             <div className="fcol"><span className="fl">Arm length</span><input name="arm_length" value={armLength} onChange={(e) => setArmLength(e.target.value)} placeholder="e.g. 1.5m" /></div>
             <div className="fcol span3"><span className="fl">Pole notes</span><input name="pole_notes" placeholder="e.g. Single arm galvanized pole" defaultValue={initial?.poleNotes || undefined} /></div>
+            {/* m181 — cost-impacting pole finish (surface treatment class,
+                galvanization / coating, colour). */}
+            <div className="fcol">
+              <span className="fl">Surface treatment</span>
+              <select
+                value={poleSpec.surface_treatment}
+                onChange={(e) => setPoleSpec((p) => ({ ...p, surface_treatment: e.target.value as PoleSpec["surface_treatment"] }))}
+              >
+                <option value="">— Not set —</option>
+                {SURFACE_TREATMENTS.filter(Boolean).map((t) => (
+                  <option key={t} value={t}>{SURFACE_TREATMENT_LABELS[t as Exclude<typeof t, "">]}</option>
+                ))}
+              </select>
+            </div>
+            <div className="fcol">
+              <span className="fl">Galvanization / finish</span>
+              <select
+                value={poleSpec.finish}
+                onChange={(e) => setPoleSpec((p) => ({ ...p, finish: e.target.value as PoleSpec["finish"] }))}
+              >
+                <option value="">— Not set —</option>
+                {POLE_FINISHES.filter(Boolean).map((f) => (
+                  <option key={f} value={f}>{POLE_FINISH_LABELS[f as Exclude<typeof f, "">]}</option>
+                ))}
+              </select>
+            </div>
+            <div className="fcol">
+              <span className="fl">Colour</span>
+              <div style={{ display: "flex", gap: 6 }}>
+                <select
+                  style={{ width: 110 }}
+                  value={poleSpec.colour_mode}
+                  onChange={(e) => setPoleSpec((p) => ({ ...p, colour_mode: e.target.value as PoleSpec["colour_mode"] }))}
+                >
+                  <option value="">—</option>
+                  <option value="standard">Standard</option>
+                  <option value="custom">Custom</option>
+                </select>
+                <input
+                  placeholder="e.g. RAL 7016"
+                  value={poleSpec.colour ?? ""}
+                  onChange={(e) => setPoleSpec((p) => ({ ...p, colour: e.target.value || null }))}
+                />
+              </div>
+            </div>
+            <input type="hidden" name="pole_spec" value={JSON.stringify(poleSpec)} />
           </div>
         ) : (
           <p style={{ fontSize: 12, color: "var(--sx-mute-2)" }}>No poles in this project.</p>

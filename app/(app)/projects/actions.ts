@@ -25,6 +25,7 @@ import { computeSectionPrice, buildCommercialDescription, computeFreightTotal, b
 import { normalizePanelDimensions } from "@/lib/panel-dimensions";
 import { validityFromPeriod } from "@/lib/freight-validity";
 import { cleanTiltAngle } from "@/lib/industrial-spec";
+import { formatPoleSpec, normalizePoleSpec, poleSpecHasContent } from "@/lib/pole-spec";
 import { normalizeAdditionalCharges } from "@/lib/logistics";
 import { computeWaitingStatus } from "@/lib/project-dashboard";
 import { saveDocument, type SaveDocumentInput } from "@/app/(app)/documents/new/actions";
@@ -66,6 +67,24 @@ function revalidate(id?: string) {
 }
 
 // ---------------------------- create / submit ----------------------------
+
+/**
+ * m181 — the SR's cost-configuration columns from the wizard: the
+ * per-category sales options (quotation vocabulary) + the pole finish spec.
+ * Both jsonb; both absent pre-m181 (callers retry without them).
+ */
+function costConfigCols(formData: FormData): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  try {
+    const cfg = JSON.parse(String(formData.get("config_values") ?? "null"));
+    if (cfg && typeof cfg === "object") out.config_values = cfg;
+  } catch {}
+  try {
+    const spec = JSON.parse(String(formData.get("pole_spec") ?? "null"));
+    if (spec && typeof spec === "object") out.pole_spec = normalizePoleSpec(spec);
+  } catch {}
+  return out;
+}
 
 export async function createProjectRequest(formData: FormData): Promise<void> {
   await requireCapability("project.create");
@@ -240,9 +259,17 @@ export async function createProjectRequest(formData: FormData): Promise<void> {
   };
   let { data: created, error } = await supabase
     .from("project_requests")
-    .insert({ ...insertRow, solar_panel_tilt_angle: tiltAngle })
+    .insert({ ...insertRow, solar_panel_tilt_angle: tiltAngle, ...costConfigCols(formData) })
     .select("id")
     .single();
+  if (error && /config_values|pole_spec/i.test(error.message ?? "")) {
+    // m181 not applied yet — retry without the cost-config columns.
+    ({ data: created, error } = await supabase
+      .from("project_requests")
+      .insert({ ...insertRow, solar_panel_tilt_angle: tiltAngle })
+      .select("id")
+      .single());
+  }
   if (error && /solar_panel_tilt_angle/i.test(error.message ?? "")) {
     // m159 not applied yet — persist the request without the tilt column
     // (graceful degradation; the business rule above still ran).
@@ -360,9 +387,16 @@ export async function updateProjectRequest(formData: FormData): Promise<void> {
 
   let { error } = await supabase
     .from("project_requests")
-    .update({ ...updateRow, solar_panel_tilt_angle: tiltAngle })
+    .update({ ...updateRow, solar_panel_tilt_angle: tiltAngle, ...costConfigCols(formData) })
     .eq("id", id)
     .eq("status", "draft");
+  if (error && /config_values|pole_spec/i.test(error.message ?? "")) {
+    // m181 not applied yet — retry without the cost-config columns.
+    ({ error } = await supabase
+      .from("project_requests")
+      .update({ ...updateRow, solar_panel_tilt_angle: tiltAngle })
+      .eq("id", id));
+  }
   if (error && /solar_panel_tilt_angle/i.test(error.message ?? "")) {
     // m159 not applied yet — save the draft without the tilt column.
     ({ error } = await supabase
@@ -1746,6 +1780,11 @@ export async function generateQuotationFromProject(formData: FormData): Promise<
         : "Pole",
       mountingHeight && poleHeight ? `overall ${poleHeight}` : null,
       poleArm ? `arm ${poleArm}` : null,
+      // m181 — cost-impacting finish rides the name end to end (m135 rule).
+      (() => {
+        const spec = normalizePoleSpec(p.pole_spec);
+        return poleSpecHasContent(spec) ? formatPoleSpec(spec) : null;
+      })(),
       poleNotes || null,
     ]
       .filter(Boolean)
@@ -1774,9 +1813,13 @@ export async function generateQuotationFromProject(formData: FormData): Promise<
     // so it survives to the production task-list line (which renders
     // config_values) instead of living only as free text. The Pole line keeps
     // its full descriptive name and needs no config chips.
+    // m181 — the SR's full per-category options (quotation vocabulary) MERGE
+    // OVER the legacy fallback pairs: the wizard capture is the richer,
+    // authoritative source; the pairs below only cover pre-m181 requests.
     config_values:
       component === "product"
-        ? (Object.fromEntries(
+        ? {
+            ...(Object.fromEntries(
             [
               effLed ? ["LED power", String(effLed)] : null,
               (pr?.solar_panel_size ?? effPanel)
@@ -1792,7 +1835,11 @@ export async function generateQuotationFromProject(formData: FormData): Promise<
                 ? ["Tilt angle", `${p.solar_panel_tilt_angle}°`]
                 : null,
             ].filter(Boolean) as [string, string][]
-          ))
+            ) as Record<string, string>),
+            ...((p.config_values && typeof p.config_values === "object"
+              ? p.config_values
+              : {}) as Record<string, string>),
+          }
         : {},
     unit_price: round2(unit),
     total_price: round2(unit * q),
@@ -1897,6 +1944,16 @@ export async function generateQuotationFromProject(formData: FormData): Promise<
       p.pole_height && `Pole ${p.pole_height}`,
       p.arm_length && `Arm ${p.arm_length}`,
       p.iot_required ? "IoT required" : null,
+      // m181 — the full cost configuration follows the request end to end.
+      ...(p.config_values && typeof p.config_values === "object"
+        ? Object.entries(p.config_values as Record<string, string>).map(
+            ([k, v]) => `${k}: ${v}`
+          )
+        : []),
+      (() => {
+        const spec = normalizePoleSpec(p.pole_spec);
+        return poleSpecHasContent(spec) ? `Pole finish: ${formatPoleSpec(spec)}` : null;
+      })(),
       p.additional_notes?.trim()
         ? `Specific request: ${p.additional_notes.trim()}`
         : null,

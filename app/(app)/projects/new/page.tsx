@@ -35,7 +35,13 @@ export default async function NewProjectPage({
   if (!canCreate) return <AccessDenied capability="project.create" />;
 
   const supabase = createClient();
-  const [{ data: clients }, { data: categories }, { data: affairs }] = await Promise.all([
+  const [
+    { data: clients },
+    { data: categories },
+    { data: affairs },
+    { data: cfgFields },
+    { data: cfgOptions },
+  ] = await Promise.all([
     supabase.from("clients").select("id, company_name, country").order("company_name", { ascending: true }),
     supabase
       .from("product_categories")
@@ -51,6 +57,19 @@ export default async function NewProjectPage({
       .is("archived_at", null)
       .not("status", "in", "(lost,abandoned)")
       .order("created_at", { ascending: false }),
+    // m181 — the SAME per-category sales options the quotation exposes, so
+    // the SR captures the complete cost configuration first time.
+    supabase
+      .from("config_fields")
+      .select("id, category_id, field_name, field_type, required, allow_custom_value, field_order")
+      .eq("active", true)
+      .eq("visible_in_quotation", true)
+      .order("field_order")
+      .order("field_name"),
+    supabase
+      .from("config_field_options")
+      .select("id, field_id, option_value, option_order")
+      .order("option_order"),
   ]);
 
   // ---- Pre-fill (m109) + edit mode (BUG-2) ----
@@ -175,6 +194,9 @@ export default async function NewProjectPage({
         solarPanelSize: pr.solar_panel_size ?? "",
         // m159 — undefined pre-migration (select("*") simply lacks the column).
         tiltAngle: pr.solar_panel_tilt_angle != null ? String(pr.solar_panel_tilt_angle) : "",
+        // m181 — undefined pre-migration, same defensive shape as tilt.
+        configValues: (pr.config_values ?? {}) as Record<string, string>,
+        poleSpec: pr.pole_spec ?? null,
         batterySpec: pr.battery_spec ?? "",
         controller: pr.controller ?? "",
         iotRequired: pr.iot_required ?? false,
@@ -220,6 +242,23 @@ export default async function NewProjectPage({
     };
   }
 
+    // m181 — flatten the per-category sales options for the wizard.
+  const optionsByField = new Map<string, string[]>();
+  for (const o of (cfgOptions ?? []) as any[]) {
+    const arr = optionsByField.get(o.field_id) ?? [];
+    arr.push(o.option_value as string);
+    optionsByField.set(o.field_id, arr);
+  }
+  const salesFields = ((cfgFields ?? []) as any[]).map((f) => ({
+    id: f.id as string,
+    category_id: f.category_id as string,
+    field_name: f.field_name as string,
+    field_type: (f.field_type ?? "text") as string,
+    required: f.required === true,
+    allow_custom_value: f.allow_custom_value === true,
+    options: optionsByField.get(f.id) ?? [],
+  }));
+
   return (
     <div className="solux-pro sx-page">
       <div className="sx-wrap">
@@ -251,6 +290,7 @@ export default async function NewProjectPage({
           </div>
         )}
         <NewProjectForm
+          salesFields={salesFields}
           clients={((clients ?? []) as any[]).map((c) => ({
             id: c.id,
             name: c.company_name,

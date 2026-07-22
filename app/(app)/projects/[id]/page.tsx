@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { formatPoleSpec, normalizePoleSpec, poleSpecHasContent } from "@/lib/pole-spec";
 import { createClient } from "@/lib/supabase/server";
 import { getEffectiveRole } from "@/lib/auth";
 import { hasUiCapability } from "@/lib/permissions";
@@ -329,6 +330,19 @@ export default async function ProjectDetailPage({
     ["Battery", reqVsApproved(p.battery_spec, (p as any).approved_battery_spec)],
     ["Controller", p.controller],
     ["IoT", p.iot_required ? "Required" : "No"],
+    // m181 — the full per-category cost options captured by the wizard
+    // (quotation vocabulary). Operations reads the complete configuration
+    // here without asking Sales. undefined pre-migration → nothing extra.
+    ...(((p as any).config_values && typeof (p as any).config_values === "object"
+      ? Object.entries((p as any).config_values as Record<string, string>)
+      : []) as Array<[string, string]>),
+    (() => {
+      const spec = normalizePoleSpec((p as any).pole_spec);
+      return [
+        "Pole finish",
+        poleSpecHasContent(spec) ? formatPoleSpec(spec) : null,
+      ] as [string, string | null];
+    })(),
   ];
   // m157 — the REAL panel used for the costing (technical dossier). A 150W
   // panel today won't have tomorrow's dimensions — the frame size actually
