@@ -106,13 +106,33 @@ export function mergeSrConfig(
       ([k]) => !GENERIC_SPEC_LABELS.has(squash(k))
     )
   );
-  return { ...kept, ...srConfig };
+
+  // P1-2 — GAP FILL, never overwrite. The line's own field-keyed values win;
+  // the SR's legacy spec only fills slots the line does not already carry.
+  //
+  // Before m181 the line arrived empty, so precedence was moot (spreading {}
+  // either way yields the same object) — this is a strict no-op for that case.
+  // Since m181 the SR wizard writes real field keys onto the line, and the
+  // caller used to skip the WHOLE backfill as soon as one of them was present,
+  // silently dropping the other legacy specs (led_power, solar_panel_size,
+  // battery_spec, controller). The caller now runs for every candidate and
+  // relies on this precedence instead.
+  //
+  // A key whose value is blank counts as a gap, so a placeholder never blocks
+  // the spec from landing.
+  const out: Record<string, string> = { ...srConfig };
+  for (const [k, v] of Object.entries(kept)) {
+    const filled = String(v ?? "").trim() !== "";
+    if (filled || !(k in out)) out[k] = v;
+  }
+  return out;
 }
 
 /**
  * Build the structured config_values for one SR-derived line from the SR
  * spec + the category's sales config fields. Returns {} when the spec is
- * empty — callers only overwrite an EMPTY config, never a filled one.
+ * empty. Its output is applied through mergeSrConfig, which fills gaps only —
+ * a value the sales team actually entered is never overwritten (P1-2).
  */
 export function buildSrConfigValues(
   spec: SrTechSpec,

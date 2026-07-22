@@ -149,3 +149,51 @@ test("merge: field-keyed values supersede the generator's generic labels", () =>
     "LED Power": "60",
   });
 });
+
+// P1-2 — the m181 SR wizard writes REAL field keys onto the line. Those are the
+// sales team's own choices and must survive the legacy-spec backfill, while the
+// specs the wizard did not cover still land.
+test("merge: the line's own field-keyed value wins, the SR spec fills the gaps", () => {
+  const merged = mergeSrConfig(
+    // Chosen in the SR wizard (m181) — real config fields of the category that
+    // are NOT spec display labels.
+    { CCT: "4000K", OPTIC: "Type III" },
+    { CCT: "3000K", Battery: "922Wh", Controller: "MPPT 20A" }
+  );
+  assert.deepEqual(merged, {
+    CCT: "4000K", // the sales choice is NOT overwritten
+    OPTIC: "Type III", // kept
+    Battery: "922Wh", // gap filled from the SR spec
+    Controller: "MPPT 20A", // gap filled from the SR spec
+  });
+});
+
+// Known limitation, PRE-DATING m181 and deliberately left alone: the five spec
+// display labels the generator writes squash to the same token as the live
+// config fields ("SOLAR PANEL" → "solarpanel"), so mergeSrConfig cannot tell a
+// generic duplicate from the category's real field. For those five the SR spec
+// still wins. Distinguishing them would mean passing the category's field names
+// into the merge — out of scope here; pinned by this test so a future change is
+// a conscious one.
+test("merge: for the 5 generic spec labels the SR spec still wins (documented limitation)", () => {
+  const merged = mergeSrConfig(
+    { "SOLAR PANEL": "18V/200W" },
+    { "SOLAR PANEL": "18V/140W" }
+  );
+  assert.deepEqual(merged, { "SOLAR PANEL": "18V/140W" });
+});
+
+test("merge: an empty existing config keeps the pre-m181 behaviour (no-op precedence)", () => {
+  const spec = { "SOLAR PANEL": "18V/140W", Battery: "922Wh" };
+  assert.deepEqual(mergeSrConfig({}, spec), spec);
+  assert.deepEqual(mergeSrConfig(null, spec), spec);
+});
+
+test("merge: a blank existing value counts as a gap, not as a choice", () => {
+  const merged = mergeSrConfig(
+    { "SOLAR PANEL": "   ", "Tilt angle": "15°" },
+    { "SOLAR PANEL": "18V/140W" }
+  );
+  assert.equal(merged["SOLAR PANEL"], "18V/140W");
+  assert.equal(merged["Tilt angle"], "15°");
+});

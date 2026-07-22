@@ -11,7 +11,6 @@ import { requireCapability } from "@/lib/permissions";
 import { buildTaskListLineFromQuotationLine } from "@/lib/manual-items";
 import {
   buildSrConfigValues,
-  isEmptyConfig,
   mergeSrConfig,
   type SrConfigField,
 } from "@/lib/sr-line-config";
@@ -374,8 +373,8 @@ export async function generateProductionTaskList(formData: FormData) {
   //   • only SR-derived, non-manual lines (source_project_request_id, or the
   //     SR shape product_id-null + category for pre-m139 rows) — a catalogue
   //     line can never inherit a spec that isn't its own;
-  //   • only lines whose config carries NO real field key yet — a config the
-  //     sales team actually filled is never modified.
+  //   • every SR-shaped line: the merge fills GAPS only, so a value the sales
+  //     team actually entered is never modified (P1-2).
   // Best-effort: a failure here must never block Launch Production.
   try {
     const candidates = rows
@@ -421,14 +420,16 @@ export async function generateProductionTaskList(formData: FormData) {
         fieldsByCategory.set(f.category_id, a);
       }
 
-      const needy = candidates.filter(({ r }) => {
-        const fields = fieldsByCategory.get(r.category_id!) ?? [];
-        const cfg = r.config_values ?? {};
-        return (
-          isEmptyConfig(cfg) ||
-          !fields.some((f) => String(cfg[f.field_name] ?? "").trim() !== "")
-        );
-      });
+      // P1-2 — this used to skip any line already carrying ONE real field key.
+      // Since m181 the SR wizard writes such keys onto the line, so filling a
+      // single product option in the SR silently dropped the backfill for the
+      // OTHER legacy specs (led_power, solar_panel_size, battery_spec,
+      // controller): they stayed under generic labels the factory-mapping
+      // resolver cannot key on — and countMissingMappings never flagged it,
+      // because it skips empty values. Every candidate is processed now;
+      // mergeSrConfig fills gaps only, so a value the sales team actually
+      // entered is still never overwritten.
+      const needy = candidates;
       // Precise SR link when m139 is applied; otherwise fall back to the
       // affaire's latest SR — only ever reached for SR-shaped lines (see the
       // candidates filter), never for catalogue lines.
