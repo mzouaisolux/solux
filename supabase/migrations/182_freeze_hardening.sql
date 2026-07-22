@@ -4,14 +4,11 @@
 -- The QA campaign of 2026-07-22 proved the m179 freeze was bypassable four
 -- ways. This migration closes the three that are DB-level.
 --
--- The fourth (attachments) is NOT closable here: `attachments` is anchored
--- to `affair_id` only — there is no task-list anchor — so "attachments
--- belonging to a frozen task list" is not expressible without adding a
--- column, i.e. a schema/architecture change. Freezing by affair instead
--- would lock an entire affair's document workspace (other quotations, other
--- task lists, client documents) the moment ONE task list is validated —
--- a functional regression, not a fix. Deliberately left open; see the QA
--- report §6.
+-- The fourth (attachments) is handled separately by **m183** — apply it too.
+-- It could not be done here because `attachments` is anchored to `affair_id`
+-- only, with no task-list anchor; m183 solves it via the link that already
+-- exists (the m179 revision snapshot names the attachments that were part of
+-- a validated version) rather than by adding a column.
 --
 -- WHY A MIGRATION IS REQUIRED: the freeze must hold when the UI and the
 -- server actions are bypassed (a direct PostgREST call with a legitimate
