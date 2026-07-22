@@ -416,11 +416,12 @@ All local-only. Clean up if it interferes.
 
 ## 10. Deployment status
 
-**Local:** ✅ `npm run build` exit 0 · ✅ **797/797 tests** · ✅ typecheck clean · dev server on :3000 (session-tied — start your own)
+**Local:** ✅ `npm run build` exit 0 · ✅ **797/797 tests** (re-verified at session end, 2.3 s) · ✅ typecheck clean · dev server on :3000 (session-tied — start your own)
 
-**Git:** branch `packing-module/phase1`, **5 commits ahead of origin**. Working tree clean except untracked `Survey/` (pre-existing, deliberately untouched).
+**Git:** branch `packing-module/phase1`, **6 commits ahead of origin** (5 features + this document). Working tree clean except untracked `Survey/` (pre-existing, deliberately untouched).
 
 ```
+0cc48b5  docs: this handover                                   ← unpushed
 8463d67  feat(sr): complete cost configuration (m181)          ← unpushed
 04e9384  feat(lighting): per-line Lighting Setups (m180)       ← unpushed
 30c681e  feat(lighting): AI review states (phase 2)            ← unpushed
