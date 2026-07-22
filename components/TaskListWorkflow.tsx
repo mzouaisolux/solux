@@ -458,15 +458,15 @@ export default function TaskListWorkflowActions({
           >
             {btnLabel("mark-ready-from-validated", "Mark production ready →", "Marking ready…")}
           </button>
-          <button
-            type="button"
-            disabled={pending || !canValidate}
-            title={validateTitle}
-            onClick={() => setModal("revision")}
-            className={secondaryClass}
-          >
-            {btnLabel("request-revision-validated", "Request revision", "Requesting…")}
-          </button>
+          {/* m182 — "Request revision" was a DEAD button here: the server
+              restricts requestRevisionWithReason to `under_validation`, so
+              from Final Validation it always failed after submission. The
+              sanctioned path is "Open controlled revision…" in the Revisions
+              panel below. (QA campaign 2026-07-22, P1 — Permissions/UX.) */}
+          <span className="text-xs text-neutral-500">
+            To change this task list, open a controlled revision in the
+            Revisions panel below.
+          </span>
           <button
             type="button"
             disabled={pending || !canReject}
@@ -510,15 +510,10 @@ export default function TaskListWorkflowActions({
             >
               {btnLabel("reopen", "Reopen for revisions", "Reopening…")}
             </button>
-            <button
-              type="button"
-              disabled={pending || !canValidate}
-              title={validateTitle}
-              onClick={() => setModal("revision")}
-              className={secondaryClass}
-            >
-              {btnLabel("bounce-back", "Bounce back to sales", "Bouncing…")}
-            </button>
+            {/* m182 — "Bounce back to sales" was a DEAD button here for the
+                same reason as "Request revision" on the validated screen:
+                requestRevisionWithReason only accepts `under_validation`.
+                Use "Reopen for revisions" (left) or a controlled revision. */}
           </div>
         </div>
       </>

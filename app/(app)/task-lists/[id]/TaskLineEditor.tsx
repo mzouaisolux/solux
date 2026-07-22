@@ -1002,6 +1002,11 @@ export default function TaskLineEditor({
                     factoryOverrides[row.field_name] ??
                     (row.source === "missing" ? "" : row.text);
                   if (!effective.trim()) return null;
+                  // m182 — factory-instruction writes are refused on a frozen
+                  // task list (server: assertLineParentNotFrozen; DB:
+                  // tl_lines_freeze_guard). For technical roles salesEditable
+                  // reduces to "not frozen", so don't offer the action at all.
+                  if (!salesEditable) return null;
                   return (
                     <div className="fi-save">
                       <SaveButton
@@ -1026,7 +1031,7 @@ export default function TaskLineEditor({
                         <button
                           type="button"
                           onClick={() => clearFieldOrder(row.field_name)}
-                          disabled={pendingFactory}
+                          disabled={pendingFactory || !salesEditable}
                           className="text-[11px] text-neutral-500 hover:text-neutral-900 hover:underline disabled:opacity-50"
                           title="Discard this order's edit — fall back to the client preset or global mapping."
                         >
@@ -1037,7 +1042,7 @@ export default function TaskLineEditor({
                         <button
                           type="button"
                           onClick={() => removeFieldForClient(row.field_name)}
-                          disabled={pendingPreset}
+                          disabled={pendingPreset || !salesEditable}
                           className="text-[11px] font-medium text-rose-600 hover:text-rose-800 hover:underline disabled:opacity-50"
                           title="Remove this client override — the field reverts to the global default for this and every future order."
                         >
@@ -1086,7 +1091,7 @@ export default function TaskLineEditor({
                       <button
                         type="button"
                         onClick={() => removeExtraFromOrder(ex)}
-                        disabled={pendingFactory}
+                        disabled={pendingFactory || !salesEditable}
                         className="shrink-0 text-neutral-300 hover:text-rose-600 text-sm leading-none disabled:opacity-50"
                         aria-label={`Remove ${ex.label} from this order`}
                         title="Remove from this order"
@@ -1100,13 +1105,14 @@ export default function TaskLineEditor({
                         setExtraValue(ex.key, ex.label, e.target.value)
                       }
                       rows={2}
+                      disabled={!salesEditable} /* m182 — frozen ⇒ read-only */
                       placeholder="Value / instruction — e.g. SR-CTRL-D4I-A12"
                     />
                     {/* Field-local save modes, same as the sales rows. */}
                     <div className="fi-save">
                       <SaveButton
                         onSave={() => saveExtraForOrder(ex)}
-                        disabled={!ex.value.trim()}
+                        disabled={!ex.value.trim() || !salesEditable}
                         className="btn sm primary"
                         successMessage="Saved to this order"
                         title="Save this field for THIS order only."
@@ -1116,7 +1122,7 @@ export default function TaskLineEditor({
                       {clientId && (
                         <SaveButton
                           onSave={() => saveExtraForClient(ex)}
-                          disabled={!ex.value.trim()}
+                          disabled={!ex.value.trim() || !salesEditable}
                           className="btn sm"
                           successMessage="Saved for this client"
                           title="Save just this field as a client override — auto-loads on every future order for this client."
@@ -1128,7 +1134,7 @@ export default function TaskLineEditor({
                         <button
                           type="button"
                           onClick={() => removeExtraForClient(ex)}
-                          disabled={pendingPreset}
+                          disabled={pendingPreset || !salesEditable}
                           className="text-[11px] font-medium text-rose-600 hover:text-rose-800 hover:underline disabled:opacity-50"
                           title="Remove this client override — it won't auto-load on future orders (stays on this order until you remove it)."
                         >
@@ -1219,13 +1225,16 @@ export default function TaskLineEditor({
                 </div>
               </div>
             ) : (
-              <button
-                type="button"
-                onClick={() => setAddingExtra(true)}
-                className="fi-add"
-              >
-                + Add factory field
-              </button>
+              /* m182 — no new factory field on a frozen task list. */
+              salesEditable && (
+                <button
+                  type="button"
+                  onClick={() => setAddingExtra(true)}
+                  className="fi-add"
+                >
+                  + Add factory field
+                </button>
+              )
             )}
           </div>
 

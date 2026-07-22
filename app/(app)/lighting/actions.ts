@@ -491,6 +491,26 @@ export async function saveProductLightingSetup(
       };
     }
 
+    // m182 — friendly freeze error. This action had NO app-level check and
+    // relied entirely on the `lighting_freeze_guard` DB trigger, so the user
+    // got a raw Postgres error (and, on a database without m179, no guard at
+    // all). Mirrors confirmLightingAiField. (QA campaign 2026-07-22, P0-1.)
+    const { data: frozenTl } = await supabase
+      .from("production_task_lists")
+      .select("number")
+      .eq("quotation_id", documentId)
+      .in("status", ["validated", "production_ready"])
+      .limit(1)
+      .maybeSingle();
+    if (frozenTl) {
+      return {
+        ok: false,
+        error:
+          `Final Validation freeze: task list ${(frozenTl as any).number} is validated — ` +
+          `open a controlled revision before changing the lighting setup.`,
+      };
+    }
+
     const fields = {
       affair_id: str(formData.get("affair_id")) || null,
       client_id: str(formData.get("client_id")) || null,

@@ -123,6 +123,38 @@ function assertNotFrozen(status: string | null | undefined, rev?: string | null)
 }
 
 /**
+ * m182 — same assert for the per-LINE edit actions, which previously had no
+ * freeze check at all (QA campaign 2026-07-22, P0-1). The parent is resolved
+ * from the LINE id, never from the client-supplied `task_list_id`, so the
+ * check cannot be steered by a forged form field.
+ *
+ * Deliberately does NOT select `current_rev`: that column only exists once
+ * m179 is applied, and selecting it unguarded is exactly what broke per-line
+ * lighting in production. The rev only labels the message; "A" is the safe
+ * default.
+ */
+async function assertLineParentNotFrozen(
+  supabase: ReturnType<typeof createClient>,
+  lineId: string
+): Promise<void> {
+  if (!lineId) return;
+  const { data: line } = await supabase
+    .from("production_task_list_lines")
+    .select("task_list_id")
+    .eq("id", lineId)
+    .maybeSingle();
+  const parentId = (line as any)?.task_list_id;
+  // Line already gone → the caller's update matches nothing anyway.
+  if (!parentId) return;
+  const { data: parent } = await supabase
+    .from("production_task_lists")
+    .select("status")
+    .eq("id", parentId)
+    .maybeSingle();
+  assertNotFrozen((parent as any)?.status);
+}
+
+/**
  * m178 — how many OPEN blocking Pre-Validation action items does this task
  * list carry? A department flagged unfinished blocking work ("Waiting for
  * pole calculation", "Missing engineering approval") — Final Validation must
@@ -837,6 +869,7 @@ export async function updateTaskListLineFactoryOverrides(formData: FormData) {
   }
 
   const supabase = createClient();
+  await assertLineParentNotFrozen(supabase, id); // m182
   const { error } = await supabase
     .from("production_task_list_lines")
     .update({ factory_overrides })
@@ -869,6 +902,7 @@ export async function updateTaskListLineTechnical(formData: FormData) {
   }
 
   const supabase = createClient();
+  await assertLineParentNotFrozen(supabase, id); // m182
   const { error } = await supabase
     .from("production_task_list_lines")
     .update({ technical_values })
@@ -1657,6 +1691,13 @@ export async function deleteTaskList(formData: FormData) {
     .eq("id", id)
     .maybeSingle();
 
+  // m182 — a Final-Validated task list must not be deletable: the delete
+  // cascades to task_list_revisions, lines, action items and the production
+  // order, i.e. it destroys the very audit trail the freeze protects. The DB
+  // trigger `tl_freeze_delete_guard` is the guarantee; this is the friendly
+  // error. (QA campaign 2026-07-22, P0-1 bypass #1.)
+  assertNotFrozen((ctx as any)?.status);
+
   const { error } = await supabase
     .from("production_task_lists")
     .delete()
@@ -2092,6 +2133,7 @@ export async function setLineFieldOverride(formData: FormData) {
   if (!id || !fieldName) throw new Error("Missing line id or field");
 
   const supabase = createClient();
+  await assertLineParentNotFrozen(supabase, id); // m182
   const { data: ln } = await supabase
     .from("production_task_list_lines")
     .select("factory_overrides")
@@ -2129,6 +2171,7 @@ export async function setLineExtraOverride(formData: FormData) {
   if (!id || !key) throw new Error("Missing line id or field key");
 
   const supabase = createClient();
+  await assertLineParentNotFrozen(supabase, id); // m182
   const read = await supabase
     .from("production_task_list_lines")
     .select("factory_extras")
@@ -2177,6 +2220,7 @@ export async function updateTaskListLineFactoryExtras(formData: FormData) {
   );
 
   const supabase = createClient();
+  await assertLineParentNotFrozen(supabase, id); // m182
   const { error } = await supabase
     .from("production_task_list_lines")
     .update({ factory_extras })

@@ -795,6 +795,15 @@ export default async function TaskListDetailPage({
   // Defensive: pre-m179 fetchRevisions returns [] and the panel stays hidden
   // (unless frozen, where it renders the freeze banner without lineage).
   const frozen = isFrozenStatus(status);
+
+  // m182 — the single editability flag for CONTENT sections. Before this, most
+  // sections gated on `salesCanEdit` alone, so a Final-Validated task list
+  // still rendered ~60 live inputs and Save buttons: the writes were correctly
+  // refused by the server and the DB, but only AFTER submitting. The freeze
+  // banner said "immutable" while the form invited edits.
+  // (QA campaign 2026-07-22, P1 — Permissions/UX.)
+  const canEditContent = salesCanEdit && !frozen;
+
   const revisions = await fetchRevisions(supabase, params.id);
   let revisionDiff: RevisionFieldChange[] = [];
   let revisionDiffLabel: string | null = null;
@@ -912,7 +921,11 @@ export default async function TaskListDetailPage({
             {/* Destructive action — placed at the top, red, with
                 confirm dialog. Hidden entirely if the user lacks the
                 capability. Backend still gates via requireCapability. */}
-            {canDeleteTaskList && (
+            {/* m182 — never offer Delete on a frozen task list: the delete
+                cascades to the revision snapshots, i.e. it destroys the audit
+                trail the freeze exists to protect. Server + DB refuse it now;
+                the button must not invite it either. */}
+            {canDeleteTaskList && !frozen && (
               <DangerDeleteButton
                 action={deleteTaskList}
                 id={task.id}
@@ -1310,8 +1323,8 @@ export default async function TaskListDetailPage({
                 initialNotes={l.internal_notes ?? null}
                 salesFields={salesFields}
                 technicalFields={technicalFields}
-                salesEditable={salesCanEdit}
-                technicalEditable={technical}
+                salesEditable={canEditContent}
+                technicalEditable={technical && !frozen} /* m182 */
                 mappingByOption={Object.fromEntries(mappingByOption)}
                 optionIdByFieldValue={Object.fromEntries(optionIdByFieldValue)}
                 clientOverrides={presetByProduct.get(l.product_id) ?? null}
@@ -1354,7 +1367,7 @@ export default async function TaskListDetailPage({
               affairId={(task as any).affair_id ?? null}
               clientId={task.client_id ?? null}
               initial={lightingRow ?? null}
-              editable={salesCanEdit}
+              editable={canEditContent}
             />
           </div>
 
@@ -1434,7 +1447,7 @@ export default async function TaskListDetailPage({
         <RiskFlagsEditor
           taskListId={task.id}
           initial={riskFlags}
-          editable={salesCanEdit}
+          editable={canEditContent}
         />
       </div>
 
@@ -1475,7 +1488,7 @@ export default async function TaskListDetailPage({
           name="production_notes"
           defaultValue={task.production_notes ?? ""}
           placeholder="Top-level production instructions from sales — context for the factory team."
-          disabled={!salesCanEdit}
+          disabled={!canEditContent}
           rows={3}
           style={{ marginTop: 10, minHeight: 74 }}
         />
@@ -1492,16 +1505,22 @@ export default async function TaskListDetailPage({
               defaultValue={task.technical_notes ?? ""}
               placeholder="Internal references, drawing codes, packaging, BOM notes. Only visible to task list manager + admin."
               rows={3}
+              disabled={!canEditContent}
               style={{ marginTop: 10, minHeight: 74, background: "#FCFCF7" }}
             />
           </>
         )}
-        <div className="savebar">
-          {/* Delete is now in the top-right header (DangerDeleteButton) */}
-          <SubmitButton variant="primary" pendingLabel="Saving…">
-            Save header
-          </SubmitButton>
-        </div>
+        {/* m182 — no Save on a frozen task list: the server and the DB both
+            refuse the write, so offering the button only produced a
+            post-submit error. */}
+        {canEditContent && (
+          <div className="savebar">
+            {/* Delete is now in the top-right header (DangerDeleteButton) */}
+            <SubmitButton variant="primary" pendingLabel="Saving…">
+              Save header
+            </SubmitButton>
+          </div>
+        )}
       </form>
 
       {/* ---------- STICKER REQUIREMENTS ----------
@@ -1512,7 +1531,7 @@ export default async function TaskListDetailPage({
           taskListId={task.id}
           documentId={task.quotation_id ?? null}
           initial={stickerReq}
-          editable={salesCanEdit}
+          editable={canEditContent}
         />
       </div>
 

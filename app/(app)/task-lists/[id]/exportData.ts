@@ -217,7 +217,15 @@ export async function fetchExportData(taskListId: string): Promise<ExportData> {
       .select(
         // m135 manual-item columns (is_manual, manual_specs) are fetched
         // separately + defensively below so exports work before the migration.
-        "id, quantity, config_values, technical_values, factory_overrides, internal_notes, position, product_id, product_name, product_sku, product_category, products(name, sku, category, category_id)"
+        //
+        // m133 — `category_id` is first-class ON THE LINE and was missing
+        // here, so SR-derived lines (product_id null → no `products` join)
+        // resolved to an empty category and the factory dossier + Excel
+        // printed ZERO configuration rows for them. It also made the m180
+        // programming rules resolve differently on screen and in the export.
+        // (QA campaign 2026-07-22, P1-1.) page.tsx selects it undefended too —
+        // m133 is long applied everywhere.
+        "id, quantity, config_values, technical_values, factory_overrides, internal_notes, position, product_id, category_id, product_name, product_sku, product_category, products(name, sku, category, category_id)"
       )
       .eq("task_list_id", taskListId)
       .order("position"),
@@ -572,7 +580,9 @@ export async function fetchExportData(taskListId: string): Promise<ExportData> {
   }
 
   const exportLines: ExportLine[] = (lines ?? []).map((l: any) => {
-    const cid = l.products?.category_id ?? "";
+    // Line-first (m133), then the joined product. SR-derived lines carry the
+    // category on the line and have no product row at all.
+    const cid = l.category_id ?? l.products?.category_id ?? "";
     const salesDefs = salesByCategory.get(cid) ?? [];
     const techDefs = technicalByCategory.get(cid) ?? [];
     const cfg = (l.config_values ?? {}) as Record<string, string>;

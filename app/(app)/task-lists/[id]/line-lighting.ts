@@ -84,11 +84,32 @@ async function loadLineAndGate(
   if (error && /lighting/i.test(error.message ?? "")) throw new Error(MISSING_COLUMN);
   if (error || !line) throw new Error("Product line not found.");
 
-  const { data: tl } = await supabase
-    .from("production_task_lists")
-    .select("id, number, status, quotation_id, current_rev")
-    .eq("id", (line as any).task_list_id)
-    .maybeSingle();
+  // m179 DEFENSIVE — `current_rev` only exists once m179 is applied. Before
+  // that this select fails with 42703 and, because the error was discarded,
+  // `tl` came back null and EVERY per-line lighting write died with a
+  // misleading "Task list not found." — even though m180 was deployed and the
+  // panel rendered fine. (QA campaign 2026-07-22, finding P0-2.) Retry without
+  // the column: the rev is only used to label the freeze message, so falling
+  // back to "A" is safe. Same contract as the `lighting` column just above.
+  const TL_BASE_COLS = "id, number, status, quotation_id";
+  let tl: any = null;
+  {
+    const withRev = await supabase
+      .from("production_task_lists")
+      .select(`${TL_BASE_COLS}, current_rev`)
+      .eq("id", (line as any).task_list_id)
+      .maybeSingle();
+    if (withRev.error) {
+      const withoutRev = await supabase
+        .from("production_task_lists")
+        .select(TL_BASE_COLS)
+        .eq("id", (line as any).task_list_id)
+        .maybeSingle();
+      tl = withoutRev.data;
+    } else {
+      tl = withRev.data;
+    }
+  }
   if (!tl) throw new Error("Task list not found.");
 
   const status = (tl as any).status as ProductionTaskListStatus;
