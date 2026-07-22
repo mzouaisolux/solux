@@ -43,6 +43,8 @@ const STATUS_STYLE: Record<LineLightingStatus, string> = {
   complete: "border-emerald-200 bg-emerald-50 text-emerald-800",
   needs_review: "border-amber-300 bg-amber-50 text-amber-900",
   missing: "border-rose-200 bg-rose-50 text-rose-700",
+  // P1-3 — optional + no programming: neutral, never alarming. It gates nothing.
+  optional_empty: "border-neutral-200 bg-neutral-50 text-neutral-500",
   not_applicable: "border-neutral-200 bg-neutral-100 text-neutral-500",
 };
 

@@ -21,6 +21,7 @@ import {
   editedSetup,
   emptyLineValues,
   hasNewerStudy,
+  LINE_LIGHTING_STATUS_LABEL,
   lineLightingStatus,
   manualSetup,
   copiedSetup,
@@ -131,6 +132,17 @@ test("status: not_applicable wins; required+empty=missing; auto+unreviewed=needs
     NOW
   );
   assert.equal(lineLightingStatus("optional", man), "complete");
+});
+
+// P1-3 — an OPTIONAL line with no programming must NOT read as a defect: the
+// release gate skips anything that is not `required`
+// (missingRequiredProgrammingFor), so a red "missing" chip contradicted the
+// server. With DEFAULT_OUTCOME = "optional" that was almost every line.
+test("status: optional+empty is neutral, required+empty stays missing", () => {
+  assert.equal(lineLightingStatus("optional", null), "optional_empty");
+  assert.equal(lineLightingStatus("required", null), "missing");
+  assert.equal(LINE_LIGHTING_STATUS_LABEL.optional_empty, "—");
+  assert.equal(LINE_LIGHTING_STATUS_LABEL.missing, "❌ Missing programming");
 });
 
 // ---------------------------------------------------------------------------

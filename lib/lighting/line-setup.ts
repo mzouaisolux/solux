@@ -263,14 +263,27 @@ export function hasProgrammingContent(s: LineLightingSetup | null): boolean {
 // ---------------------------------------------------------------------------
 
 export type ProgrammingRequirement = "required" | "optional" | "not_applicable";
-export type LineLightingStatus = "complete" | "needs_review" | "missing" | "not_applicable";
+export type LineLightingStatus =
+  | "complete"
+  | "needs_review"
+  | "missing"
+  | "optional_empty"
+  | "not_applicable";
 
 export function lineLightingStatus(
   requirement: ProgrammingRequirement,
   setup: LineLightingSetup | null
 ): LineLightingStatus {
   if (requirement === "not_applicable") return "not_applicable";
-  if (!hasProgrammingContent(setup)) return "missing"; // for optional: renders as "—", never gates
+  if (!hasProgrammingContent(setup)) {
+    // P1-3 — an OPTIONAL line with no programming is not a defect: the
+    // release gate ignores it (missingRequiredProgrammingFor skips anything
+    // that is not `required`). It used to return "missing", so the UI painted
+    // a red "❌ Missing programming" chip that blocked nothing — and since
+    // DEFAULT_OUTCOME is "optional", that was almost every line. The comment
+    // here already documented the intended "—"; the code did not implement it.
+    return requirement === "optional" ? "optional_empty" : "missing";
+  }
   if (setup!.mode === "automatic" && setup!.review.state === "unreviewed") return "needs_review";
   if (validateLineValues(setup!.final).errors.length > 0) return "needs_review";
   return "complete";
@@ -280,6 +293,7 @@ export const LINE_LIGHTING_STATUS_LABEL: Record<LineLightingStatus, string> = {
   complete: "✅ Complete",
   needs_review: "⚠ Needs review",
   missing: "❌ Missing programming",
+  optional_empty: "—",
   not_applicable: "N/A — not required",
 };
 
