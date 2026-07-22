@@ -256,7 +256,7 @@ See §2.6–2.7. Includes explicit **"Apply to all eligible lines"** (one-time c
 | `lib/import/pdf-text.ts` | Opt-in `pageMarkers` mode |
 | `lib/lighting/extract-energy-study.ts` | Candidate-based tilt extraction, multilingual prompt |
 | `lib/lighting/types.ts` | Extraction + provenance type extensions |
-| `lib/production-dossier.ts` | Enum title dicts removed (moved to terminology); banner on `DOSSIER_SECTIONS` |
+| `lib/production-dossier.ts` | Banner on `DOSSIER_SECTIONS`. ⚠️ **Correction (QA 2026-07-22):** an earlier version of this row claimed the enum title dicts were "removed (moved to terminology)". That is **false on this branch** — `PACKAGING_VERSION_TITLES` / `MANUAL_BRAND_TITLES` / `MANUAL_LANGUAGE_TITLES` are still exported and consumed (6 references). §8 P2 is the accurate account. `lib/terminology-server.ts` / `-client.ts` are imported by nothing: m177 is admin-only today. |
 | `components/ProductionDossierPDF.tsx` | Per-line programming block |
 | `components/documents/IndustrialFileEditor.tsx` | Tilt conflict banner + provenance evidence |
 | `components/lighting/ProductLightingSetupForm.tsx` | Tilt row in AI panel; conflict-aware messaging |
