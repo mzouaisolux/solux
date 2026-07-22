@@ -164,7 +164,9 @@ export function LineLightingPanel({
                     act(saveLineLighting, l.id, { values: JSON.stringify(values) })
                   }
                   onConfirm={() => act(confirmLineLighting, l.id)}
-                  onAuto={() => act(autoPopulateLineLighting, l.id)}
+                  onAuto={(confirm) =>
+                    act(autoPopulateLineLighting, l.id, confirm ? { confirm: "1" } : {})
+                  }
                   onMode={(mode, confirm) =>
                     act(setLineLightingMode, l.id, { mode, ...(confirm ? { confirm: "1" } : {}) })
                   }
@@ -200,7 +202,9 @@ function LineEditor({
   studyName: string | null;
   onSave: (values: LineLightingValues) => void;
   onConfirm: () => void;
-  onAuto: () => void;
+  /** D2 — `confirm` is required when the line is in Manual mode: the import
+   *  switches it back to Automatic and discards the hand-entered values. */
+  onAuto: (confirm?: boolean) => void;
   onMode: (mode: "automatic" | "manual", confirm?: boolean) => void;
   onApplyAll: () => void;
 }) {
@@ -274,7 +278,9 @@ function LineEditor({
             <button
               type="button"
               disabled={busy}
-              onClick={onAuto}
+              // Wrapped: passing `onAuto` directly would hand the click event
+              // through as the `confirm` flag (truthy).
+              onClick={() => onAuto()}
               className="rounded-md border border-indigo-200 bg-indigo-50 px-2.5 py-1 text-[11px] font-medium text-indigo-900 hover:bg-indigo-100"
               data-testid="auto-populate"
             >
@@ -285,11 +291,17 @@ function LineEditor({
             <button
               type="button"
               disabled={busy}
-              onClick={() =>
-                window.confirm(
-                  "A newer approved study extraction exists. Import its recommendation?\n\nCurrent values are kept in the history."
-                ) && onAuto()
-              }
+              onClick={() => {
+                // D2 — on a Manual line the import silently switched the mode
+                // back to Automatic; the old wording never said so.
+                const manual = s?.mode === "manual";
+                const ok = window.confirm(
+                  manual
+                    ? "A newer approved study extraction exists.\n\nImporting it switches this line back to AUTOMATIC and replaces your manual values.\n\nThey are kept in the history. Continue?"
+                    : "A newer approved study extraction exists. Import its recommendation?\n\nCurrent values are kept in the history."
+                );
+                if (ok) onAuto(manual);
+              }}
               className="rounded-md border border-sky-300 bg-sky-50 px-2.5 py-1 text-[11px] font-medium text-sky-900 hover:bg-sky-100"
               data-testid="import-newer-study"
             >

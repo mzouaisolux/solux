@@ -249,6 +249,20 @@ export async function autoPopulateLineLighting(formData: FormData) {
   }
   const now = new Date().toISOString();
   const existing = normalizeLineLighting(line.lighting);
+
+  // D2 — importUpdatedRecommendation forces mode:"automatic". On a MANUAL
+  // line that therefore discards the hand-entered values, which is exactly
+  // the transition setLineLightingMode protects with confirm=1. Without this
+  // check the guard was bypassable through a different action ("Import
+  // updated study values" on a line switched to Manual after having been
+  // Automatic — it keeps its stale `recommended`, so the button shows).
+  // Same wording as setLineLightingMode so the two paths cannot diverge.
+  if (existing?.mode === "manual" && str(formData, "confirm") !== "1") {
+    throw new Error(
+      "Switching to Automatic replaces the current values with the study's recommendation. Confirm to proceed — the manual values stay in the history."
+    );
+  }
+
   const next = existing
     ? importUpdatedRecommendation(existing, rec, userId, now)
     : setupFromRecommendation(rec, userId, now);
