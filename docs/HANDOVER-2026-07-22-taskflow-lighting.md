@@ -1,8 +1,36 @@
 # Engineering Handover — Task-List Workflow, Terminology & Lighting Architecture
 **Session date:** 2026-07-21 → 2026-07-22
-**Branch:** `packing-module/phase1`
 **Repo:** `~/dev/facturation` (canonical git repo — **not** the iCloud copy)
-**Migrations delivered:** m176 → m181
+**Migrations delivered:** m176 → m181 (then m182 → m183, see below)
+
+---
+
+## ⚡ STATUS — updated end of 2026-07-22, read this first
+
+Everything this document lists as "pending" in its original form **has since been
+done**. Current reality:
+
+| | |
+|---|---|
+| **Branch** | `main` @ `eeeaf97` — the feature branch was fast-forward-merged and pushed. `packing-module/phase1` still exists on origin, one commit behind |
+| **Cloud migrations** | **ALL applied** — 173 → 183, `db:migrate` reports **0 pending** |
+| **Vercel Production** | ✅ **Ready** on `eeeaf97`, live at `solux-hub-seven.vercel.app` |
+| **Freeze (m179)** | now DB-enforced in production, and **hardened by m182 + m183** |
+
+A QA campaign ran after this handover was written and found real defects, all
+since fixed. Read **`docs/QA-CAMPAIGN-2026-07-22.md`** alongside this file — it
+supersedes §8 (remaining work) and parts of §9 (known issues).
+
+What that campaign changed, in one line each:
+- **m182** — closed 3 ways the Final Validation freeze could be bypassed (delete the task list, sneak a content change alongside a status change, rewrite a revision snapshot).
+- **m183** — froze the attachments captured in a validated revision snapshot.
+- **Per-line lighting was broken in production** (`line-lighting.ts` selected `current_rev` unguarded) — fixed, and m179 landing fixed the root cause too.
+- **Factory export dropped the whole configuration of SR-derived lines** (`exportData.ts` never selected the line's own `category_id`) — fixed.
+- **D1 / D2 / P1-2 / P1-3** — silent data loss in the line editor, a bypassed confirm guard, a disabled SR backfill, and optional lines painted as errors — all fixed.
+
+⚠️ Sections 1 → 7 (architecture, root causes, design decisions) remain accurate
+and are still the best introduction to this feature set. Sections 8 → 12 are
+annotated below where they went stale.
 
 ---
 
@@ -277,14 +305,28 @@ See §2.6–2.7. Includes explicit **"Apply to all eligible lines"** (one-time c
 |---|---|---|
 | `176_tilt_ai_provenance.sql` | `production_task_lists.tilt_ai_provenance` (jsonb) | ✅ **applied** |
 | `177_terminology.sql` | `terminology` table (130-row seed) + `terminology.manage` capability | ✅ **applied** |
-| `178_task_list_action_items.sql` | `task_list_action_items` table + index + RLS | ❌ **NOT APPLIED** |
-| `179_task_list_revisions_freeze.sql` | `task_list_revisions` table, `production_task_lists.current_rev`, **3 freeze triggers** | ❌ **NOT APPLIED** |
+| `178_task_list_action_items.sql` | `task_list_action_items` table + index + RLS | ✅ **applied** |
+| `179_task_list_revisions_freeze.sql` | `task_list_revisions` table, `production_task_lists.current_rev`, **3 freeze triggers** | ✅ **applied** |
 | `180_line_lighting_and_rules.sql` | `production_task_list_lines.lighting` (jsonb), `lighting_programming_rules` table, `lighting_rules.manage` | ✅ **applied** |
 | `181_sr_cost_configuration.sql` | `project_requests.config_values`, `project_requests.pole_spec` | ✅ **applied** |
+| `182_freeze_hardening.sql` | DELETE guard on task lists, removes the status-change bypass, `tl_revision_freeze_guard` | ✅ **applied** |
+| `183_attachment_freeze.sql` | `attachment_freeze_guard` — freezes attachments named in a finalised revision snapshot | ✅ **applied** |
 
-**Local (`127.0.0.1:54322`, Docker Supabase): all six applied.**
+> ✅ **All migrations are applied in cloud** (verified 2026-07-22: REST probes on
+> every object + `npm run db:migrate` reporting **0 pending**, 180 recorded).
+> The packing migrations 173/174 and the bank-charges 175 were applied too, so
+> the packing module is now live — still gated `superAdminOnly`.
+>
+> The original text of this section warned that m178/m179 were missing and that
+> the freeze was therefore not DB-enforced. **That is no longer true.** The
+> freeze is enforced and hardened; see `docs/QA-CAMPAIGN-2026-07-22.md` §3 for
+> the four bypasses that were found and closed, with their SQL proofs.
+>
+> A read-only verification script lives at `supabase/verify_freeze_prod.sql` —
+> paste it in the Supabase SQL editor to re-check the freeze at any time. It
+> wraps its write tests in `BEGIN … ROLLBACK`, so it mutates nothing.
 
-> 🔴 **CRITICAL — cloud is missing m178 and m179.** Verified by REST probe on 2026-07-22 (`task_list_action_items` → PGRST205; `current_rev` → 42703). There is **no order dependency** between them and m180/m181, so applying them now is safe. Until then, in cloud: the Pre-Validation board renders without action items, the revisions panel stays hidden, and **the Final Validation freeze is NOT enforced** (app-level asserts still apply, DB triggers do not exist).
+**Local (`127.0.0.1:54322`, Docker Supabase): all applied as well.**
 
 ### Two databases — the trap that cost time
 
@@ -355,17 +397,41 @@ New **"Product options"** section (per-category, rendered only when the selected
 
 ## 8. Remaining work (priority order)
 
-### P0 — Apply missing cloud migrations
-Apply **m178** then **m179** in the Supabase SQL editor. Without m179 the Final Validation freeze is not DB-enforced in production.
+> **This section is superseded.** P0, P1 and P3 are DONE (migrations applied,
+> branch merged into `main` and pushed, frozen task lists no longer render any
+> Save / Delete / Add control). The live backlog is in
+> **`docs/QA-CAMPAIGN-2026-07-22.md` §4** — that campaign also found ~30 places
+> where the original spec was never built, which matter more than what is left
+> below. P2, P4, P5, P6 remain open and are restated accurately here.
 
-### P1 — Push the branch
-`packing-module/phase1` is **5 commits ahead** of origin. Vercel is building stale code.
+### ~~P0 — Apply missing cloud migrations~~ ✅ DONE
+All migrations 173 → 183 are applied in cloud; `db:migrate` reports 0 pending.
 
-### P2 — Land the dossier-PDF terminology migration
-The full m177 (including routing all ~95 dossier strings through the dictionary) exists on `claude/xenodochial-roentgen-4d52b3` (`5f0be63`) but was **never landed on phase1**, because phase1's `1d7fc33` rewrote that component (857 insertions / 1353 deletions). It must be **redone against phase1's compacted `LineBuild` structure** — ~329 CJK characters remain hardcoded there. Note phase1's PDF still imports `PACKAGING_VERSION_TITLES` / `MANUAL_BRAND_TITLES` / `MANUAL_LANGUAGE_TITLES` (6 references), so removing them from `lib/production-dossier.ts` on phase1 would break the build until the migration is done.
+### ~~P1 — Push the branch~~ ✅ DONE
+Fast-forward-merged into `main` (`a0d7d08 → eeeaf97`, 34 commits) and pushed.
+Vercel Production is Ready on `eeeaf97`.
 
-### P3 — Hide "Bounce back to sales" on frozen lists
-The button still renders on frozen task lists; the server correctly refuses. UI-only cleanup.
+### P2 — Land the dossier-PDF terminology migration ⬅️ **still the largest open item**
+The full m177 (routing the ~95 dossier strings through the dictionary) is
+archived at the annotated tag **`archive/m177-dossier-terminology`** (`5f0be63`,
+pushed). It was never landed, because `1d7fc33` rewrote that component
+(857 insertions / 1353 deletions). It must be **redone against `main`'s compacted
+`LineBuild` structure** — measured 2026-07-22: **352 hardcoded CJK characters in
+`components/ProductionDossierPDF.tsx` + 177 in `lib/production-dossier.ts`**.
+`main`'s PDF still imports `PACKAGING_VERSION_TITLES` / `MANUAL_BRAND_TITLES` /
+`MANUAL_LANGUAGE_TITLES` (6 references), so removing them before doing the
+migration breaks the build.
+
+⚠️ Related finding: `lib/terminology-server.ts` and `lib/terminology-client.ts`
+are **imported by nothing** — m177 is admin-only today. Nothing renders from the
+terminology table yet. Do not blind-merge the archive tag; use it as a reference
+for WHICH strings to migrate.
+
+### ~~P3 — Hide "Bounce back to sales" on frozen lists~~ ✅ DONE
+It was wider than described: the whole editing surface stayed live on frozen
+lists (60 active controls for a TLM). Now none. The two buttons that always
+failed server-side ("Request revision" on validated, "Bounce back to sales" on
+production_ready) were removed in favour of the controlled-revision path.
 
 ### P4 — DIALux per-zone recommendations in automatic mode
 `autoPopulateLineLighting` only reads the Energy Study extraction. DIALux extraction produces per-zone configurations (mounting height, CCT, optics) that could map to lines.
@@ -381,7 +447,12 @@ They share `.next/`; running a build corrupts the dev server ("missing required 
 ## 9. Known issues, technical debt & assumptions
 
 ### 9.1 Dossier PDF terminology (see P2)
-Two divergent versions exist. Do not blind-merge the worktree branch.
+Two divergent versions exist. Do not blind-merge the archive. The old worktree
+branch was replaced by the annotated tag `archive/m177-dossier-terminology`
+(pushed) — a tag rather than a branch, because a pushed branch makes Vercel
+build it, and that historical snapshot fails by construction: it predates the
+July build fixes (`c2bbabd`, `3898e41`, `5ff7f8c`, `49c4407`). A red Preview on
+it means nothing for `main`.
 
 ### 9.2 `doc.destroy` is a no-op under pdfjs-dist v6
 `DocPreview.renderPdfThumb()` calls `doc.destroy?.()`; `PDFDocumentProxy` has no `destroy()` in v6 (verified: throws when called directly). Per-document workers are never freed — a bounded leak, not a crash. Fix: keep the `loadingTask` and call `loadingTask.destroy()`. A background task chip was spawned for this.
@@ -414,46 +485,107 @@ All local-only. Clean up if it interferes.
 
 ---
 
-## 10. Deployment status
+## 10. Deployment status — **updated end of 2026-07-22**
 
-**Local:** ✅ `npm run build` exit 0 · ✅ **797/797 tests** (re-verified at session end, 2.3 s) · ✅ typecheck clean · dev server on :3000 (session-tied — start your own)
+**Local:** ✅ typecheck exit 0 · ✅ **802/802 unit tests** · ✅ **23/23 e2e** (real
+logins) · dev server on :3000 is session-tied — start your own, and never run
+`npm run build` while it runs (they share `.next/`).
 
-**Git:** branch `packing-module/phase1`, **6 commits ahead of origin** (5 features + this document). Working tree clean except untracked `Survey/` (pre-existing, deliberately untouched).
+**Git:** on **`main` @ `eeeaf97`**, identical to `origin/main` (0 commits either
+way). Working tree clean except untracked `Survey/` (pre-existing, untouched).
 
+The feature branch was **fast-forward-merged**: `a0d7d08 → eeeaf97`, 34 commits,
+177 files, +21 497 / −2 399. No merge commit, no conflict.
+
+Remote branches:
 ```
-0cc48b5  docs: this handover                                   ← unpushed
-8463d67  feat(sr): complete cost configuration (m181)          ← unpushed
-04e9384  feat(lighting): per-line Lighting Setups (m180)       ← unpushed
-30c681e  feat(lighting): AI review states (phase 2)            ← unpushed
-9ff91c1  feat(task-list): Final Validation freeze (m179)       ← unpushed
-1986c25  feat(task-list): Pre-Validation board (m178)          ← unpushed
-─────────────────────────────────────────── origin/packing-module/phase1
-49c4407  fix(pdf-worker): pin pdfjs-dist, unblock worker route
-0d0fad2  fix(terminology): show the real read error
-c63630e  fix(lighting): show extracted panel tilt in AI panel
-3898e41  fix(build): stop type-checking .tmp.ts scratch
-c2bbabd  fix(types): widen recon text helper param
-5ff7f8c  fix(build): serve pdf.js worker statically
-2ab5fcf  feat(admin): centralized terminology (m177)
-85eae66  feat(task-list): tilt AI provenance (m176)
-2891ec2  chore(git): untrack tsconfig.tsbuildinfo
+eeeaf97  main                        ← reference, deployed
+5a022b4  packing-module/phase1       ← merged, now 1 commit behind main
+362bf32  ux/event-registry-polish    ← old, 0 commits outside main
+```
+Remote tag:
+```
+5f0be63  archive/m177-dossier-terminology   ← P2 reference, DO NOT MERGE
 ```
 
-**Other branch:** `claude/xenodochial-roentgen-4d52b3` holds `5f0be63` — the full m177 with the dossier-PDF migration (see P2). Do not delete.
+**PRs:** none — merged directly by fast-forward.
 
-**PRs:** none opened.
-**Vercel:** last push (`49c4407`) contains the build fixes, so deploys should be green. The 5 unpushed commits are not deployed. **Verify the Vercel dashboard** — I could not observe it.
+**Vercel:** ✅ **Production Ready on `eeeaf97`**, build 2 min 22 s, live at
+`solux-hub-seven.vercel.app`. Observed on the dashboard, not inferred.
+⚠️ Red *Preview* deployments exist for old branches — they are expected and
+irrelevant: those snapshots predate the July build fixes. **Filter Vercel on
+Environment = Production**; everything else is branch noise.
 
 ---
 
-## 11. Recommended next task
+## 11. Recommended next task — **updated end of 2026-07-22**
 
-**Apply m178 + m179 to cloud, push the branch, then do P2 (dossier-PDF terminology migration on phase1's structure).**
+The original recommendation (apply migrations, push, then P2) is done except P2.
 
-Order matters: the migrations make the already-deployed features functional; the push gets the last five commits to Vercel; P2 is the largest remaining piece of committed-but-incomplete work and the only one where two divergent versions exist.
+**Do P2: the dossier-PDF terminology migration**, against `main`'s current
+`LineBuild` structure — ~529 hardcoded CJK characters across
+`components/ProductionDossierPDF.tsx` (352) and `lib/production-dossier.ts`
+(177), with `archive/m177-dossier-terminology` as the reference for which
+strings to route. It is the largest incomplete piece, and finally makes m177
+render somewhere other than its admin screen.
+
+Before that, two smaller things worth clearing, both from
+`docs/QA-CAMPAIGN-2026-07-22.md`:
+- **9.2** `doc.destroy` is a no-op under pdfjs-dist v6 — a bounded worker leak.
+- The campaign's §4 list of ~30 spec items that were never built. Several are
+  cheap (a real "newer study" notification, a history viewer, per-product
+  programming rules in the admin); several are product decisions, not bugs.
 
 ---
 
-## 12. First prompt for the next session
+## 12. First prompt for the next session — **updated end of 2026-07-22**
 
-See the block below this document.
+```
+Tu reprends le projet SOLUX ERP (`solux-quotation-tool`) — ERP Next.js 14 +
+Supabase : Client → Affaire → Service Request → Devis → Proforma → Task List de
+production → Ordre de production → Colisage → Expédition → Facture.
+
+⚠️ REPO CANONIQUE = `~/dev/facturation` (git). Le dossier iCloud est une COPIE
+PÉRIMÉE NON-GIT — ne jamais y coder. Le `cwd` du shell y revient après chaque
+commande : préfixe toujours par `cd ~/dev/facturation &&`.
+
+AVANT TOUTE MODIFICATION, lis dans cet ordre :
+  1. docs/HANDOVER-2026-07-22-taskflow-lighting.md  (architecture, causes racines)
+  2. docs/QA-CAMPAIGN-2026-07-22.md                 (défauts trouvés + corrigés,
+                                                     et ~30 écarts plan/produit)
+
+ÉTAT VÉRIFIÉ fin 2026-07-22 : branche `main` @ `eeeaf97` = `origin/main`.
+Migrations 173→183 TOUTES appliquées en cloud (`db:migrate` : 0 pending).
+Vercel Production Ready sur `eeeaf97`. 802/802 tests, 23/23 e2e, typecheck 0.
+Le gel Final Validation est enforced en base ET durci (m182/m183).
+
+OBJECTIF : P2 — la migration terminologie du dossier PDF de production.
+Router les chaînes codées en dur vers `lib/terminology.ts` : ~352 caractères CJK
+dans `components/ProductionDossierPDF.tsx` et ~177 dans `lib/production-dossier.ts`.
+Le tag `archive/m177-dossier-terminology` (`5f0be63`) contient la version faite
+sur l'ANCIENNE structure du composant — sers-t'en comme référence de CE QU'IL FAUT
+migrer, mais NE LE FUSIONNE PAS : `1d7fc33` a réécrit ce composant depuis.
+Note : `lib/terminology-server.ts` et `-client.ts` ne sont importés par RIEN
+aujourd'hui — m177 ne rend nulle part hors de son écran admin.
+
+RÈGLES (non négociables) :
+- Réponds en français.
+- Jamais « ça marche » sans preuve (sortie de commande, test, sonde). Sinon dis-le.
+- Fini = l'utilisateur le VOIT : page → menu → bouton → résultat.
+- Capabilities = source de vérité unique (`lib/capabilities.ts`), jamais le rôle brut.
+  Fais tourner `npm run check:capabilities` et `npm run check:schema`.
+- Supabase non typé : les fautes de colonne explosent au RUNTIME (42703).
+  Toute lecture d'une colonne récente doit être DÉFENSIVE (cf. le bug m180/m179).
+- Aucune credential DDL ici : les migrations se collent à la main dans le SQL
+  editor Supabase (`brqhcqaagzfiozzamzon`). Ne lance JAMAIS `db:migrate --apply`.
+- Jamais `git stash` dans ce repo. Jamais `npm run build` pendant que `next dev`
+  tourne (ils partagent `.next/`).
+- `grep` est ugrep ici — préfère `git grep` ou Python. `timeout` n'est pas installé.
+- Ne touche pas au dossier `Survey/` non suivi.
+- HYGIÈNE GIT : en fin de session, audite les branches, pousse tout travail unique
+  (ou archive-le en tag annoté), vérifie `main` ↔ `origin/main`, et demande
+  confirmation avant toute suppression. Un hook `SessionEnd` le rappelle.
+
+Commence par lire les deux documents, fais un point court de l'état réel que tu
+observes (git, tests, migrations), puis enchaîne sur P2.
+```
