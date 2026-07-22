@@ -17,7 +17,10 @@
 -- friendlier first line of defence, never as the guarantee.
 --
 -- Idempotent. Safe to re-run. Reads and modifies no data.
+-- Apply manually in the Supabase SQL editor, AFTER m178 + m179.
 -- =====================================================================
+
+begin;
 
 -- ---------------------------------------------------------------------
 -- BYPASS #2 — "change the status in the same UPDATE and the freeze
@@ -155,3 +158,19 @@ drop trigger if exists tl_revision_freeze_guard on public.task_list_revisions;
 create trigger tl_revision_freeze_guard
   before update or delete on public.task_list_revisions
   for each row execute function public.tl_revision_freeze_guard();
+
+-- Ledger (m113 rule: every migration self-inserts).
+insert into schema_migrations (filename, note)
+values ('182_freeze_hardening.sql',
+        'Final Validation freeze hardening (QA campaign 2026-07-22): tl_freeze_guard drops the redundant `new.status = old.status` short-circuit (any UPDATE touching status skipped the content check) and gains a DELETE branch + tl_freeze_delete_guard (a frozen task list could be deleted, cascading away its revision snapshots); new tl_revision_freeze_guard makes validated/superseded revisions immutable. Delete branches are scoped to the PostgREST roles so the m169 super-admin Force Delete keeps working. RLS deliberately untouched.')
+on conflict (filename) do nothing;
+
+commit;
+
+-- ---------------------------------------------------------------------
+-- Smoke (run separately):
+--   select trigger_name, event_manipulation, event_object_table
+--     from information_schema.triggers
+--    where trigger_name like '%freeze%' order by 3, 2;
+--   -- expect 10 rows here (12 once m183 is applied too)
+-- ---------------------------------------------------------------------

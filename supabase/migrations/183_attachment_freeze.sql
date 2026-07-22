@@ -38,7 +38,10 @@
 -- call with a legitimate user JWT). Only the database can provide that.
 --
 -- Idempotent. Safe to re-run. Reads and modifies no data.
+-- Apply manually in the Supabase SQL editor, AFTER m178 + m179 + m182.
 -- =====================================================================
+
+begin;
 
 create or replace function public.attachment_freeze_guard()
 returns trigger
@@ -101,3 +104,18 @@ drop trigger if exists attachment_freeze_guard on public.attachments;
 create trigger attachment_freeze_guard
   before update or delete on public.attachments
   for each row execute function public.attachment_freeze_guard();
+
+-- Ledger (m113 rule: every migration self-inserts).
+insert into schema_migrations (filename, note)
+values ('183_attachment_freeze.sql',
+        'Final Validation freeze: attachments (QA campaign 2026-07-22, fourth bypass). attachments is anchored to affair_id only, so freezing "the task list documents" uses the link that already exists — an attachment is frozen iff a finalised m179 revision snapshot names its id. Deleting it or swapping its file in place is refused; folder/note/visibility/doc_status stay editable (m164 DnD) and Replace keeps inserting a new version row (m151). Delete branch scoped to the PostgREST roles so the m169 Force Delete keeps working.')
+on conflict (filename) do nothing;
+
+commit;
+
+-- ---------------------------------------------------------------------
+-- Smoke (run separately):
+--   select trigger_name, event_manipulation from information_schema.triggers
+--    where event_object_table = 'attachments';
+--   -- expect attachment_freeze_guard on UPDATE and on DELETE
+-- ---------------------------------------------------------------------
