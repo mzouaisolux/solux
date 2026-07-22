@@ -144,6 +144,17 @@ export function LineLightingPanel({
 
               {open === l.id && (
                 <LineEditor
+                  // D1 — LineEditor seeds its `values` state from setup.final
+                  // through a LAZY useState initialiser, which runs only on
+                  // mount. router.refresh() delivers fresh props but React
+                  // keeps the same instance, so the inputs kept showing the OLD
+                  // values while the recommendation block above them already
+                  // showed the new study — and the next "Save programming"
+                  // wrote those stale values back over the freshly imported
+                  // ones (silent data loss). Keying on audit.updated_at
+                  // remounts the editor exactly when the server state changed:
+                  // all 8 mutation paths in lib/lighting/line-setup.ts stamp it.
+                  key={`${l.id}:${l.setup?.audit.updated_at ?? "none"}`}
                   line={l}
                   editable={editable}
                   busy={busy}
