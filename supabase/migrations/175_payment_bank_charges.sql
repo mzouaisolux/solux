@@ -37,4 +37,13 @@ comment on column public.production_orders.deposit_bank_charges is
 comment on column public.production_orders.balance_bank_charges is
   'm175 — bank charges absorbed by Solux on the BALANCE wire (expected − received, capped at BANK_CHARGES_TOLERANCE). Recorded as an expense, never a customer receivable.';
 
+-- Ledger (m113 rule: every migration self-inserts). Without this the file
+-- keeps showing as pending in `npm run db:migrate` after it has been applied.
+insert into schema_migrations (filename, note)
+values ('175_payment_bank_charges.sql',
+        'Bank charges tolerance: production_orders.deposit_bank_charges + balance_bank_charges (numeric, default 0). A wire shortfall <= BANK_CHARGES_TOLERANCE is booked as an absorbed bank charge, never as a customer receivable. Purely additive; the payments action already writes these columns defensively.')
+on conflict (filename) do nothing;
+
+notify pgrst, 'reload schema';
+
 commit;
