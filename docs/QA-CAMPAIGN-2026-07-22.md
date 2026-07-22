@@ -64,6 +64,8 @@ La politique RLS `tasks update` / `tasks delete` autorise **le commercial créat
 | 3 | **Réécriture directe des snapshots.** RLS `tl revisions write` = `ALL` to `authenticated`, aucun trigger sur `task_list_revisions` | `pg_policies` | **tout utilisateur connecté** |
 | 4 | **Documents non gelés.** 0 trigger sur `attachments`, aucune garde dans `_actions/attachments.ts` | `information_schema.triggers` = 0 | tout utilisateur ayant accès à l'affaire |
 
+> ✅ **CORRIGÉ** — trous 1/2/3 par **m182**, trou 4 par **m183** (gel ciblé sur les pièces jointes nommées dans un snapshot de révision finalisé). 16 tests SQL au total, dont 5 non-régressions. Voir §6.
+
 `task_list_revisions`, `production_task_list_lines`, `task_list_action_items` et `production_orders` sont tous en **`ON DELETE CASCADE`** : le trou #1 détruit donc aussi toute la piste d'audit censée prouver ce qui avait été validé.
 
 **Ce que le gel protège correctement** (7 tests) : UPDATE de colonne non-workflow, INSERT/UPDATE/DELETE de ligne, `risk_flags`, `product_lighting_setups` du même command — tous rejetés avec le bon message. `UPDATE status` seul et écriture sur liste non gelée : autorisés (témoin OK).
@@ -188,13 +190,20 @@ Ce ne sont **pas des bugs**. Ce sont des écarts entre le plan et le produit.
 
 ---
 
-## 6. Remédiation proposée (NON appliquée — en attente d'arbitrage)
+## 6. Remédiation — LIVRÉE (local uniquement, cloud en attente)
 
-### Migration `m182` — colmatage du gel
-1. Ajouter `DELETE` au `tl_freeze_guard` sur `production_task_lists`.
-2. Supprimer la condition `new.status = old.status` au profit d'une **liste blanche explicite** de colonnes workflow.
-3. Restreindre les RLS d'écriture de `task_list_revisions` (et resserrer `task_list_action_items`).
-4. Étendre le gel aux `attachments` rattachées à une task list gelée.
+### Migration `m182` — colmatage du gel (appliquée en local, prouvée 10/10)
+1. ✅ `DELETE` ajouté au `tl_freeze_guard` + trigger `BEFORE DELETE`, scopé aux rôles PostgREST pour ne pas casser le Force Delete m169 (SECURITY DEFINER).
+2. ✅ Condition `new.status = old.status` supprimée — elle était **redondante** (la liste blanche `allowed` tolère déjà les transitions) et **nocive**.
+3. ✅ `tl_revision_freeze_guard` : snapshots immuables dès `validated`/`superseded`. RLS **délibérément non touchée** (la resserrer risquait de casser lectures et écritures légitimes) ; le trigger donne l'immuabilité exacte à la colonne près.
+
+### Migration `m183` — gel des pièces jointes (appliquée en local, prouvée 6/6)
+4. ✅ Résolu **sans changement de schéma**, en utilisant un lien qui existait déjà : le snapshot m179 enregistre `id`/`file_name`/`storage_path` des pièces jointes de la version validée. Une pièce jointe est gelée **si et seulement si** un snapshot finalisé la nomme.
+   - documents ajoutés **après** la validation → libres
+   - `folder` / note / visibilité / `doc_status` → toujours éditables (la catégorisation DnD m164 continue de marcher)
+   - « Replace » crée déjà une **nouvelle ligne** (`group_id`+`version`, m151) → inchangé, et le fichier validé reste récupérable
+   - suppression ou échange du fichier en place → refusés
+   - Écarté : geler par `affair_id` aurait verrouillé tout l'espace documentaire de l'affaire (mesuré : les affaires mélangent `customer`, `technical`, `certifications`, `energy_studies`).
 
 ### Correctifs applicatifs
 5. `assertNotFrozen()` dans `deleteTaskList`, `setTaskListStatus` et les 5 actions mutant des lignes ; garde applicative dans `saveProductLightingSetup`.
