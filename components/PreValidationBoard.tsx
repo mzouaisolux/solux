@@ -148,7 +148,7 @@ export function PreValidationBlockers({
                 {b.anchor && (
                   <>
                     {" — "}
-                    <a className="underline decoration-neutral-300 hover:decoration-neutral-500" href={b.anchor}>resolve ↓</a>
+                    <a className="underline decoration-neutral-300 hover:decoration-neutral-500" href={b.anchor}>resolve →</a>
                   </>
                 )}
               </span>

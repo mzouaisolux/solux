@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 /**
  * OPS DENSE — tab bar for the task-list cockpit.
@@ -41,6 +41,45 @@ export default function OpsTabs({
 }) {
   const first = tabs[0]?.id ?? "";
   const [active, setActive] = useState(initial && tabs.some((t) => t.id === initial) ? initial : first);
+
+  /**
+   * "resolve →" links. The rail (and the readiness banner) point at anchors
+   * like `#tl-product`, which now live inside a hidden panel — a plain anchor
+   * jump would land on `display:none` and do nothing visible.
+   *
+   * Delegated on the document because the rail is rendered OUTSIDE this
+   * component: find the anchor's target, walk up to its owning panel, switch
+   * to that tab, then scroll. Nothing is lifted into context and no panel is
+   * unmounted, so form state is untouched. Any anchor whose target is not
+   * inside a panel keeps the browser's native behaviour.
+   */
+  useEffect(() => {
+    const onClick = (e: MouseEvent) => {
+      if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey) return;
+      const link = (e.target as HTMLElement | null)?.closest?.(
+        'a[href^="#"]'
+      ) as HTMLAnchorElement | null;
+      if (!link) return;
+      const id = (link.getAttribute("href") || "").slice(1);
+      if (!id) return;
+      const target = document.getElementById(id);
+      const panel = target?.closest("[data-ops-panel]") as HTMLElement | null;
+      const tabId = panel?.getAttribute("data-ops-panel");
+      // Only intercept when the tab really exists, so a stale anchor keeps
+      // behaving like a normal link instead of silently swallowing the click.
+      if (!target || !tabId || !document.getElementById(`ops-tab-${tabId}`)) return;
+      e.preventDefault();
+      setActive(tabId);
+      // The panel is display:none until React commits; scroll after that.
+      requestAnimationFrame(() =>
+        requestAnimationFrame(() =>
+          target.scrollIntoView({ behavior: "smooth", block: "start" })
+        )
+      );
+    };
+    document.addEventListener("click", onClick);
+    return () => document.removeEventListener("click", onClick);
+  }, []);
 
   return (
     <>
