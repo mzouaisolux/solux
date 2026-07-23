@@ -1,11 +1,14 @@
 # Handover — Ops Dense redesign of the Task List page
-**Session:** 2026-07-23 · **Branch:** `main` @ `c328bca` (9 commits ahead of `origin/main`)
+**Session:** 2026-07-23 · **Branch:** `main` @ `f187916` (14 commits ahead of `origin/main`)
 **Repo:** `~/dev/facturation` — the iCloud folder is a stale non-git copy, never code there.
 **Scope:** presentation only. No business logic, no schema, no server action was changed.
 
-> **Session 2 (same day) — §5 is DONE.** `PreValidationBoard` is split and its
-> parts now live in the rail. Commits `e615762` (extract) → `cc7293e` (move) →
-> `186696d` (style) → `c328bca` (dead CSS). Details in §9, which supersedes §5.
+> **Session 2 (same day) — §5 is DONE, and so is the §4 finishing list.**
+> `PreValidationBoard` is split and its parts live in the rail: `e615762`
+> (extract) → `cc7293e` (move) → `186696d` (style) → `c328bca` (dead CSS);
+> see §9, which supersedes §5. Then `8c0af35` (resolve → links), `f1f681f`
+> (MISSING badges), `741b5b2` (Save line on the header row), `f187916` (mini
+> stepper); see §10.
 
 ---
 
@@ -59,10 +62,10 @@ Signatures: **no border-radius anywhere**, `font-variant-numeric: tabular-nums` 
 | KPI strip | ✅ matches |
 | Rail: Needs attention · Next step | ✅ present |
 | Rail: **Pending issues · AI-extracted values** | ✅ **done in session 2 — see §9** |
-| `MISSING` amber badges on empty required fields | ❌ CSS approximation only (`:invalid`), no badge |
-| `resolve →` links in Needs attention | ❌ text only, not links |
-| Mini stepper in the header right | ❌ still a full-width card |
-| `Save line` ink button at panel top-right | ❌ still inline in the form |
+| `MISSING` amber badges on empty required fields | ✅ real badge — see §10 |
+| `resolve →` links in Needs attention | ✅ switch to the owning tab — §10 |
+| Mini stepper in the header right | ✅ compact dot row — §10 |
+| `Save line` ink button at panel top-right | ✅ on the header row — §10 |
 
 ---
 
@@ -87,7 +90,7 @@ The tab composition was achieved by physically relocating JSX ranges with a Pyth
 | Component | Why |
 |---|---|
 | `ConfigFieldInput` | **shared with the quote builder** — restyled from outside via `.cfg-form > label / > .block`, never edited |
-| `PreValidationBoard` | still whole; splitting it is the next task (§5) |
+| `PreValidationBoard` | split in session 2 (§9); still exported whole as the fallback |
 | `TaskListWorkflow`, `RevisionsPanel`, `LineLightingPanel`, `IndustrialFileEditor` | only restyled through scoped CSS |
 | `evaluateRelease` | **the single release authority.** The rail and the KPI strip only mirror it |
 
@@ -116,12 +119,12 @@ Command bar 134 → KPI strip 95 → tab bar 229 → rail 295. Measured in a rea
 
 ### Major
 1. ~~**Split `PreValidationBoard` into rail cards**~~ — **done, §9.**
-2. **Mini stepper in the header** — the reference shows the 6-step lifecycle as a small dot row at the command bar's right. Currently a full-width `.flow` card. Needs a compact variant, not a second component. *This is now the largest remaining structural gap.*
+2. ~~**Mini stepper in the header**~~ — **done, §10.**
 
 ### Small polish
-3. `MISSING` amber badge next to the label of a required-but-empty field (the reference shows a real badge; today only the input is tinted via `:invalid`).
-4. `resolve →` links in the rail's Needs attention, jumping to the owning tab — requires lifting the active tab into context (see the pitfall in §6).
-5. `Save line` as an ink button at the Product panel's top-right, with the reference's caption "Changes are kept in memory until you click Save line".
+3. ~~`MISSING` amber badge~~ — **done, §10.**
+4. ~~`resolve →` links~~ — **done, §10** (delegated listener, nothing lifted into context).
+5. ~~`Save line` at the panel's top-right~~ — **done, §10.**
 6. Tilt preset chips: active chip should be **ink**, not green (`chipBase` in the reference).
 7. `Spare parts` as its own tab — it lives inside `IndustrialFileEditor`; needs component surgery, low value.
 
@@ -310,3 +313,50 @@ live on disk only. Re-create them from this description if they are gone.
 §4 item 2 — the mini stepper — is now the largest structural gap, followed by
 the `MISSING` badges and the `resolve →` links (which need the active tab in
 context, see §6).
+
+
+---
+
+## 10. Session 2 — the finishing list (§4 items 2-5)
+
+| Commit | Item | How |
+|---|---|---|
+| `8c0af35` | `resolve →` links | `OpsTabs` delegates a click listener on `document`, walks the anchor target up to its `[data-ops-panel]`, activates that tab, then scrolls. Nothing lifted into context, no panel unmounted — so §6's pitfall does not apply. Anchors outside a panel keep native behaviour. |
+| `f1f681f` | `MISSING` badges | `TaskLineEditor` wraps each field in `.cfg-field` and renders the badge there. `ConfigFieldInput` is still untouched. |
+| `741b5b2` | `Save line` | The whole block moved onto the `.cfg-line` header row; the duplicate "Unsaved changes" chips moved with it instead of being shown twice. |
+| `f187916` | Mini stepper | `.flow.mini`, a CSS variant of the same markup and the same `deriveFlowSteps()` data. |
+
+### The one thing to know about the MISSING badges
+The badge calls `isRequiredFieldEmpty()`, extracted from `countRequiredEmpty`'s
+loop and now used by both, so a badge shows **if and only if** the KPI counted
+that field. That means it follows `required_for_production`, **not** the
+`required` flag behind the red asterisk — and in the catalogue the two do not
+coincide. On `7158d184` the badges land on BATTERY and SPIGOT while
+`SOLAR PANEL *`, `OPTIC *` and `CCT *` carry an asterisk and no badge.
+
+That reads oddly, and it is a **data question, not a UI one**: either those
+asterisked fields should be `required_for_production`, or the badged ones
+should not carry an asterisk. Badging the asterisk instead would have shown 3
+badges against a KPI of 2 — exactly the divergence this page forbids. Worth
+raising with whoever owns the category config.
+
+### Things that moved and were re-measured
+- Sticky stack after the header grew: KPI 134→229, tab bar 229→287, rail
+  295→985 at scrollY 700, no overlap. The bar pinned at 0-134 is the **app
+  header**, not this page's `.head`, which is why growing `.head` changed
+  nothing. (Related: `.ops-topbar` in the stylesheet matches no JSX at all.)
+- Two full-width rules had to be undone for the compact stepper: `flex: 1`
+  (labels collided) and the `top: 6.5px` connector (struck the labels through
+  once the row was 14px tall).
+- Page height, TLM on `7158d184`: 2900 → 2450 (rail split) → **2314px**.
+
+### Verified after the finishing list
+```
+tsc 0 · 803/803 · e2e:regression 23/23
+TLM + operations: 7 tabs, 5 rail cards, 0 pageerror, 0 console.error, typing survives
+FROZEN 10ff8536: 0 Save line, empty caption, 0 add-item, 0 confirm-ai
+resolve → : 5/5 links switch to the right tab, target visible
+MISSING   : KPI "2 still empty" vs exactly 2 badges; clears live on selection
+```
+The two pre-existing findings from §9 still stand: the frozen list's `Delete`
+and `Reject`, and `sales` 404ing on both subject lists.
