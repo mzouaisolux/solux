@@ -19,7 +19,6 @@ import {
   type FactoryExtras,
   type ResolvedFactoryExtra,
 } from "@/lib/factory-extras";
-import { isRequiredFieldEmpty } from "@/lib/task-list-mapping-status";
 import {
   updateTaskListLine,
   updateTaskListLineTechnical,
@@ -738,6 +737,18 @@ export default function TaskLineEditor({
         )}
         <div className="qwrap">
           <div className="lk">Quantity</div>
+          {/* Dirty / Saved status for this line */}
+          {salesEditable && (isDirty || isTechDirty) && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-semibold text-amber-800">
+              <span className="h-1.5 w-1.5 rounded-full bg-amber-500" aria-hidden />
+              Unsaved changes
+            </span>
+          )}
+          {salesEditable && !isDirty && !isTechDirty && savedAt && (
+            <span className="text-[11px] font-medium text-emerald-700">
+              ✓ Saved · {new Date(savedAt).toLocaleTimeString()}
+            </span>
+          )}
           <label className="qbox block">
             <input
               type="number"
@@ -751,43 +762,6 @@ export default function TaskLineEditor({
               aria-label="Quantity"
             />
           </label>
-        </div>
-
-        {/* Save line — the reference puts the primary action at the panel's
-            top-right with its caption, instead of at the far bottom of a long
-            form. Moved here whole: the same status text, the same button, the
-            same saveSales handler. The separate "Unsaved changes" / "✓ Saved"
-            chips that used to sit next to Quantity said exactly what the
-            caption says, so they went with the move rather than being shown
-            twice. */}
-        <div className="cfg-save">
-          <span className="cfg-save-note">
-            {isDirty ? (
-              <span className="font-medium text-amber-700">
-                ● Unsaved changes — click Save line to persist.
-              </span>
-            ) : savedAt ? (
-              <span className="text-emerald-700">
-                ✓ Saved · {new Date(savedAt).toLocaleTimeString()}
-              </span>
-            ) : salesEditable ? (
-              /* Only an invitation when there is something to click: a frozen
-                 line renders no Save button, and telling the reader to press
-                 one would be nonsense. "✓ Saved" above stays either way. */
-              "Changes are kept in memory until you click Save line."
-            ) : null}
-          </span>
-          {salesEditable && (
-            <button
-              onClick={saveSales}
-              disabled={pendingSales}
-              className={`btn-primary transition-colors ${
-                isDirty ? "ring-2 ring-amber-400 ring-offset-1" : ""
-              }`}
-            >
-              {pendingSales ? "Saving…" : "Save line"}
-            </button>
-          )}
         </div>
       </div>
 
@@ -883,32 +857,17 @@ export default function TaskLineEditor({
                   {salesSpec}
                 </div>
               )}
-              {/* The reference badges a required-but-empty field. The badge
-                  lives on a wrapper, never inside ConfigFieldInput — that
-                  component is shared with the quote builder and must not grow
-                  task-list concerns. `isRequiredFieldEmpty` is the very
-                  function countRequiredEmpty uses, so a badge appears if and
-                  only if the KPI counted that field: no second rule. */}
-              {salesFields.map((f) => {
-                const missing = isRequiredFieldEmpty(f, config);
-                return (
-                  <div
-                    key={f.id}
-                    className={`cfg-field${missing ? " is-missing" : ""}`}
-                    data-missing={missing ? "1" : undefined}
-                  >
-                    {missing && <span className="cfg-missing">Missing</span>}
-                    <ConfigFieldInput
-                      field={f}
-                      values={config}
-                      onChange={(patch) => {
-                        setConfig((prev) => ({ ...prev, ...patch }));
-                        setIsDirty(true);
-                      }}
-                    />
-                  </div>
-                );
-              })}
+              {salesFields.map((f) => (
+                <ConfigFieldInput
+                  key={f.id}
+                  field={f}
+                  values={config}
+                  onChange={(patch) => {
+                    setConfig((prev) => ({ ...prev, ...patch }));
+                    setIsDirty(true);
+                  }}
+                />
+              ))}
             </fieldset>
             <aside>
               <SummaryPanel rows={salesSummary} tone="sales" />
@@ -1407,6 +1366,32 @@ export default function TaskLineEditor({
         />
       </div>
 
+      <div className="flex items-center justify-between">
+        <span className="text-[11px] text-neutral-500">
+          {isDirty ? (
+            <span className="font-medium text-amber-700">
+              ● Unsaved changes — click Save line to persist.
+            </span>
+          ) : savedAt ? (
+            <span className="text-emerald-700">
+              ✓ Saved · {new Date(savedAt).toLocaleTimeString()}
+            </span>
+          ) : (
+            "Changes are kept in memory until you click Save line."
+          )}
+        </span>
+        {salesEditable && (
+          <button
+            onClick={saveSales}
+            disabled={pendingSales}
+            className={`btn-primary transition-colors ${
+              isDirty ? "ring-2 ring-amber-400 ring-offset-1" : ""
+            }`}
+          >
+            {pendingSales ? "Saving…" : "Save line"}
+          </button>
+        )}
+      </div>
     </div>
   );
 }

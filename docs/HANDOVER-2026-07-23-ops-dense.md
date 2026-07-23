@@ -1,362 +1,171 @@
-# Handover — Ops Dense redesign of the Task List page
-**Session:** 2026-07-23 · **Branch:** `main` @ `f187916` (14 commits ahead of `origin/main`)
-**Repo:** `~/dev/facturation` — the iCloud folder is a stale non-git copy, never code there.
-**Scope:** presentation only. No business logic, no schema, no server action was changed.
+# Ops Dense — design notes and incremental plan for the Task List page
 
-> **Session 2 (same day) — §5 is DONE, and so is the §4 finishing list.**
-> `PreValidationBoard` is split and its parts live in the rail: `e615762`
-> (extract) → `cc7293e` (move) → `186696d` (style) → `c328bca` (dead CSS);
-> see §9, which supersedes §5. Then `8c0af35` (resolve → links), `f1f681f`
-> (MISSING badges), `741b5b2` (Save line on the header row), `f187916` (mini
-> stepper); see §10.
+**Status: NOT IMPLEMENTED.** On 2026-07-23 the page was restored to
+`origin/main` (`1d4b01e`) after a large redesign drifted too far to review
+safely. This file is no longer a record of what shipped — it is the notes and
+the plan for redoing it **incrementally, one validated slice at a time**.
+
+**Repo:** `~/dev/facturation` — the iCloud folder is a stale non-git copy.
+**Reference:** `~/Downloads/PTL-SLX-AES-26-005 Ops Dense - standalone.html`.
 
 ---
 
-## 1. Current state
+## 1. Why the first attempt was rolled back
 
-### What the task is
-The owner supplied an approved redesign of this page — `~/Downloads/PTL-SLX-AES-26-005 Ops Dense - standalone.html` — and asked for an **exact copy**, tab by tab, applied to the real page. It is a **declension**, not an inspiration: same components, same order, same rhythm.
+It was one big refactor: tab shell, KPI strip, decision rail, board split,
+badges, stepper, revision overlay — all landing before the owner could judge
+any single piece. Each commit was individually verified, but the page as a
+whole was never validated against the reference by the person who owns it, so
+the gap kept being discovered late and patched, which is drift.
 
-> The reference is a **bundled artifact**, not plain HTML. Its design source is gzip+base64 inside `<script type="__bundler/manifest">`. To read it again:
-> ```
-> python3 -c "import re,json,base64,gzip;h=open('/Users/mehdizouai/Downloads/PTL-SLX-AES-26-005 Ops Dense - standalone.html',encoding='utf-8').read();t=json.loads(re.search(r'<script type=\"__bundler/template\"[^>]*>(.*?)</script>',h,re.S).group(1).strip());open('/tmp/ref-template.html','w').write(t)"
-> ```
-> Then the JSX logic is in the `<script type="text/x-dc">` block of that template.
-> **Better:** open the artifact in a browser and click each tab — that is how the per-tab composition was established.
+**The rule for the next attempt: one slice, shown, accepted, then the next.**
+No slice may depend on a later one to make sense.
 
-### Design tokens (extracted from the reference, now live)
-| Token | Value | Use |
-|---|---|---|
-| accent | `#55ff7e` / deep `#0b7a39` / tint `rgba(85,255,126,.14)` | done · valid |
-| ink | `#0f0f0f` | emphasis, active tab, primary button, Next-step card |
-| text / muted | `#2a2a2c` · `#67646f` · `#aeaaba` | |
-| lines | `#e7e7ea` (cards) · `#dcdde1` (controls) | |
-| amber | `#e8870e`, deep `#9a5a00`, line `rgba(232,135,14,.42)` | **needs attention only, never decorative** |
-| page bg | `#faf9f5` | |
-
-Signatures: **no border-radius anywhere**, `font-variant-numeric: tabular-nums` on every figure, uppercase micro-eyebrows 10–11 px / 700–800 / `.06em`.
-
-### Layout changes already implemented
-1. **Sticky command bar** — identity, status, meta and page actions on one dense line. Was four stacked rows.
-2. **KPI strip** — 5 cards (required fields · factory mappings · tilt angle · revision · quote terms), amber left-border when blocking, green when settled. **Sticky**, parked under the command bar.
-3. **Tab bar** — 7 tabs replacing a ~10 000 px vertical stack. Active tab = ink. Sticky under the KPI strip.
-4. **Two-column work area** — tabbed main + **sticky decision rail** (320 px), collapsing to one column under 1180 px.
-5. **Tab composition reordered to match the reference exactly** (JSX blocks physically moved, see §2).
-6. **Ink Next-step card moved into the rail** — was a full-width bar above the tabs.
-7. **Density pass inside the panels** — square controls, 13 px fields, uppercase micro-labels, ink primary buttons, hairline tables.
-8. **Sales configuration is now a 3-column grid** (was a stacked column) — the single biggest gain inside the Product tab.
-9. **Options render as a chip row** (were stacked checkboxes).
-10. **`.tl-secnav` hidden** — the old jump-link row duplicated the tab bar. Hidden, not deleted: its anchors still resolve.
-
-### Measured result
-| | Before | After |
-|---|---|---|
-| Page height, TLM, MAG-26-020 | ~10 500 px | **3 616 px** |
-| Single tab | — | **~1 800 px** |
-
-### Fidelity vs the reference
-| Area | State |
-|---|---|
-| Tokens, typography, square corners, density | ✅ matches |
-| Tab set, order, per-tab composition | ✅ matches |
-| KPI strip | ✅ matches |
-| Rail: Needs attention · Next step | ✅ present |
-| Rail: **Pending issues · AI-extracted values** | ✅ **done in session 2 — see §9** |
-| `MISSING` amber badges on empty required fields | ✅ real badge — see §10 |
-| `resolve →` links in Needs attention | ✅ switch to the owning tab — §10 |
-| Mini stepper in the header right | ✅ compact dot row — §10 |
-| `Save line` ink button at panel top-right | ✅ on the header row — §10 |
+Reverted in commit "restore the task-list page to origin/main". The work is
+still in history (`3b4c9a0` … `9514d12`) and can be read for reference — but
+it should be re-derived slice by slice, not cherry-picked wholesale.
 
 ---
 
-## 2. Architecture decisions
+## 2. Reading the reference
 
-### Tabs are RSC-safe by construction
-`OpsTabs` is a **client** component; the panels are rendered on the **server** and handed over as `children`. The client half never re-renders them — it only toggles which is visible.
-
-**Panels stay MOUNTED** (`display:none`, not unmounted). Deliberate:
-- in-progress form input survives a tab switch;
-- browser in-page search still finds everything;
-- the anchors the old jump-nav targeted still resolve.
-
-**Constraint:** do not "optimise" this into conditional rendering. Unmounting would drop form state and break anchors.
-
-### Blocks were MOVED, never rewritten
-The tab composition was achieved by physically relocating JSX ranges with a Python script, verbatim. No JSX inside a moved block was edited. That is why every form, server action, permission gate and freeze rule is byte-identical to before the session.
-
-**Constraint:** keep doing it this way. Rewriting a block to "clean it up" while moving it is how business behaviour silently breaks here.
-
-### Left unchanged on purpose
-| Component | Why |
-|---|---|
-| `ConfigFieldInput` | **shared with the quote builder** — restyled from outside via `.cfg-form > label / > .block`, never edited |
-| `PreValidationBoard` | split in session 2 (§9); still exported whole as the fallback |
-| `TaskListWorkflow`, `RevisionsPanel`, `LineLightingPanel`, `IndustrialFileEditor` | only restyled through scoped CSS |
-| `evaluateRelease` | **the single release authority.** The rail and the KPI strip only mirror it |
-
-### CSS is scoped, always
-Everything lives under `.tl-detail.ops …`. Nothing outside this page can be affected. The `ops` class is added on the page root; removing it reverts the entire skin.
-
-### Sticky offsets are measured, not guessed
-Command bar 134 → KPI strip 95 → tab bar 229 → rail 295. Measured in a real browser. **If the command bar's height changes, re-measure and update all four**, otherwise elements overlap or float.
-
----
-
-## 3. Files modified
-
-| File | Role | What changed | More work expected |
-|---|---|---|---|
-| `app/(app)/task-lists/[id]/OpsTabs.tsx` | **new** — client tab bar + `OpsPanel` server wrapper | whole file | No, unless a tab is added |
-| `app/(app)/task-lists/[id]/page.tsx` | Server component, ~1930 lines, renders the whole page | `ops` class on root · KPI strip added · JSX blocks reordered into 7 panels · Next-step moved into the rail · rail added | **Yes** — §5 moves board parts into the rail |
-| `app/(app)/task-lists/[id]/tasklist.css` | Page-scoped stylesheet, now 2471 lines | Ops Dense skin appended in 9 blocks (shell, panels, layout, rail parity) | **Yes** — rail cards + polish |
-| `docs/HANDOVER-2026-07-23-ops-dense.md` | this file | new | — |
-
-**Untouched but central to read:** `components/PreValidationBoard.tsx` (432 lines), `lib/task-list-mapping-status.ts` (`evaluateRelease`).
-
----
-
-## 4. Remaining work
-
-### Major
-1. ~~**Split `PreValidationBoard` into rail cards**~~ — **done, §9.**
-2. ~~**Mini stepper in the header**~~ — **done, §10.**
-
-### Small polish
-3. ~~`MISSING` amber badge~~ — **done, §10.**
-4. ~~`resolve →` links~~ — **done, §10** (delegated listener, nothing lifted into context).
-5. ~~`Save line` at the panel's top-right~~ — **done, §10.**
-6. Tilt preset chips: active chip should be **ink**, not green (`chipBase` in the reference).
-7. `Spare parts` as its own tab — it lives inside `IndustrialFileEditor`; needs component surgery, low value.
-
----
-
-## 5. Immediate next task — split `PreValidationBoard` into rail cards
-
-### Goal
-The reference's rail is, top to bottom: **Needs attention · Next step · Pending issues · AI-extracted values**. Today the last two (plus the blocking list) are inside one full-width `PreValidationBoard` sitting above the tabs, costing ~450 px before the user reaches any content.
-
-### Components involved
-- `components/PreValidationBoard.tsx` — 432 lines, `"use client"`, holds `useState(adding)`, `useState(error)`, `useTransition`, `useRouter`. Internal blocks, already commented:
-  - L230 `{/* ---- Blocking errors ---- */}`
-  - L257 `{/* ---- Pending issues (action items) ---- */}`
-  - L358 `{/* ---- AI review ---- */}`
-  - L414 `{/* ---- Warnings (non-blocking) ---- */}`
-  - closes L430
-- `app/(app)/task-lists/[id]/page.tsx` — mounts it at **L1066**, guarded by `showPreValidationBoard`.
-
-### Expected architecture
-Export **three sibling client components from the same file**, sharing the props they already receive:
-```
-PreValidationBlockers   // L230 block  -> feeds the rail's "Needs attention"
-PendingIssuesCard       // L257 block  -> rail card (owns `adding`/`error` state)
-AiReviewCard            // L358 block  -> rail card
-```
-Keep `PreValidationBoard` exported and working — it is the fallback and keeps the diff reversible.
-
-### Safest strategy (in this order, verifying between each)
-1. **Extract without moving.** Split the JSX into the three components, still rendered by `PreValidationBoard` in the same order. Page output must be **identical**. Verify, commit.
-2. **Move the mount.** In `page.tsx`, stop rendering `PreValidationBoard`; render the three components inside `<aside className="ops-aside">`, in reference order. Verify, commit.
-3. **Style** them as `.ops-card` (`padding: 12px 16px 6px` header, `4px 16px 14px` body) with the amber variant for blockers.
-4. **Delete nothing** until steps 1–3 are green.
-
-### Pitfalls
-- **State must not be duplicated.** `adding` / `error` belong to the pending-issues block only. If the split leaves a second `useState` driving the same form, the "+ Add" toggle desynchronises. One owner per state.
-- **`router.refresh()` is called after every action item mutation.** Keep exactly one caller.
-- **Warnings block (L414)** has no home in the reference rail. Do not silently drop it — fold it into Needs attention or keep it in the Risks tab.
-- **`m178Live` fallback.** When m178 is unapplied the board renders an explicit banner instead of items. Preserve that path in the split, or pre-m178 databases show an empty card with no explanation.
-- **The blocking list must keep mirroring `evaluateRelease`.** Never recompute blockers in the new card — pass them through.
-- **Rail height.** Four cards in a 320 px sticky column may exceed the viewport. Give `.ops-aside` `max-height: calc(100vh - 310px); overflow-y: auto;` or the bottom card becomes unreachable.
-- **Sticky offsets** — removing the full-width board changes nothing above it, so 134/229/295 stay valid. Re-measure if the command bar changes.
-
-### Validation
-- 7 tabs still present, correct composition, no JS error.
-- The rail shows 4 cards in reference order.
-- Adding an action item still works, and still blocks Final Validation when flagged `blocking`.
-- A frozen task list still shows **no** write control.
-
----
-
-## 6. Known risks
-
-| Risk | Where | Guard |
-|---|---|---|
-| **Duplicated state** after the split | `adding` / `error` in the board | one owner per state; grep for `useState` after splitting |
-| **Duplicated rendering** | rendering both `PreValidationBoard` and its parts | remove the old mount in the same commit as the new one |
-| **Release gate divergence** | rail / KPI strip re-deriving blockers | mirror `evaluateRelease` only — it is the single authority |
-| **Permissions** | `canCreate` / `canBlock` / `isTechnical` / `canReviewAi` must follow the split | verify as `operations` and `sales`, not just TLM |
-| **Freeze** | a frozen list must expose no Save/Delete/Add | re-run the frozen-state check on `10ff8536-…` |
-| **Hydration** | panels are server-rendered inside a client tab wrapper | never move server-only data fetching into `OpsTabs` |
-| **Unnecessary rerenders** | `OpsTabs` re-renders on tab switch | children are `children` — they do not re-render. Do not pass panels as a prop array of elements built inline |
-| **Sticky overlap** | four hard-coded offsets | re-measure after any header change |
-| **Shared component** | `ConfigFieldInput` also serves the quote builder | never edit it; style from `.tl-detail.ops .cfg-form` |
-| **`:invalid` styling** | amber tint on required-empty fields | it is a CSS approximation; a real badge needs markup |
-
----
-
-## 7. Validation checklist
+It is a bundled artifact, not plain HTML. To extract:
 
 ```bash
-cd ~/dev/facturation
-npx tsc --noEmit          # must exit 0
-npm test                  # 802/802
-npm run check:capabilities
-npm run e2e:regression    # 23/23, real logins
+python3 -c "import re,json;h=open('/Users/mehdizouai/Downloads/PTL-SLX-AES-26-005 Ops Dense - standalone.html',encoding='utf-8').read();t=json.loads(re.search(r'<script type=\"__bundler/template\"[^>]*>(.*?)</script>',h,re.S).group(1).strip());open('/tmp/ref-template.html','w').write(t)"
 ```
 
-Then, in a browser (dev server must already be running — **never** `npm run build` while `next dev` is up, they share `.next/`):
+The behaviour lives in the `<script type="text/x-dc">` block of that template.
+**Read it — it is the spec, not just a picture.** What it defines:
 
-| # | Check |
+| State | Default | Drives |
+|---|---|---|
+| `tab` | `product` | 8 tabs: product · industrial · lighting · branding · risks · **spares** · docs · activity |
+| `revModal` | closed | the revision history overlay |
+| `aiOpen` | **open** | AI-extracted values card collapses (`Hide ▴` / `Show ▾`) |
+| `progOpen` | **open** | lighting programme collapses (`Collapse ▴` / `Expand ▾`) |
+| `pendingOpen` | **closed** | pending issues add-form (`+ Add ▾` / `Hide ▴`) |
+
+Also in the reference and easy to miss:
+- each blocker has a **second line** naming the fields (`Sales configuration —
+  Optic, CCT`) and a `go:` that switches tab;
+- the KPI strip is **BLOCKING · LIGHTING · AI VALUES · REVISION · QUOTE
+  TERMS** — not the current app's Required fields / Factory mappings / Tilt
+  angle set;
+- revisions are `Rev D in progress` / `Rev C validated` / `Rev B, A
+  superseded`, each with a reason and a date.
+
+### Design tokens
+| Token | Value |
 |---|---|
-| 1 | `/task-lists/7158d184-0fac-40bb-9727-5794d8cea6ba` (Pre-Validation) — 7 tabs, each with its reference composition |
-| 2 | `/task-lists/10ff8536-017f-4269-983c-4a8c31e98eb2` (frozen) — **no Save / Delete / Add anywhere** |
-| 3 | Switch tabs with text typed in a field — the text must survive |
-| 4 | Scroll 700 px — command bar, KPI strip and tab bar all stay pinned, none overlapping |
-| 5 | Repeat #1 as `operations` and `sales` — no access regression |
-| 6 | Zero `pageerror` in the console |
+| accent | `#55ff7e` · deep `#0b7a39` · tint `rgba(85,255,126,.14)` |
+| ink | `#0f0f0f` |
+| text / muted | `#2a2a2c` · `#67646f` · `#aeaaba` |
+| lines | `#e7e7ea` (cards) · `#dcdde1` (controls) |
+| amber | `#e8870e` · deep `#9a5a00` · line `rgba(232,135,14,.42)` — **needs attention only, never decorative** |
+| page bg | `#faf9f5` |
 
-Test accounts: domain `solux-light.com`, shared password in `.env.e2e` (`E2E_PASSWORD`), users `testlm@` / `testoperation@` / `testsales@` / `testdir@`.
-
----
-
-## 8. Prompt for the next session
-
-See the block at the end of this document.
+No border-radius anywhere · `font-variant-numeric: tabular-nums` on every
+figure · uppercase micro-eyebrows 10–11 px / 700–800 / `.06em`.
 
 ---
 
-## 9. Session 2 — the rail split, as built (supersedes §5)
+## 3. Constraints that cost real time to discover
 
-### What shipped
-Four commits, one per step of §5's strategy, each verified before the next.
+Keep these whatever the implementation order.
 
-| Commit | Step | What it does |
-|---|---|---|
-| `e615762` | 1 · extract | `PreValidationBoard.tsx` exports four sibling components; the board still composes them, the mount in `page.tsx` is untouched |
-| `cc7293e` | 2 · move | Old full-width mount deleted, parts mounted in `<aside className="ops-aside">`, same commit so nothing renders twice |
-| `186696d` | 3 · style | Stylesheet block 10, `.tl-detail.ops .ops-aside` only |
-| `c328bca` | 4 · clean | `.ops-attn-item` / `.ops-attn-ok`, dead once the markup changed |
+| Constraint | Why it bites |
+|---|---|
+| **`evaluateRelease` is the only release authority** | Any rail / KPI / badge must MIRROR it. A hand-rolled "needs attention" list drifted from the gate and silently omitted blocking action items, open revisions and empty task lists. |
+| **`required` ≠ `required_for_production`** | The red asterisk uses `required`; the KPI and the gate use `required_for_production`. They do **not** coincide in the catalogue — badging the asterisk showed 3 badges against a KPI of 2. Whatever marks a field must call the same helper the count calls. **Also a data question worth raising:** on `7158d184`, `SOLAR PANEL *` is not required-for-production while `BATTERY` (no asterisk) is. |
+| **`ConfigFieldInput` is shared with the quote builder** | Never edit it. Style it from outside (`.cfg-form > label`, `> .block`), or wrap it — and if you wrap it, every `.cfg-form > x` rule needs a `.cfg-form > .wrapper > x` twin or the 3-column grid breaks. |
+| **A frozen task list must expose no write control** | Verify on `10ff8536-…`. Note two write controls exist there **already, on `origin/main`**: `Delete` on an attachment row (`AttachmentsPanel`) and `Reject` (`TaskListWorkflowActions`). Pre-existing, not caused by the redesign — but a real finding to settle separately. |
+| **If panels become tabs, they must stay MOUNTED** | `display:none`, never conditional rendering: unmounting drops in-progress form input and breaks the anchors. |
+| **A sticky offset chain is measured, not guessed** | Command bar 134 → KPI strip 229 → tab bar 287 → rail 295. The bar pinned at 0–134 is the **app header**, not this page's `.head`. Re-measure after any header change. |
+| **An overlay rendered inside the sticky rail is painted over** | The sticky command bar / KPI strip / tab bar are their own stacking contexts. Portal to `<body>`; if the CSS is page-scoped, the portalled wrapper needs the page classes plus `display: contents`. |
+| **`.po-premium .bg-solux` is `!important`** | Primary buttons are accent green page-wide. The reference's ink primary is a page-wide decision, not a per-button override. |
+| **Blocks must be MOVED verbatim, never rewritten in passing** | Rewriting while relocating is how business behaviour breaks unnoticed here. |
 
-### Exports now available from `components/PreValidationBoard.tsx`
-```
-computeBlockers(signals, items)      // the itemised gate — ONE implementation
-aiFieldsNeedingReview(aiFields)
-PreValidationBlockers                // L230 block
-PendingIssuesCard                    // L257 block — owns adding/error/busy
-AiReviewCard                         // L358 block — owns its own confirm transition
-PreValidationWarnings                // L414 block
-PreValidationBoard                   // still exported: fallback, keeps the diff reversible
-```
-
-### Decisions worth knowing
-- **Needs attention no longer re-derives anything.** It used to hand-roll four
-  of the gates in `page.tsx`; it now renders `PreValidationBlockers`, so
-  blocking action items, an open revision, an empty task list and missing
-  factory programming appear in the rail too. It still only mirrors —
-  `evaluateRelease` remains the only authority that gates.
-- **Warnings** are folded under Needs attention, separated by a hairline. The
-  reference rail has no slot for them; dropping them was not an option.
-- **Rail order** is the reference's: Needs attention · Next step · Pending
-  issues · AI-extracted values, with Revision kept last.
-- **`showPreValidationBoard` still guards** Pending issues and AI values, so
-  outside the collaborative phase no write control is mounted at all.
-- **The rail scrolls internally** — 5 cards measure 1127 px against a 590 px
-  column. `max-height: calc(100vh - 310px)`, lifted again under 1180 px.
-- **Amber is conditional now**: `:has()` drops the card to a neutral hairline
-  when the gate is clear. Written as an override, so a browser without `:has()`
-  keeps today's always-amber card rather than losing the accent.
-- **The moved JSX was never edited.** The card headers duplicate each block's
-  own title, so the inner titles are hidden in CSS — except Pending issues,
-  where only the label is hidden and the row is lifted onto the header line
-  (that is what the `pending-wrap` class is for).
-
-### Proof collected
-```
-tsc --noEmit             0
-npm test                 803/803
-check:capabilities       PASS (52 catalogued, 0 orphan)
-e2e:regression           23/23, real logins
-```
-Browser, TLM + operations on `7158d184`: 7 tabs, 5 rail cards in reference
-order, page height 2900 → **2450 px**, 0 `pageerror`, 0 `console.error`,
-typing survives a tab switch. Step 1 was proven by diffing the rendered board
-DOM before/after with `data-testid` stripped: **identical, 5876 B, empty
-diff**. Step 2 was proven by checking each relocated block is a byte-exact
-substring of the pre-move board HTML (1746 / 1258 / 1900 B). Sticky stack at
-scrollY 700: KPI 134→229, tabs 229→287, rail 295→885, no overlap. Frozen
-`10ff8536`: 0 add-item, 0 confirm-ai, no Pending/AI card.
-
-Harness: `e2e/audit/ops-rail-verify.tmp.ts` (fingerprint + frozen + typing),
-`ops-rail-shot.tmp.mjs` (screenshots + rail metrics), `ops-final-checks.tmp.mjs`
-(`:has()` behaviour + sticky stack). All `*.tmp.*`, so **gitignored** — they
-live on disk only. Re-create them from this description if they are gone.
-
-### Observations, deliberately NOT acted on (out of the presentation scope)
-1. **The frozen list still exposes two write controls** — `Delete` (attachment
-   row, `AttachmentsPanel`) and `Reject` (`TaskListWorkflowActions`, in the
-   Next-step card). **Identical at `f08ea13`**, i.e. pre-session, so this is
-   not a regression from the split — but check #2 of §7 does not actually
-   hold today. Fixing it means touching permissions, not presentation.
-2. **`sales` gets a 404** on both subject task lists. Also identical at
-   `f08ea13` — the account is not on those affairs. Not an access regression;
-   re-run check #5 against a list that account owns.
-3. **Primary buttons are accent green, not ink.** `.po-premium .bg-solux` sets
-   it with `!important` page-wide; "Validate →" and "Add" get the same
-   treatment. The reference's ink primary is a page-wide change, not a
-   per-button override.
-4. **Two orphan CSS rules predate this session**: `.ops-topbar` (no JSX uses
-   it — the pinned command bar is the app header) and `.ops-card.next` /
-   `.nx-title` (the JSX says `next-wrap`). Side effect: `.nx-meta` in the
-   Revision card is styled by `.ops-card.next .nx-meta` and therefore gets no
-   styling at all.
-
-### Next
-§4 item 2 — the mini stepper — is now the largest structural gap, followed by
-the `MISSING` badges and the `resolve →` links (which need the active tab in
-context, see §6).
-
+### Dead CSS already in the file (pre-existing)
+- `.ops-topbar` — matches no JSX.
+- `.ops-card.next` / `.nx-title` — the JSX says `next-wrap`, so `.nx-meta` in
+  the Revision card is styled by nothing.
+- `select:required:invalid` — `ConfigFieldInput` sets no `required`, so this
+  half never matched the product configuration.
 
 ---
 
-## 10. Session 2 — the finishing list (§4 items 2-5)
+## 4. What the page actually needs, worst first
 
-| Commit | Item | How |
-|---|---|---|
-| `8c0af35` | `resolve →` links | `OpsTabs` delegates a click listener on `document`, walks the anchor target up to its `[data-ops-panel]`, activates that tab, then scrolls. Nothing lifted into context, no panel unmounted — so §6's pitfall does not apply. Anchors outside a panel keep native behaviour. |
-| `f1f681f` | `MISSING` badges | `TaskLineEditor` wraps each field in `.cfg-field` and renders the badge there. `ConfigFieldInput` is still untouched. |
-| `741b5b2` | `Save line` | The whole block moved onto the `.cfg-line` header row; the duplicate "Unsaved changes" chips moved with it instead of being shown twice. |
-| `f187916` | Mini stepper | `.flow.mini`, a CSS variant of the same markup and the same `deriveFlowSteps()` data. |
+Ranked by what the owner reacted to, not by implementation order.
 
-### The one thing to know about the MISSING badges
-The badge calls `isRequiredFieldEmpty()`, extracted from `countRequiredEmpty`'s
-loop and now used by both, so a badge shows **if and only if** the KPI counted
-that field. That means it follows `required_for_production`, **not** the
-`required` flag behind the red asterisk — and in the catalogue the two do not
-coincide. On `7158d184` the badges land on BATTERY and SPIGOT while
-`SOLAR PANEL *`, `OPTIC *` and `CCT *` carry an asterisk and no badge.
+1. **Revisions are invisible.** Everything already exists — `RevisionsPanel`
+   carries the lineage, reasons, authors, the field-level diff and
+   `openControlledRevision` with its capability gate and mandatory reason. It
+   is simply rendered far down the page. The user cannot see how many
+   revisions exist, when they were opened, or open a previous one. *This needs
+   surfacing, not building.*
+2. **The page says things two and three times.** On `5aed8777`: Generate
+   Production PDF ×2, Send by Email ×2, and a readiness banner restating both
+   the top-of-page counts and the board. Measured before the revert.
+3. **~8 400 px of vertical stack.** Everything is always visible, so nothing
+   is prioritised.
+4. **Interactions are missing**, not just layout: the reference's collapsibles
+   and its blocker → tab navigation.
 
-That reads oddly, and it is a **data question, not a UI one**: either those
-asterisked fields should be `required_for_production`, or the badged ones
-should not carry an asterisk. Badging the asterisk instead would have shown 3
-badges against a KPI of 2 — exactly the divergence this page forbids. Worth
-raising with whoever owns the category config.
+---
 
-### Things that moved and were re-measured
-- Sticky stack after the header grew: KPI 134→229, tab bar 229→287, rail
-  295→985 at scrollY 700, no overlap. The bar pinned at 0-134 is the **app
-  header**, not this page's `.head`, which is why growing `.head` changed
-  nothing. (Related: `.ops-topbar` in the stylesheet matches no JSX at all.)
-- Two full-width rules had to be undone for the compact stepper: `flex: 1`
-  (labels collided) and the `top: 6.5px` connector (struck the labels through
-  once the row was 14px tall).
-- Page height, TLM on `7158d184`: 2900 → 2450 (rail split) → **2314px**.
+## 5. Incremental plan
 
-### Verified after the finishing list
+One slice per round. Each is independently shippable and independently
+revertible; each ends with a screenshot for the owner **before** the next
+starts.
+
+| # | Slice | Touches | Owner sees |
+|---|---|---|---|
+| 1 | **Revision history reachable** — surface the existing `RevisionsPanel`: current rev, how many, when, open any previous one | `page.tsx` placement + a small card | The revision workflow working, on `5aed8777` (Rev A–D) |
+| 2 | **Remove the duplications** — one home per action | `page.tsx` | PDF / Email / Excel once each; no banner echoing the counts |
+| 3 | **Tokens + density only** — type scale, square corners, tabular figures, spacing. No structural change | `tasklist.css` | Same page, denser and calmer |
+| 4 | **KPI strip** — the reference's five facts, mirroring `evaluateRelease` | `page.tsx` + css | The five facts pinned at the top |
+| 5 | **Tabs** — 7 or 8 panels, mounted, anchors preserved | new `OpsTabs` + `page.tsx` | One click to any section |
+| 6 | **Decision rail** — needs attention · next step · pending · AI values | `PreValidationBoard` split + `page.tsx` | The rail, with blocker → tab links |
+| 7 | **Interactions** — `aiOpen`, `progOpen`, `pendingOpen`, blocker sub-lines | components | Collapsibles behaving like the reference |
+| 8 | **Polish** — MISSING badges, Save line placement, mini stepper, Spare parts tab | components | The remaining reference details |
+
+Slices 1 and 2 are pure wins with no visual risk — start there.
+
+### Per-slice checklist
+```bash
+cd ~/dev/facturation
+npx tsc --noEmit          # 0
+npm test                  # 803/803
+npm run e2e:regression    # 23/23
 ```
-tsc 0 · 803/803 · e2e:regression 23/23
-TLM + operations: 7 tabs, 5 rail cards, 0 pageerror, 0 console.error, typing survives
-FROZEN 10ff8536: 0 Save line, empty caption, 0 add-item, 0 confirm-ai
-resolve → : 5/5 links switch to the right tab, target visible
-MISSING   : KPI "2 still empty" vs exactly 2 badges; clears live on selection
-```
-The two pre-existing findings from §9 still stand: the frozen list's `Delete`
-and `Reject`, and `sales` 404ing on both subject lists.
+Then, in the browser, on `/task-lists/<id>`:
+1. `7158d184-…` (Pre-Validation) — the slice does what it claims;
+2. `5aed8777-…` (Final Validation, Rev A–D) — revisions and dossier actions;
+3. `10ff8536-…` (frozen) — no NEW write control appears;
+4. zero `pageerror`;
+5. repeat 1 as `operations` (`sales` 404s on these three lists — it is not on
+   those affairs; use a list that account owns).
+
+Accounts: domain `solux-light.com`, password in `.env.e2e` (`E2E_PASSWORD`),
+users `testlm@` / `testoperation@` / `testsales@` / `testdir@`.
+
+---
+
+## 6. Verification harness
+
+`e2e/audit/*.tmp.*` are gitignored, so they live on disk only. The useful one
+logs in for real and reports, per task list: tab count, rail cards, page
+height, duplicate action buttons, write controls on the frozen list, whether
+typing survives a tab switch, and `pageerror` count. Rebuild it from the login
+pattern in `e2e/audit/cockpit-scan.ts` — it is 40 lines, and it caught every
+regression in the reverted attempt, including two the eye missed.
+
+Two techniques worth reusing:
+- **Prove a refactor changed nothing**: capture the rendered DOM of the block
+  before and after with `data-testid` stripped, and `diff` them. A byte-equal
+  diff is proof that a "pure move" really was one.
+- **Prove a moved block is verbatim**: assert the new HTML is an exact
+  substring of the old.

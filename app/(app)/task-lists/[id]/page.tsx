@@ -14,13 +14,10 @@ import { StickerRequirementsEditor } from "@/components/documents/StickerRequire
 import { RiskFlagsEditor } from "@/components/documents/RiskFlagsEditor";
 import { IndustrialFileEditor } from "@/components/documents/IndustrialFileEditor";
 import {
-  PreValidationBlockers,
-  PreValidationWarnings,
-  PendingIssuesCard,
-  AiReviewCard,
+  PreValidationBoard,
   type BoardAiField,
 } from "@/components/PreValidationBoard";
-import { RevisionRailCard } from "@/components/RevisionRailCard";
+import { RevisionsPanel } from "@/components/RevisionsPanel";
 import {
   diffSnapshots,
   isFrozenStatus,
@@ -72,7 +69,6 @@ import TaskListWorkflowActions, {
 } from "@/components/TaskListWorkflow";
 import { DirtyWrapper } from "./DirtyWrapper";
 import { deleteTaskList, updateTaskListHeader } from "./actions";
-import OpsTabs, { OpsPanel } from "./OpsTabs";
 import { hasUiCapability } from "@/lib/permissions";
 import { DangerDeleteButton } from "@/components/DangerDeleteButton";
 import { SubmitButton } from "@/components/SubmitButton";
@@ -842,7 +838,7 @@ export default async function TaskListDetailPage({
 
   return (
     <DirtyWrapper>
-    <div className="tl-detail wrap ops">
+    <div className="tl-detail wrap">
       {/* Breadcrumb */}
       <div className="crumb">
         <Link href="/task-lists">Task lists</Link>
@@ -966,125 +962,170 @@ export default async function TaskListDetailPage({
               production team.
             </p>
           )}
-
-          {/* WORKFLOW STEPPER — the reference shows the 6-step lifecycle as a
-              compact dot row at the command bar's right, not as a full-width
-              card of its own. Same markup and same deriveFlowSteps() data as
-              before; `mini` is a CSS variant, not a second component. */}
-          <div className="flow mini">
-            <div className="flow-head">
-              <span className="micro">Validation workflow</span>
-              <span className="flow-sub">
-                Sales drafts → production validates &amp; enriches → factory
-                release.
-              </span>
-            </div>
-            <div className="steps">
-              {flowSteps.map((s) => (
-                <div
-                  key={s.name}
-                  className={`step${
-                    s.state === "done" ? " done" : s.state === "now" ? " now" : ""
-                  }`}
-                  title={`${s.name} — ${s.sub}`}
-                >
-                  <div className="dot">{s.state === "done" && <StepCheck />}</div>
-                  <div className="sname">{s.name}</div>
-                  <div className="sdate">{s.sub}</div>
-                </div>
-              ))}
-            </div>
-          </div>
         </div>
       </div>
 
-      {/* OPS DENSE — KPI strip. The five facts a TLM checks before touching
-          anything, pulled from values already computed above. Amber = blocks
-          Final Validation; green = settled. Read-only: every figure links to
-          the tab that owns it. */}
-      <div className="ops-kpis">
-        <div className={`ops-kpi ${requiredEmptyCount > 0 ? "warn" : "good"}`}>
-          <span className="kpi-k">Required fields</span>
-          <span className="kpi-v">
-            {requiredEmptyCount > 0
-              ? `${requiredEmptyCount} still empty`
-              : "All set"}
-          </span>
-          <span className="kpi-s">sales configuration</span>
-        </div>
-        <div className={`ops-kpi ${missingMappingCount > 0 ? "warn" : "good"}`}>
-          <span className="kpi-k">Factory mappings</span>
-          <span className="kpi-v">
-            {missingMappingCount > 0
-              ? `${missingMappingCount} missing`
-              : "Complete"}
-          </span>
-          <span className="kpi-s">instructions for the factory</span>
-        </div>
-        <div
-          className={`ops-kpi ${
-            tiltConflict || tiltCheckpointPending ? "warn" : "good"
-          }`}
-        >
-          <span className="kpi-k">Tilt angle</span>
-          <span className="kpi-v">
-            {tiltConflict
-              ? "Conflict pending"
-              : tiltCheckpointPending
-                ? "Drawing to verify"
-                : "Verified"}
-          </span>
-          <span className="kpi-s">pole drawing checkpoint</span>
-        </div>
-        <div className="ops-kpi">
-          <span className="kpi-k">Revision</span>
-          <span className="kpi-v">
-            {currentRev ? `Rev ${currentRev}` : "—"}
-          </span>
-          <span className="kpi-s">
-            {frozen ? "frozen — controlled revision required" : "editable"}
+      {/* WORKFLOW STEPPER — visual lifecycle progress, derived from the
+          existing status + linked PO status. */}
+      <div className="flow">
+        <div className="flow-head">
+          <span className="micro">Validation workflow</span>
+          <span className="flow-sub">
+            Sales drafts → production validates &amp; enriches → factory
+            release.
           </span>
         </div>
-        {inheritedChips.length > 0 && (
-          <div className="ops-kpi">
-            <span className="kpi-k">Quote terms</span>
-            <span className="kpi-v">
-              {inheritedChips
-                .slice(0, 2)
-                .map((c) => c.value)
-                .join(" · ")}
+        <div className="steps">
+          {flowSteps.map((s) => (
+            <div
+              key={s.name}
+              className={`step${
+                s.state === "done" ? " done" : s.state === "now" ? " now" : ""
+              }`}
+            >
+              <div className="dot">{s.state === "done" && <StepCheck />}</div>
+              <div className="sname">{s.name}</div>
+              <div className="sdate">{s.sub}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* m178 — PRE-VALIDATION BOARD: the dashboard of the collaborative
+          phase. Aggregates the SAME signals the server-side release gate
+          enforces (no second source of truth) + the departments' own pending
+          items. Visible to every role; edit affordances follow the role. */}
+      {showPreValidationBoard && (
+        <PreValidationBoard
+          taskListId={task.id}
+          items={actionItems}
+          users={boardUsers}
+          signals={{
+            requiredEmptyCount,
+            missingMappingCount,
+            tiltCheckpointPending,
+            tiltConflictPending: tiltConflict,
+            hasOpenRevision: !!revisionThread.request && !revisionThread.request.resolved,
+            lineCount: (lines ?? []).length,
+            missingRequiredProgramming,
+          }}
+          aiFields={boardAiFields}
+          warnings={boardWarnings}
+          canCreate={m178Live && (technical || salesCanEdit || status === "under_validation")}
+          canBlock={technical}
+          isTechnical={technical}
+          userId={currentUserId ?? null}
+          m178Live={m178Live}
+          documentId={task.quotation_id ?? null}
+          canReviewAi={technical || salesCanEdit}
+        />
+      )}
+
+      {/* m179 — FINAL VALIDATION: freeze banner, controlled revisions, and
+          the field-level diff between revisions. */}
+      {(frozen || revisions.length > 0) && (
+        <RevisionsPanel
+          taskListId={task.id}
+          frozen={frozen}
+          currentRev={currentRev}
+          revisions={revisions.map((r) => ({ ...r, snapshot: null }))}
+          diff={revisionDiff.slice(0, 200)}
+          diffLabel={revisionDiffLabel}
+          canManage={technical && canValidateTaskList}
+        />
+      )}
+
+      {/* RELEASE READINESS (#7/#8) — kept for the Final Validation stage; the
+          Pre-Validation board above covers the collaborative phase. */}
+      {technical &&
+        status === "validated" &&
+        (missingMappingCount > 0 ||
+          requiredEmptyCount > 0 ||
+          tiltCheckpointPending ||
+          tiltConflict) && (
+          <div className="tl-readiness" role="status">
+            <span className="tl-readiness-ico" aria-hidden>
+              ⚠
             </span>
-            <span className="kpi-s">
-              {inheritedChips
-                .slice(2, 4)
-                .map((c) => c.value)
-                .join(" · ") || "inherited from the quotation"}
-            </span>
+            <div className="tl-readiness-body">
+              {(() => {
+                const total =
+                  requiredEmptyCount +
+                  missingMappingCount +
+                  (tiltCheckpointPending ? 1 : 0) +
+                  (tiltConflict ? 1 : 0);
+                return (
+                  <div className="tl-readiness-title">
+                    Not ready to release — {total} item{total === 1 ? "" : "s"} to
+                    resolve before validation
+                  </div>
+                );
+              })()}
+              <ul className="tl-readiness-list">
+                {requiredEmptyCount > 0 && (
+                  <li>
+                    <b>{requiredEmptyCount}</b> required field
+                    {requiredEmptyCount === 1 ? "" : "s"} still empty —{" "}
+                    <a href="#tl-product">fill in Product configuration ↓</a>
+                  </li>
+                )}
+                {missingMappingCount > 0 && (
+                  <li>
+                    <b>{missingMappingCount}</b> factory mapping
+                    {missingMappingCount === 1 ? "" : "s"} missing — resolve on the
+                    lines below or in{" "}
+                    <Link href="/factory-mapping">Admin → Factory mapping</Link>
+                  </li>
+                )}
+                {tiltConflict && (
+                  <li>
+                    The Energy Study states{" "}
+                    <b>{industrial?.provenance?.value}°</b> but this task list
+                    says <b>{industrial?.tilt}°</b> —{" "}
+                    <a href="#tl-industrial">resolve the tilt conflict ↓</a>
+                  </li>
+                )}
+                {tiltCheckpointPending && (
+                  <li>
+                    Pole drawing not yet verified against the{" "}
+                    <b>{industrial?.tilt}°</b> tilt angle —{" "}
+                    <a href="#tl-industrial">confirm the checkpoint ↓</a>
+                  </li>
+                )}
+              </ul>
+            </div>
           </div>
         )}
-      </div>
-
-      {/* The workflow stepper used to sit here, full width. It now rides in
-          the command bar (see `.flow.mini` above) — the reference keeps the
-          lifecycle glanceable without spending a card on it. */}
-
-      {/* m178 — PRE-VALIDATION BOARD: no longer a full-width block here. Its
-          four parts now live in the decision rail below (Ops Dense reference
-          order: Needs attention · Next step · Pending issues · AI-extracted
-          values), which is where the reference puts them. Same components,
-          same props, same server data — see the <aside className="ops-aside">
-          at the bottom of this file. */}
-
-
-      {/* RELEASE READINESS — removed. It listed exactly what the KPI strip
-          already states and what the rail's "Needs attention" already lists
-          with working resolve → links, i.e. the same facts three times, in
-          the one place the reference keeps clear. evaluateRelease is
-          unaffected: this was a read-only echo, never a gate. */}
 
       {/* Workflow next-action bar — INK bar wrapping the existing
           TaskListWorkflowActions buttons (Mark production ready / Request
           revision / Reject) + the submitted-for-validation stamp. */}
+      <div className="nextstep">
+        <div className="lead">
+          <span className="micro">Next step</span>
+          <span className="big">Move this task list to its next stage</span>
+        </div>
+        <div className="acts">
+          <TaskListWorkflowActions
+            taskListId={task.id}
+            status={status}
+            isTechnical={technical}
+            canValidate={canValidateTaskList}
+            canReject={canRejectTaskList}
+            revisionThread={revisionThread}
+            missingMappingCount={missingMappingCount}
+            tiltCheckpointPending={tiltCheckpointPending}
+            clientName={clientName}
+            taskNumber={task.number ?? null}
+          />
+        </div>
+        {task.submitted_at && (
+          <div className="stamp">
+            Submitted for validation{" "}
+            <b>{new Date(task.submitted_at).toLocaleString()}</b>
+          </div>
+        )}
+      </div>
 
       {/* POST-VALIDATION COCKPIT — the natural END of the TLM workflow.
           As soon as the task list is validated the manager generates the
@@ -1101,35 +1142,35 @@ export default async function TaskListDetailPage({
             }`}
             role={searchParams?.validated === "1" ? "status" : undefined}
           >
-            {/* The dossier actions are NOT repeated here: the command bar
-                already carries Generate Production PDF · Send by Email ·
-                Export Excel for exactly this status, and having them twice on
-                one screen was the page's most visible redundancy. What stays
-                is the one thing the bar cannot say — that validation
-                succeeded, and which production order owns tracking now. */}
-            <div className="tl-validated-line">
-              <span className="micro">
-                {searchParams?.validated === "1"
-                  ? "✓ Task list validated"
-                  : "Production package"}
-              </span>
-              {linkedPo ? (
-                <span className="v">
-                  Production order{" "}
-                  <Link
-                    href={`/production/orders/${linkedPo.id}`}
-                    className="font-medium underline"
-                  >
-                    {linkedPo.number ?? "created"}
-                  </Link>{" "}
-                  tracks deposits, delays and shipping. Dossier actions are in
-                  the command bar above.
-                </span>
-              ) : (
-                <span className="v">
-                  Generate the production dossier from the command bar above.
-                </span>
-              )}
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <div className="label-row">
+                  <span className="micro">
+                    {searchParams?.validated === "1"
+                      ? "✓ Task list validated"
+                      : "Production package"}
+                  </span>
+                </div>
+                <p className="text-sm font-semibold text-neutral-900 mt-1">
+                  {searchParams?.validated === "1"
+                    ? "Validation complete — generate the production dossier to finish."
+                    : "Generate the complete production dossier for the factory."}
+                </p>
+                {linkedPo && (
+                  <p className="text-xs text-neutral-500 mt-1">
+                    Production order{" "}
+                    <Link
+                      href={`/production/orders/${linkedPo.id}`}
+                      className="font-medium underline"
+                    >
+                      {linkedPo.number ?? "created"}
+                    </Link>{" "}
+                    was created automatically — deposits, delays and shipping
+                    are tracked there.
+                  </p>
+                )}
+              </div>
+              <ProductionDossierActions taskListId={task.id} />
             </div>
           </div>
         )}
@@ -1157,29 +1198,6 @@ export default async function TaskListDetailPage({
         </div>
       )}
 
-      {/* OPS DENSE — work area: tabbed main column + sticky decision rail.
-          The sections below are UNCHANGED; they are only grouped into panels
-          so the file is reachable in one click instead of ~10 000 px of
-          scrolling. Panels stay mounted, so form state survives a switch. */}
-      <div className="ops-grid">
-        <div className="ops-main">
-      <OpsTabs
-        tabs={[
-          { id: "product", label: "Product", count: requiredEmptyCount },
-          {
-            id: "industrial",
-            label: "Industrial file",
-            count:
-              (tiltConflict ? 1 : 0) + (tiltCheckpointPending ? 1 : 0) || null,
-          },
-          { id: "lighting", label: "Lighting" },
-          { id: "branding", label: "Stickers & branding" },
-          { id: "risks", label: "Risks" },
-          { id: "docs", label: "Docs & logistics" },
-          { id: "activity", label: "Activity", neutral: true },
-        ]}
-      >
-      <OpsPanel id="product">
       {/* ---------- PRODUCT CONFIGURATION (the real purpose) ----------
           The page now LEADS with product config: a compact visual
           summary per line (for fast ops/factory scanning) on top of the
@@ -1325,9 +1343,48 @@ export default async function TaskListDetailPage({
         )}
       </div>
 
-      </OpsPanel>
+      {/* ---------- PRODUCT LIGHTING SETUP (m144) ----------
+          Sales completes the APPROVED lighting config here (Energy Study +
+          power + dimming program + optics + operating hours), with optional AI
+          Auto-fill. Non-blocking; transferred to the production order via the
+          command (quotation_id). Editable while the task list is sales-editable. */}
+      {task.quotation_id && (
+        <>
+          <div className="sec-head">
+            <div className="lhs">
+              <h2 id="tl-lighting" style={{ scrollMarginTop: 16 }}>
+                Product Lighting Setup
+              </h2>
+              <p className="micro">
+                Lighting parameters + technical studies for production,
+                controller programming and quality control.
+              </p>
+            </div>
+          </div>
+          <div className="prod-shell">
+            <ProductLightingSetupForm
+              documentId={task.quotation_id}
+              affairId={(task as any).affair_id ?? null}
+              clientId={task.client_id ?? null}
+              initial={lightingRow ?? null}
+              editable={canEditContent}
+            />
+          </div>
 
-      <OpsPanel id="industrial">
+          {/* m180 — programming PER PRODUCT LINE: the study above is the
+              source; each eligible line owns its own final program. */}
+          <div className="prod-shell" style={{ marginTop: 12 }}>
+            <LineLightingPanel
+              taskListId={task.id}
+              lines={panelLines}
+              editable={salesCanEdit && !frozen}
+              studyAvailable={studyExtractedAt != null}
+              studyName={lightingRow?.energy_study_name ?? null}
+            />
+          </div>
+        </>
+      )}
+
       {/* ---------- INDUSTRIAL PRODUCTION FILE (m159) ----------
           The task list is the complete industrial production file (owner spec
           2026-07-08): solar-panel tilt angle + pole-drawing checkpoint, pole
@@ -1371,69 +1428,6 @@ export default async function TaskListDetailPage({
         </div>
       )}
 
-      </OpsPanel>
-
-      <OpsPanel id="lighting">
-      {/* ---------- PRODUCT LIGHTING SETUP (m144) ----------
-          Sales completes the APPROVED lighting config here (Energy Study +
-          power + dimming program + optics + operating hours), with optional AI
-          Auto-fill. Non-blocking; transferred to the production order via the
-          command (quotation_id). Editable while the task list is sales-editable. */}
-      {task.quotation_id && (
-        <>
-          <div className="sec-head">
-            <div className="lhs">
-              <h2 id="tl-lighting" style={{ scrollMarginTop: 16 }}>
-                Product Lighting Setup
-              </h2>
-              <p className="micro">
-                Lighting parameters + technical studies for production,
-                controller programming and quality control.
-              </p>
-            </div>
-          </div>
-          <div className="prod-shell">
-            <ProductLightingSetupForm
-              documentId={task.quotation_id}
-              affairId={(task as any).affair_id ?? null}
-              clientId={task.client_id ?? null}
-              initial={lightingRow ?? null}
-              editable={canEditContent}
-            />
-          </div>
-
-          {/* m180 — programming PER PRODUCT LINE: the study above is the
-              source; each eligible line owns its own final program. */}
-          <div className="prod-shell" style={{ marginTop: 12 }}>
-            <LineLightingPanel
-              taskListId={task.id}
-              lines={panelLines}
-              editable={salesCanEdit && !frozen}
-              studyAvailable={studyExtractedAt != null}
-              studyName={lightingRow?.energy_study_name ?? null}
-            />
-          </div>
-        </>
-      )}
-
-      </OpsPanel>
-
-      <OpsPanel id="branding">
-      {/* ---------- STICKER REQUIREMENTS ----------
-          Often-forgotten labelling spec: which stickers, where, with
-          what artwork/instructions. Artwork files live in Attachments. */}
-      <div className="stk-shell">
-        <StickerRequirementsEditor
-          taskListId={task.id}
-          documentId={task.quotation_id ?? null}
-          initial={stickerReq}
-          editable={canEditContent}
-        />
-      </div>
-
-      </OpsPanel>
-
-      <OpsPanel id="risks">
       {/* ---------- KNOWN RISKS / WARNINGS ----------
           Sits between the configuration and attachments. Compact +
           collapsed by default; the active risk chips stay visible so a
@@ -1456,6 +1450,17 @@ export default async function TaskListDetailPage({
           editable={canEditContent}
         />
       </div>
+
+      {/* ---------- PROJECT ATTACHMENTS ----------
+          Drawings, dimensions, tender docs, artwork — the project-
+          specific detail the product code alone can't carry. Shown high
+          on the page so factory/ops see it during validation. Keyed to
+          the affair, shared across versions + the quotation. */}
+      {task.quotation_id && (
+        <div className="att-shell">
+          <AttachmentsPanel documentId={task.quotation_id} />
+        </div>
+      )}
 
       {/* Header form — production notes (sales) + technical notes (TLM).
           The old shipping-method / lines / workflow-stage grid was
@@ -1518,19 +1523,17 @@ export default async function TaskListDetailPage({
         )}
       </form>
 
-      </OpsPanel>
-
-      <OpsPanel id="docs">
-      {/* ---------- PROJECT ATTACHMENTS ----------
-          Drawings, dimensions, tender docs, artwork — the project-
-          specific detail the product code alone can't carry. Shown high
-          on the page so factory/ops see it during validation. Keyed to
-          the affair, shared across versions + the quotation. */}
-      {task.quotation_id && (
-        <div className="att-shell">
-          <AttachmentsPanel documentId={task.quotation_id} />
-        </div>
-      )}
+      {/* ---------- STICKER REQUIREMENTS ----------
+          Often-forgotten labelling spec: which stickers, where, with
+          what artwork/instructions. Artwork files live in Attachments. */}
+      <div className="stk-shell">
+        <StickerRequirementsEditor
+          taskListId={task.id}
+          documentId={task.quotation_id ?? null}
+          initial={stickerReq}
+          editable={canEditContent}
+        />
+      </div>
 
       {/* Logistics inherited from the linked quotation. Read-only view
           of the commercial terms agreed with the customer. Placed BELOW
@@ -1599,15 +1602,6 @@ export default async function TaskListDetailPage({
         </>
       )}
 
-      </OpsPanel>
-
-      <OpsPanel id="activity">
-      {/* m179's RevisionsPanel is no longer mounted here. Buried seventh of
-          seven tabs, it made the lineage invisible — the page showed "Rev D"
-          as a label and nothing else. It now renders inside the rail's
-          Revision card, which opens it as a history overlay. MOVED, not
-          duplicated: mounting it in both places would be the redundancy the
-          rest of this pass is removing. */}
       {/* ---------- FACTORY VALIDATION HISTORY ----------
           Focused, timeline-oriented view of just the validation flow
           (submit → review → validate → revise → approve). The full
@@ -1635,139 +1629,6 @@ export default async function TaskListDetailPage({
           actorLabelByUser={tlActorLabels}
           emptyMessage="No activity recorded for this task list yet."
         />
-      </div>
-
-      </OpsPanel>
-
-      </OpsTabs>
-        </div>
-
-        {/* OPS DENSE — decision rail. Read-only mirror of what still blocks
-            Final Validation (evaluateRelease stays the single authority) plus
-            the revision state. Sticky, so it stays in view across tabs. */}
-        <aside className="ops-aside">
-          {/* 1 — NEEDS ATTENTION. Was a hand-rolled list that re-derived four
-              of the gates; it now renders PreValidationBlockers, the same
-              component the board used, so the rail mirrors computeBlockers in
-              full (blocking action items, open revision, empty task list and
-              missing programming included) instead of a subset. It still only
-              MIRRORS: evaluateRelease remains the sole authority that gates.
-              The non-blocking warnings are folded in underneath — the
-              reference rail has no home for them and they must not be
-              silently dropped. */}
-          <section className="ops-card attn">
-            <div className="ops-card-h">
-              <span>Needs attention</span>
-            </div>
-            <div className="ops-card-b">
-              <PreValidationBlockers
-                signals={{
-                  requiredEmptyCount,
-                  missingMappingCount,
-                  tiltCheckpointPending,
-                  tiltConflictPending: tiltConflict,
-                  hasOpenRevision:
-                    !!revisionThread.request && !revisionThread.request.resolved,
-                  lineCount: (lines ?? []).length,
-                  missingRequiredProgramming,
-                }}
-                items={actionItems}
-              />
-              <PreValidationWarnings warnings={boardWarnings} />
-            </div>
-          </section>
-
-          {/* Reference parity: the ink Next-step card lives IN the rail,
-              not full-width above the tabs. Same markup, same actions. */}
-          <section className="ops-card next-wrap">
-      <div className="nextstep">
-        <div className="lead">
-          <span className="micro">Next step</span>
-          <span className="big">Move this task list to its next stage</span>
-        </div>
-        <div className="acts">
-          <TaskListWorkflowActions
-            taskListId={task.id}
-            status={status}
-            isTechnical={technical}
-            canValidate={canValidateTaskList}
-            canReject={canRejectTaskList}
-            revisionThread={revisionThread}
-            missingMappingCount={missingMappingCount}
-            tiltCheckpointPending={tiltCheckpointPending}
-            clientName={clientName}
-            taskNumber={task.number ?? null}
-          />
-        </div>
-        {task.submitted_at && (
-          <div className="stamp">
-            Submitted for validation{" "}
-            <b>{new Date(task.submitted_at).toLocaleString()}</b>
-          </div>
-        )}
-      </div>
-          </section>
-
-          {/* 3 — PENDING ISSUES. Same guard as the old full-width board
-              (`showPreValidationBoard`): outside the collaborative phase the
-              server does not even fetch the action items, and a frozen list
-              must expose no write control. */}
-          {showPreValidationBoard && (
-            /* `pending-wrap` is the positioning context that lets the CSS lift
-               the block's own "+ Add item" button onto the card header line,
-               the way the reference does — without editing the moved JSX. */
-            <section className="ops-card pending-wrap">
-              <div className="ops-card-h">
-                <span>Pending issues</span>
-              </div>
-              <div className="ops-card-b">
-                <PendingIssuesCard
-                  taskListId={task.id}
-                  items={actionItems}
-                  users={boardUsers}
-                  canCreate={
-                    m178Live &&
-                    (technical || salesCanEdit || status === "under_validation")
-                  }
-                  canBlock={technical}
-                  isTechnical={technical}
-                  userId={currentUserId ?? null}
-                  m178Live={m178Live}
-                />
-              </div>
-            </section>
-          )}
-
-          {/* 4 — AI-EXTRACTED VALUES. AiReviewCard returns null when there is
-              nothing extracted, so the card header is guarded too. */}
-          {showPreValidationBoard && boardAiFields.length > 0 && (
-            <section className="ops-card">
-              <div className="ops-card-h">
-                <span>AI-extracted values</span>
-              </div>
-              <div className="ops-card-b">
-                <AiReviewCard
-                  aiFields={boardAiFields}
-                  documentId={task.quotation_id ?? null}
-                  canReviewAi={technical || salesCanEdit}
-                />
-              </div>
-            </section>
-          )}
-
-          {/* 5 — REVISION. Was a one-line label; now the lineage itself, with
-              the full history + field diff + controlled-revision form one
-              click away. Same components, same server action. */}
-          <RevisionRailCard
-            taskListId={task.id}
-            frozen={frozen}
-            currentRev={currentRev}
-            revisions={revisions.map((r) => ({ ...r, snapshot: null }))}
-            diff={revisionDiff.slice(0, 200)}
-            diffLabel={revisionDiffLabel}
-            canManage={technical && canValidateTaskList}
-          />
-        </aside>
       </div>
 
       {/* Conversation drawer overlay — opens when ?event=<id> is in
