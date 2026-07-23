@@ -1197,10 +1197,19 @@
    so its markup is untouched. Inside .cfg-form we re-skin its real DOM —
    the `.eyebrow` field labels, selects, and the checkbox_group options —
    to read as the mockup's .field / .optlist / .cbox look. */
+/* `.cfg-field` is the task-list-only wrapper that carries the MISSING badge.
+   It must stay transparent to the layout, so every rule that used to target a
+   direct child of .cfg-form targets the wrapped child too. */
 .tl-detail .cfg-form > label,
-.tl-detail .cfg-form > .block {
+.tl-detail .cfg-form > .block,
+.tl-detail .cfg-form > .cfg-field > label,
+.tl-detail .cfg-form > .cfg-field > .block {
   display: block;
   margin-bottom: 14px;
+}
+.tl-detail .cfg-form > .cfg-field {
+  min-width: 0;
+  position: relative;
 }
 .tl-detail .cfg-form .eyebrow {
   font-size: 10.5px;
@@ -2152,7 +2161,11 @@
 
 /* A required field that is still empty gets the reference's amber rail —
    the same visual grammar as the KPI strip and the decision rail, so
-   "what blocks me" reads identically everywhere on the page. */
+   "what blocks me" reads identically everywhere on the page.
+   NOTE: the `select:required:invalid` half never matched the product
+   configuration — ConfigFieldInput sets no `required` on its selects, so the
+   page has zero of them. Those fields are handled by block 11; this rule
+   stays for the plain required inputs elsewhere in the panels. */
 .tl-detail.ops .ops-panel select:required:invalid,
 .tl-detail.ops .ops-panel input:required:placeholder-shown {
   border-color: rgba(232, 135, 14, 0.62);
@@ -2302,7 +2315,10 @@
   align-items: start;
 }
 .tl-detail.ops .cfg-form > label,
-.tl-detail.ops .cfg-form > .block {
+.tl-detail.ops .cfg-form > .block,
+.tl-detail.ops .cfg-form > .cfg-field,
+.tl-detail.ops .cfg-form > .cfg-field > label,
+.tl-detail.ops .cfg-form > .cfg-field > .block {
   display: block;
   min-width: 0;
   margin: 0;
@@ -2645,4 +2661,42 @@
   font-weight: 700;
   letter-spacing: 0.04em;
   text-transform: uppercase;
+}
+
+/* ---- 11. MISSING BADGE ------------------------------------------------
+   The reference tags a required-but-empty field with a small amber badge on
+   the label line, not just a tinted input. The badge is rendered by
+   TaskLineEditor's `.cfg-field` wrapper — ConfigFieldInput is shared with the
+   quote builder and stays untouched — and it appears if and only if
+   isRequiredFieldEmpty() counted the field, the same call countRequiredEmpty
+   makes for the KPI and the release gate. ------------------------------ */
+.tl-detail.ops .cfg-field > .cfg-missing {
+  position: absolute;
+  top: 0;
+  right: 0;
+  z-index: 1;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--amber-deep);
+  background: var(--amber-tint);
+  border: 1px solid var(--amber-line);
+  padding: 1px 4px;
+  line-height: 1.35;
+  pointer-events: none;
+}
+/* Keep the label clear of the badge. */
+.tl-detail.ops .cfg-field.is-missing .eyebrow {
+  padding-right: 58px;
+}
+/* The amber rail on the control itself, now driven by the same flag instead
+   of `select:required:invalid` — ConfigFieldInput never sets `required`, so
+   that rule matched nothing. */
+.tl-detail.ops .cfg-field.is-missing select,
+.tl-detail.ops .cfg-field.is-missing > label > input,
+.tl-detail.ops .cfg-field.is-missing > label > textarea {
+  border-color: rgba(232, 135, 14, 0.62);
+  border-left: 3px solid var(--amber);
+  background: rgba(232, 135, 14, 0.05);
 }

@@ -90,19 +90,33 @@ export function countRequiredEmpty(args: {
   let empty = 0;
   for (const line of args.lines) {
     if (!line.categoryId) continue;
-    const fields = (args.salesFieldsByCategory.get(line.categoryId) ?? []).filter(
-      (f) => f.required_for_production === true
-    );
+    const fields = args.salesFieldsByCategory.get(line.categoryId) ?? [];
     for (const f of fields) {
-      const raw = line.config[f.field_name];
-      const display =
-        raw === CUSTOM_OPTION_SENTINEL
-          ? line.config[customValueKey(f.field_name)] ?? ""
-          : raw ?? "";
-      if (!display.trim()) empty++;
+      if (isRequiredFieldEmpty(f, line.config)) empty++;
     }
   }
   return empty;
+}
+
+/**
+ * Is this one field a required-for-production gap? Extracted from
+ * countRequiredEmpty so the editor's "MISSING" badge and the count that feeds
+ * the release gate can never disagree — the badge marks a field if and only if
+ * this function counted it. Note `required_for_production`, NOT the `required`
+ * flag behind the red asterisk: the latter is quotation-side and would flag
+ * fields the gate does not care about.
+ */
+export function isRequiredFieldEmpty(
+  f: ConfigField,
+  config: Record<string, string>
+): boolean {
+  if (f.required_for_production !== true) return false;
+  const raw = config[f.field_name];
+  const display =
+    raw === CUSTOM_OPTION_SENTINEL
+      ? config[customValueKey(f.field_name)] ?? ""
+      : raw ?? "";
+  return !display.trim();
 }
 
 /**

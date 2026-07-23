@@ -19,6 +19,7 @@ import {
   type FactoryExtras,
   type ResolvedFactoryExtra,
 } from "@/lib/factory-extras";
+import { isRequiredFieldEmpty } from "@/lib/task-list-mapping-status";
 import {
   updateTaskListLine,
   updateTaskListLineTechnical,
@@ -857,17 +858,32 @@ export default function TaskLineEditor({
                   {salesSpec}
                 </div>
               )}
-              {salesFields.map((f) => (
-                <ConfigFieldInput
-                  key={f.id}
-                  field={f}
-                  values={config}
-                  onChange={(patch) => {
-                    setConfig((prev) => ({ ...prev, ...patch }));
-                    setIsDirty(true);
-                  }}
-                />
-              ))}
+              {/* The reference badges a required-but-empty field. The badge
+                  lives on a wrapper, never inside ConfigFieldInput — that
+                  component is shared with the quote builder and must not grow
+                  task-list concerns. `isRequiredFieldEmpty` is the very
+                  function countRequiredEmpty uses, so a badge appears if and
+                  only if the KPI counted that field: no second rule. */}
+              {salesFields.map((f) => {
+                const missing = isRequiredFieldEmpty(f, config);
+                return (
+                  <div
+                    key={f.id}
+                    className={`cfg-field${missing ? " is-missing" : ""}`}
+                    data-missing={missing ? "1" : undefined}
+                  >
+                    {missing && <span className="cfg-missing">Missing</span>}
+                    <ConfigFieldInput
+                      field={f}
+                      values={config}
+                      onChange={(patch) => {
+                        setConfig((prev) => ({ ...prev, ...patch }));
+                        setIsDirty(true);
+                      }}
+                    />
+                  </div>
+                );
+              })}
             </fieldset>
             <aside>
               <SummaryPanel rows={salesSummary} tone="sales" />
