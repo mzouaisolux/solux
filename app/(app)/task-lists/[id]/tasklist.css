@@ -2315,3 +2315,96 @@
 .tl-detail.ops .ops-panel .sec-head {
   padding-bottom: 6px;
 }
+
+/* ---- 8. PANEL LAYOUT — matching the reference panel by panel ---------
+   Side-by-side comparison of each tab showed three structural gaps that
+   no amount of token work fixes. */
+
+/* (a) SALES CONFIGURATION is a 3-COLUMN GRID in the reference, not a
+       stacked column. Same fields, ~3x less height — this is the single
+       biggest difference inside the Product tab. */
+.tl-detail.ops .cfg-form {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px 18px;
+  align-items: start;
+}
+.tl-detail.ops .cfg-form > label,
+.tl-detail.ops .cfg-form > .block {
+  display: block;
+  min-width: 0;
+  margin: 0;
+}
+/* Headings and banners inside the fieldset span the full width. */
+.tl-detail.ops .cfg-form > .micro,
+.tl-detail.ops .cfg-form > .hint,
+.tl-detail.ops .cfg-form > div[class*="border-"],
+.tl-detail.ops .cfg-form > fieldset,
+.tl-detail.ops .cfg-form > p {
+  grid-column: 1 / -1;
+}
+@media (max-width: 1400px) {
+  .tl-detail.ops .cfg-form {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 900px) {
+  .tl-detail.ops .cfg-form {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* (b) OPTIONS read as a row of chips in the reference, not a vertical
+       checkbox list. */
+.tl-detail.ops .ops-panel fieldset:has(> label input[type="checkbox"]) {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.tl-detail.ops .ops-panel fieldset:has(> label input[type="checkbox"]) > label {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid var(--line-2);
+  background: #fff;
+  padding: 6px 11px;
+  font-size: 11.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--ink-1);
+  cursor: pointer;
+  margin: 0;
+}
+.tl-detail.ops .ops-panel fieldset:has(> label input[type="checkbox"]) > label:hover {
+  border-color: var(--ink-0);
+}
+
+/* (c) The KPI strip must stay PINNED with the command bar. It used to
+       scroll away under it, which is why it looked missing. The sticky
+       stack is now: command bar (134) → KPIs (66) → tabs (58). */
+.tl-detail.ops .ops-kpis {
+  position: sticky;
+  top: 134px;
+  z-index: 40;
+  background: #faf9f5;
+  margin: 0 -28px;
+  padding: 10px 28px;
+}
+.tl-detail.ops .ops-tabbar {
+  /* measured stack: command bar 134 + KPI strip 95 */
+  top: 229px;
+}
+.tl-detail.ops .ops-aside {
+  /* + tab bar 58 */
+  top: 295px;
+}
+
+/* (d) The old jump-link nav (.tl-secnav) solved the very problem the tab
+       bar now solves — anchors down one long wall of sections. Keeping
+       both means two competing navigations stacked on top of each other.
+       Hidden rather than deleted: the anchors it targeted still exist and
+       still resolve, so nothing that linked to them breaks. */
+.tl-detail.ops .tl-secnav {
+  display: none !important;
+}
