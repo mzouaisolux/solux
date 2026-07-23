@@ -1,7 +1,11 @@
 # Handover — Ops Dense redesign of the Task List page
-**Session:** 2026-07-23 · **Branch:** `main` @ `f08ea13` (4 commits ahead of `origin/main`)
+**Session:** 2026-07-23 · **Branch:** `main` @ `c328bca` (9 commits ahead of `origin/main`)
 **Repo:** `~/dev/facturation` — the iCloud folder is a stale non-git copy, never code there.
 **Scope:** presentation only. No business logic, no schema, no server action was changed.
+
+> **Session 2 (same day) — §5 is DONE.** `PreValidationBoard` is split and its
+> parts now live in the rail. Commits `e615762` (extract) → `cc7293e` (move) →
+> `186696d` (style) → `c328bca` (dead CSS). Details in §9, which supersedes §5.
 
 ---
 
@@ -54,7 +58,7 @@ Signatures: **no border-radius anywhere**, `font-variant-numeric: tabular-nums` 
 | Tab set, order, per-tab composition | ✅ matches |
 | KPI strip | ✅ matches |
 | Rail: Needs attention · Next step | ✅ present |
-| Rail: **Pending issues · AI-extracted values** | ❌ **missing — still full-width above the tabs** |
+| Rail: **Pending issues · AI-extracted values** | ✅ **done in session 2 — see §9** |
 | `MISSING` amber badges on empty required fields | ❌ CSS approximation only (`:invalid`), no badge |
 | `resolve →` links in Needs attention | ❌ text only, not links |
 | Mini stepper in the header right | ❌ still a full-width card |
@@ -111,8 +115,8 @@ Command bar 134 → KPI strip 95 → tab bar 229 → rail 295. Measured in a rea
 ## 4. Remaining work
 
 ### Major
-1. **Split `PreValidationBoard` into rail cards** — the last structural gap. Its three parts belong in the rail (§5).
-2. **Mini stepper in the header** — the reference shows the 6-step lifecycle as a small dot row at the command bar's right. Currently a full-width `.flow` card. Needs a compact variant, not a second component.
+1. ~~**Split `PreValidationBoard` into rail cards**~~ — **done, §9.**
+2. **Mini stepper in the header** — the reference shows the 6-step lifecycle as a small dot row at the command bar's right. Currently a full-width `.flow` card. Needs a compact variant, not a second component. *This is now the largest remaining structural gap.*
 
 ### Small polish
 3. `MISSING` amber badge next to the label of a required-but-empty field (the reference shows a real badge; today only the input is tinted via `:invalid`).
@@ -214,3 +218,95 @@ Test accounts: domain `solux-light.com`, shared password in `.env.e2e` (`E2E_PAS
 ## 8. Prompt for the next session
 
 See the block at the end of this document.
+
+---
+
+## 9. Session 2 — the rail split, as built (supersedes §5)
+
+### What shipped
+Four commits, one per step of §5's strategy, each verified before the next.
+
+| Commit | Step | What it does |
+|---|---|---|
+| `e615762` | 1 · extract | `PreValidationBoard.tsx` exports four sibling components; the board still composes them, the mount in `page.tsx` is untouched |
+| `cc7293e` | 2 · move | Old full-width mount deleted, parts mounted in `<aside className="ops-aside">`, same commit so nothing renders twice |
+| `186696d` | 3 · style | Stylesheet block 10, `.tl-detail.ops .ops-aside` only |
+| `c328bca` | 4 · clean | `.ops-attn-item` / `.ops-attn-ok`, dead once the markup changed |
+
+### Exports now available from `components/PreValidationBoard.tsx`
+```
+computeBlockers(signals, items)      // the itemised gate — ONE implementation
+aiFieldsNeedingReview(aiFields)
+PreValidationBlockers                // L230 block
+PendingIssuesCard                    // L257 block — owns adding/error/busy
+AiReviewCard                         // L358 block — owns its own confirm transition
+PreValidationWarnings                // L414 block
+PreValidationBoard                   // still exported: fallback, keeps the diff reversible
+```
+
+### Decisions worth knowing
+- **Needs attention no longer re-derives anything.** It used to hand-roll four
+  of the gates in `page.tsx`; it now renders `PreValidationBlockers`, so
+  blocking action items, an open revision, an empty task list and missing
+  factory programming appear in the rail too. It still only mirrors —
+  `evaluateRelease` remains the only authority that gates.
+- **Warnings** are folded under Needs attention, separated by a hairline. The
+  reference rail has no slot for them; dropping them was not an option.
+- **Rail order** is the reference's: Needs attention · Next step · Pending
+  issues · AI-extracted values, with Revision kept last.
+- **`showPreValidationBoard` still guards** Pending issues and AI values, so
+  outside the collaborative phase no write control is mounted at all.
+- **The rail scrolls internally** — 5 cards measure 1127 px against a 590 px
+  column. `max-height: calc(100vh - 310px)`, lifted again under 1180 px.
+- **Amber is conditional now**: `:has()` drops the card to a neutral hairline
+  when the gate is clear. Written as an override, so a browser without `:has()`
+  keeps today's always-amber card rather than losing the accent.
+- **The moved JSX was never edited.** The card headers duplicate each block's
+  own title, so the inner titles are hidden in CSS — except Pending issues,
+  where only the label is hidden and the row is lifted onto the header line
+  (that is what the `pending-wrap` class is for).
+
+### Proof collected
+```
+tsc --noEmit             0
+npm test                 803/803
+check:capabilities       PASS (52 catalogued, 0 orphan)
+e2e:regression           23/23, real logins
+```
+Browser, TLM + operations on `7158d184`: 7 tabs, 5 rail cards in reference
+order, page height 2900 → **2450 px**, 0 `pageerror`, 0 `console.error`,
+typing survives a tab switch. Step 1 was proven by diffing the rendered board
+DOM before/after with `data-testid` stripped: **identical, 5876 B, empty
+diff**. Step 2 was proven by checking each relocated block is a byte-exact
+substring of the pre-move board HTML (1746 / 1258 / 1900 B). Sticky stack at
+scrollY 700: KPI 134→229, tabs 229→287, rail 295→885, no overlap. Frozen
+`10ff8536`: 0 add-item, 0 confirm-ai, no Pending/AI card.
+
+Harness: `e2e/audit/ops-rail-verify.tmp.ts` (fingerprint + frozen + typing),
+`ops-rail-shot.tmp.mjs` (screenshots + rail metrics), `ops-final-checks.tmp.mjs`
+(`:has()` behaviour + sticky stack). All `*.tmp.*`, so **gitignored** — they
+live on disk only. Re-create them from this description if they are gone.
+
+### Observations, deliberately NOT acted on (out of the presentation scope)
+1. **The frozen list still exposes two write controls** — `Delete` (attachment
+   row, `AttachmentsPanel`) and `Reject` (`TaskListWorkflowActions`, in the
+   Next-step card). **Identical at `f08ea13`**, i.e. pre-session, so this is
+   not a regression from the split — but check #2 of §7 does not actually
+   hold today. Fixing it means touching permissions, not presentation.
+2. **`sales` gets a 404** on both subject task lists. Also identical at
+   `f08ea13` — the account is not on those affairs. Not an access regression;
+   re-run check #5 against a list that account owns.
+3. **Primary buttons are accent green, not ink.** `.po-premium .bg-solux` sets
+   it with `!important` page-wide; "Validate →" and "Add" get the same
+   treatment. The reference's ink primary is a page-wide change, not a
+   per-button override.
+4. **Two orphan CSS rules predate this session**: `.ops-topbar` (no JSX uses
+   it — the pinned command bar is the app header) and `.ops-card.next` /
+   `.nx-title` (the JSX says `next-wrap`). Side effect: `.nx-meta` in the
+   Revision card is styled by `.ops-card.next .nx-meta` and therefore gets no
+   styling at all.
+
+### Next
+§4 item 2 — the mini stepper — is now the largest structural gap, followed by
+the `MISSING` badges and the `resolve →` links (which need the active tab in
+context, see §6).
