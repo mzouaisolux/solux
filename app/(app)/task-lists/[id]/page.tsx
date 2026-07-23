@@ -20,7 +20,7 @@ import {
   AiReviewCard,
   type BoardAiField,
 } from "@/components/PreValidationBoard";
-import { RevisionsPanel } from "@/components/RevisionsPanel";
+import { RevisionRailCard } from "@/components/RevisionRailCard";
 import {
   diffSnapshots,
   isFrozenStatus,
@@ -1076,67 +1076,11 @@ export default async function TaskListDetailPage({
           at the bottom of this file. */}
 
 
-      {/* RELEASE READINESS (#7/#8) — kept for the Final Validation stage; the
-          Pre-Validation board above covers the collaborative phase. */}
-      {technical &&
-        status === "validated" &&
-        (missingMappingCount > 0 ||
-          requiredEmptyCount > 0 ||
-          tiltCheckpointPending ||
-          tiltConflict) && (
-          <div className="tl-readiness" role="status">
-            <span className="tl-readiness-ico" aria-hidden>
-              ⚠
-            </span>
-            <div className="tl-readiness-body">
-              {(() => {
-                const total =
-                  requiredEmptyCount +
-                  missingMappingCount +
-                  (tiltCheckpointPending ? 1 : 0) +
-                  (tiltConflict ? 1 : 0);
-                return (
-                  <div className="tl-readiness-title">
-                    Not ready to release — {total} item{total === 1 ? "" : "s"} to
-                    resolve before validation
-                  </div>
-                );
-              })()}
-              <ul className="tl-readiness-list">
-                {requiredEmptyCount > 0 && (
-                  <li>
-                    <b>{requiredEmptyCount}</b> required field
-                    {requiredEmptyCount === 1 ? "" : "s"} still empty —{" "}
-                    <a href="#tl-product">fill in Product configuration ↓</a>
-                  </li>
-                )}
-                {missingMappingCount > 0 && (
-                  <li>
-                    <b>{missingMappingCount}</b> factory mapping
-                    {missingMappingCount === 1 ? "" : "s"} missing — resolve on the
-                    lines below or in{" "}
-                    <Link href="/factory-mapping">Admin → Factory mapping</Link>
-                  </li>
-                )}
-                {tiltConflict && (
-                  <li>
-                    The Energy Study states{" "}
-                    <b>{industrial?.provenance?.value}°</b> but this task list
-                    says <b>{industrial?.tilt}°</b> —{" "}
-                    <a href="#tl-industrial">resolve the tilt conflict ↓</a>
-                  </li>
-                )}
-                {tiltCheckpointPending && (
-                  <li>
-                    Pole drawing not yet verified against the{" "}
-                    <b>{industrial?.tilt}°</b> tilt angle —{" "}
-                    <a href="#tl-industrial">confirm the checkpoint ↓</a>
-                  </li>
-                )}
-              </ul>
-            </div>
-          </div>
-        )}
+      {/* RELEASE READINESS — removed. It listed exactly what the KPI strip
+          already states and what the rail's "Needs attention" already lists
+          with working resolve → links, i.e. the same facts three times, in
+          the one place the reference keeps clear. evaluateRelease is
+          unaffected: this was a read-only echo, never a gate. */}
 
       {/* Workflow next-action bar — INK bar wrapping the existing
           TaskListWorkflowActions buttons (Mark production ready / Request
@@ -1157,35 +1101,35 @@ export default async function TaskListDetailPage({
             }`}
             role={searchParams?.validated === "1" ? "status" : undefined}
           >
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <div className="label-row">
-                  <span className="micro">
-                    {searchParams?.validated === "1"
-                      ? "✓ Task list validated"
-                      : "Production package"}
-                  </span>
-                </div>
-                <p className="text-sm font-semibold text-neutral-900 mt-1">
-                  {searchParams?.validated === "1"
-                    ? "Validation complete — generate the production dossier to finish."
-                    : "Generate the complete production dossier for the factory."}
-                </p>
-                {linkedPo && (
-                  <p className="text-xs text-neutral-500 mt-1">
-                    Production order{" "}
-                    <Link
-                      href={`/production/orders/${linkedPo.id}`}
-                      className="font-medium underline"
-                    >
-                      {linkedPo.number ?? "created"}
-                    </Link>{" "}
-                    was created automatically — deposits, delays and shipping
-                    are tracked there.
-                  </p>
-                )}
-              </div>
-              <ProductionDossierActions taskListId={task.id} />
+            {/* The dossier actions are NOT repeated here: the command bar
+                already carries Generate Production PDF · Send by Email ·
+                Export Excel for exactly this status, and having them twice on
+                one screen was the page's most visible redundancy. What stays
+                is the one thing the bar cannot say — that validation
+                succeeded, and which production order owns tracking now. */}
+            <div className="tl-validated-line">
+              <span className="micro">
+                {searchParams?.validated === "1"
+                  ? "✓ Task list validated"
+                  : "Production package"}
+              </span>
+              {linkedPo ? (
+                <span className="v">
+                  Production order{" "}
+                  <Link
+                    href={`/production/orders/${linkedPo.id}`}
+                    className="font-medium underline"
+                  >
+                    {linkedPo.number ?? "created"}
+                  </Link>{" "}
+                  tracks deposits, delays and shipping. Dossier actions are in
+                  the command bar above.
+                </span>
+              ) : (
+                <span className="v">
+                  Generate the production dossier from the command bar above.
+                </span>
+              )}
             </div>
           </div>
         )}
@@ -1658,19 +1602,12 @@ export default async function TaskListDetailPage({
       </OpsPanel>
 
       <OpsPanel id="activity">
-      {/* m179 — FINAL VALIDATION: freeze banner, controlled revisions, and
-          the field-level diff between revisions. */}
-      {(frozen || revisions.length > 0) && (
-        <RevisionsPanel
-          taskListId={task.id}
-          frozen={frozen}
-          currentRev={currentRev}
-          revisions={revisions.map((r) => ({ ...r, snapshot: null }))}
-          diff={revisionDiff.slice(0, 200)}
-          diffLabel={revisionDiffLabel}
-          canManage={technical && canValidateTaskList}
-        />
-      )}
+      {/* m179's RevisionsPanel is no longer mounted here. Buried seventh of
+          seven tabs, it made the lineage invisible — the page showed "Rev D"
+          as a label and nothing else. It now renders inside the rail's
+          Revision card, which opens it as a history overlay. MOVED, not
+          duplicated: mounting it in both places would be the redundancy the
+          rest of this pass is removing. */}
       {/* ---------- FACTORY VALIDATION HISTORY ----------
           Focused, timeline-oriented view of just the validation flow
           (submit → review → validate → revise → approve). The full
@@ -1818,19 +1755,18 @@ export default async function TaskListDetailPage({
             </section>
           )}
 
-          <section className="ops-card">
-            <div className="ops-card-h">
-              <span>Revision</span>
-              <span>{currentRev ? `Rev ${currentRev}` : "—"}</span>
-            </div>
-            <div className="ops-card-b">
-              <div className="nx-meta" style={{ marginTop: 0 }}>
-                {frozen
-                  ? "This version is frozen. Any change requires a controlled revision, which re-runs the full Pre-Validation cycle."
-                  : "Editable — the next Final Validation will freeze this revision."}
-              </div>
-            </div>
-          </section>
+          {/* 5 — REVISION. Was a one-line label; now the lineage itself, with
+              the full history + field diff + controlled-revision form one
+              click away. Same components, same server action. */}
+          <RevisionRailCard
+            taskListId={task.id}
+            frozen={frozen}
+            currentRev={currentRev}
+            revisions={revisions.map((r) => ({ ...r, snapshot: null }))}
+            diff={revisionDiff.slice(0, 200)}
+            diffLabel={revisionDiffLabel}
+            canManage={technical && canValidateTaskList}
+          />
         </aside>
       </div>
 
