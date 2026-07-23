@@ -4,7 +4,8 @@
  * Run with:  npm test   (Node ≥ 22.6, built-in runner + native TS stripping)
  *
  * Locks in the owner rules (2026-07-12): IoT twins are hidden from catalogue
- * pickers ONLY for the approved families (AOSPRO+, SSLX Performance,
+ * pickers ONLY for the approved families (AOSPRO+, AOS PERFORMANCE,
+ * SSLX Performance,
  * SSLX Pro), the Connectivity group maps each choice to the real product id,
  * and an IoT product with no standard twin stays visible.
  */
@@ -40,9 +41,12 @@ const PRODUCTS = [
   { id: "polei", name: "Pole 9m IoT version", category: "Poles", category_id: CAT_OTHER },
 ];
 
-test("family eligibility is limited to the three approved families", () => {
+test("family eligibility is limited to the approved families", () => {
   assert.equal(isVariantEligibleFamily("AOSPRO +"), true);
   assert.equal(isVariantEligibleFamily("AOSPRO+"), true);
+  // AOS PERFORMANCE — added 2026-07-23. Same registry, same behaviour.
+  assert.equal(isVariantEligibleFamily("AOS PERFORMANCE"), true);
+  assert.equal(isVariantEligibleFamily("AOS Performance"), true);
   assert.equal(isVariantEligibleFamily("SSLXPRO"), true);
   assert.equal(isVariantEligibleFamily("SSLX Pro"), true);
   assert.equal(isVariantEligibleFamily("SSLX Performance"), true);
@@ -108,4 +112,42 @@ test("name matching tolerates case and spacing drift", () => {
   ]);
   assert.ok(index.hiddenIds.has("b"));
   assert.equal(index.groupsByProductId.get("a")?.choices[1]?.productId, "b");
+});
+
+// --- AOS PERFORMANCE (2026-07-23) ------------------------------------------
+// The live catalogue writes the suffix in CAPS ("AOS PERFORMANCE 40 IOT
+// VERSION") while AOSPRO+ writes it in lower case ("AOSPRO+40 IoT version").
+// Both must pair — the detector is case-insensitive by design. Names below
+// are copied verbatim from the production catalogue.
+const CAT_AOSPERF = "cat-aosperf";
+const AOSPERF = [
+  { id: "apf40", name: "AOS PERFORMANCE 40", category: "AOS PERFORMANCE", category_id: CAT_AOSPERF },
+  { id: "apf40i", name: "AOS PERFORMANCE 40 IOT VERSION", category: "AOS PERFORMANCE", category_id: CAT_AOSPERF },
+  { id: "apf120", name: "AOS PERFORMANCE 120", category: "AOS PERFORMANCE", category_id: CAT_AOSPERF },
+  { id: "apf120i", name: "AOS PERFORMANCE 120 IOT VERSION", category: "AOS PERFORMANCE", category_id: CAT_AOSPERF },
+];
+
+test("AOS PERFORMANCE collapses exactly like AOSPRO+ (caps suffix included)", () => {
+  const index = buildVariantIndex(AOSPERF);
+  // Only the IoT twins are hidden — the standard models stay in the catalogue.
+  assert.deepEqual([...index.hiddenIds].sort(), ["apf120i", "apf40i"]);
+
+  // Both members resolve to the same group, so an existing quotation line
+  // that already carries the IoT product still shows the toggle.
+  const g = index.groupsByProductId.get("apf40");
+  assert.ok(g, "the standard model must expose the connectivity group");
+  assert.equal(g.key, "connectivity");
+  assert.equal(g.baseProductId, "apf40");
+  assert.deepEqual(
+    g.choices.map((c) => [c.key, c.productId]),
+    [["standard", "apf40"], ["iot", "apf40i"]]
+  );
+  assert.equal(index.groupsByProductId.get("apf40i"), g);
+
+  // Toggling IoT must resolve to the real IoT product id — that is what
+  // every downstream process (pricing, BOM, task list, packing) receives.
+  assert.equal(
+    g.choices.find((c) => c.key === "iot")?.productId,
+    "apf40i"
+  );
 });

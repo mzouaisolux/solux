@@ -73,8 +73,24 @@ const IOT_SUFFIX_RE = /\s+iot\s+version\s*$/i;
  * Families where collapsing is enabled, as normalized category names.
  * Normalization strips everything but letters/digits/'+' and lowercases, so
  * "AOSPRO +", "AOSPRO+", "SSLXPRO", "SSLX Pro" all match their key.
+ *
+ * Adding a family here is the ONLY change needed to enable the standard↔IoT
+ * toggle for it — the pairing itself is automatic, driven by the naming
+ * convention above. Both consumers (the quotation ProductConfigurator and
+ * the transport request form) build their index from this same registry, so
+ * one entry switches the behaviour on everywhere at once. Never add a second
+ * per-family mechanism.
+ *
+ * "aosperformance" — AOS PERFORMANCE, added 2026-07-23. Its 6 models each
+ * already carry a conforming "<base> IOT VERSION" twin in the same category,
+ * so the toggle covers all of them with no data migration.
  */
-const ELIGIBLE_FAMILY_KEYS = new Set(["aospro+", "sslxperformance", "sslxpro"]);
+const ELIGIBLE_FAMILY_KEYS = new Set([
+  "aospro+",
+  "aosperformance",
+  "sslxperformance",
+  "sslxpro",
+]);
 
 export function familyKey(category: string | null | undefined): string {
   return (category ?? "").toLowerCase().replace(/[^a-z0-9+]/g, "");
