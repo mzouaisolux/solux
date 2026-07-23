@@ -2744,3 +2744,104 @@
     justify-content: space-between;
   }
 }
+
+/* ---- 13. MINI STEPPER -------------------------------------------------
+   The lifecycle as a compact dot row inside the command bar. Same markup as
+   the full-width card it replaces — only the presentation changes, so
+   deriveFlowSteps() and the done/now/todo classes are untouched. Each step
+   keeps its date in `title`, so nothing is lost by hiding the caption. */
+.tl-detail.ops .flow.mini {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  box-shadow: none;
+}
+/* The heading is redundant next to the KPI strip; the dots speak. */
+.tl-detail.ops .flow.mini .flow-head {
+  display: none;
+}
+.tl-detail.ops .flow.mini .steps {
+  display: flex;
+  align-items: center;
+  gap: 0;
+}
+.tl-detail.ops .flow.mini .step {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  /* The full-width stepper stretches each step (flex: 1) and draws a 2px
+     connector at top: 6.5px — which is exactly where the label sits once the
+     row is 14px tall, so it struck the text through. Both are undone here. */
+  flex: 0 0 auto;
+  padding: 0 9px 0 0;
+  border: 0;
+  background: none;
+  min-width: 0;
+  position: static;
+}
+.tl-detail.ops .flow.mini .step::after,
+.tl-detail.ops .flow.mini .step::before {
+  content: none !important;
+}
+/* Hairline between steps, reading as one continuous track. */
+.tl-detail.ops .flow.mini .step + .step {
+  padding-left: 9px;
+  border-left: 1px solid var(--line-1);
+}
+.tl-detail.ops .flow.mini .step .dot {
+  width: 8px;
+  height: 8px;
+  min-width: 8px;
+  border-radius: 0;
+  border: 1px solid var(--line-2);
+  background: #fff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  margin: 0;
+}
+.tl-detail.ops .flow.mini .step .dot svg {
+  display: none;
+}
+.tl-detail.ops .flow.mini .step.done .dot {
+  background: var(--accent);
+  border-color: var(--accent-deep);
+}
+.tl-detail.ops .flow.mini .step.now .dot {
+  background: var(--ink-0);
+  border-color: var(--ink-0);
+}
+.tl-detail.ops .flow.mini .step .sname {
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--mute-2);
+  white-space: nowrap;
+  margin: 0;
+}
+.tl-detail.ops .flow.mini .step.done .sname {
+  color: var(--mute-1);
+}
+.tl-detail.ops .flow.mini .step.now .sname {
+  color: var(--ink-0);
+}
+/* The per-step date is in the tooltip; the row must stay one line. */
+.tl-detail.ops .flow.mini .step .sdate {
+  display: none;
+}
+/* Under 1100px the command bar is already tight — drop the labels, keep the
+   dots, so the lifecycle is still readable at a glance. */
+@media (max-width: 1100px) {
+  .tl-detail.ops .flow.mini .step .sname {
+    display: none;
+  }
+  .tl-detail.ops .flow.mini .step {
+    padding-right: 6px;
+  }
+  .tl-detail.ops .flow.mini .step + .step {
+    padding-left: 6px;
+  }
+}

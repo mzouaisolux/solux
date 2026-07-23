@@ -966,6 +966,35 @@ export default async function TaskListDetailPage({
               production team.
             </p>
           )}
+
+          {/* WORKFLOW STEPPER — the reference shows the 6-step lifecycle as a
+              compact dot row at the command bar's right, not as a full-width
+              card of its own. Same markup and same deriveFlowSteps() data as
+              before; `mini` is a CSS variant, not a second component. */}
+          <div className="flow mini">
+            <div className="flow-head">
+              <span className="micro">Validation workflow</span>
+              <span className="flow-sub">
+                Sales drafts → production validates &amp; enriches → factory
+                release.
+              </span>
+            </div>
+            <div className="steps">
+              {flowSteps.map((s) => (
+                <div
+                  key={s.name}
+                  className={`step${
+                    s.state === "done" ? " done" : s.state === "now" ? " now" : ""
+                  }`}
+                  title={`${s.name} — ${s.sub}`}
+                >
+                  <div className="dot">{s.state === "done" && <StepCheck />}</div>
+                  <div className="sname">{s.name}</div>
+                  <div className="sdate">{s.sub}</div>
+                </div>
+              ))}
+            </div>
+          </div>
         </div>
       </div>
 
@@ -1035,31 +1064,9 @@ export default async function TaskListDetailPage({
         )}
       </div>
 
-      {/* WORKFLOW STEPPER — visual lifecycle progress, derived from the
-          existing status + linked PO status. */}
-      <div className="flow">
-        <div className="flow-head">
-          <span className="micro">Validation workflow</span>
-          <span className="flow-sub">
-            Sales drafts → production validates &amp; enriches → factory
-            release.
-          </span>
-        </div>
-        <div className="steps">
-          {flowSteps.map((s) => (
-            <div
-              key={s.name}
-              className={`step${
-                s.state === "done" ? " done" : s.state === "now" ? " now" : ""
-              }`}
-            >
-              <div className="dot">{s.state === "done" && <StepCheck />}</div>
-              <div className="sname">{s.name}</div>
-              <div className="sdate">{s.sub}</div>
-            </div>
-          ))}
-        </div>
-      </div>
+      {/* The workflow stepper used to sit here, full width. It now rides in
+          the command bar (see `.flow.mini` above) — the reference keeps the
+          lifecycle glanceable without spending a card on it. */}
 
       {/* m178 — PRE-VALIDATION BOARD: no longer a full-width block here. Its
           four parts now live in the decision rail below (Ops Dense reference
