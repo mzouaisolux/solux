@@ -1945,37 +1945,9 @@
   border-color: var(--amber-line);
   border-top: 3px solid var(--amber);
 }
-.ops-attn-item {
-  display: block;
-  width: 100%;
-  text-align: left;
-  border: 0;
-  border-bottom: 1px solid var(--line-1);
-  background: none;
-  padding: 8px 0;
-  font-family: inherit;
-  cursor: pointer;
-}
-.ops-attn-item:last-child {
-  border-bottom: 0;
-}
-.ops-attn-item .t {
-  display: block;
-  font-size: 12.5px;
-  font-weight: 700;
-  color: var(--amber-deep);
-}
-.ops-attn-item .s {
-  display: block;
-  font-size: 10.5px;
-  color: var(--mute-1);
-  margin-top: 1px;
-}
-.ops-attn-ok {
-  font-size: 12px;
-  color: var(--accent-deep);
-  font-weight: 600;
-}
+/* .ops-attn-item / .ops-attn-ok described the hand-rolled markup this card
+   carried before it started rendering PreValidationBlockers. No JSX uses
+   either class any more; the same rhythm now lives in block 10 (c). */
 
 /* "Next step" — the one dark card, exactly as in the reference. */
 .ops-card.next {
