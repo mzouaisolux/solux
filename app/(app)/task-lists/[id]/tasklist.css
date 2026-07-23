@@ -2123,3 +2123,195 @@
   /* command bar (134) + tab bar (58) */
   top: 200px;
 }
+
+/* ---- 7. INSIDE THE PANELS -------------------------------------------
+   The shell alone is not the reference: the reference is dense INSIDE
+   each tab too. Same tokens applied to the controls, cards, chips and
+   rows that live in every panel. Presentation only. */
+
+/* Cards: square, hairline, the reference's shadow. */
+.tl-detail.ops .ops-panel .card,
+.tl-detail.ops .ops-panel .prod-shell,
+.tl-detail.ops .ops-panel .risk-shell,
+.tl-detail.ops .ops-panel .att-shell,
+.tl-detail.ops .ops-panel .stk-shell,
+.tl-detail.ops .ops-panel .vh-shell,
+.tl-detail.ops .ops-panel .act-shell {
+  border: 1px solid var(--line-1);
+  border-radius: 0;
+  box-shadow: var(--shadow);
+  background: #fff;
+}
+/* Kill every inherited radius inside a panel — the reference is square. */
+.tl-detail.ops .ops-panel [class*="rounded"],
+.tl-detail.ops .ops-panel input,
+.tl-detail.ops .ops-panel select,
+.tl-detail.ops .ops-panel textarea,
+.tl-detail.ops .ops-panel button,
+.tl-detail.ops .ops-panel .btn {
+  border-radius: 0 !important;
+}
+
+/* Form controls — 13px, full width, hairline #dcdde1 (reference selNormal). */
+.tl-detail.ops .ops-panel select,
+.tl-detail.ops .ops-panel input[type="text"],
+.tl-detail.ops .ops-panel input[type="number"],
+.tl-detail.ops .ops-panel input[type="date"],
+.tl-detail.ops .ops-panel textarea {
+  box-sizing: border-box;
+  border: 1px solid var(--line-2);
+  background: #fff;
+  padding: 8px 10px;
+  font-size: 13px;
+  font-family: inherit;
+  color: var(--ink-1);
+}
+.tl-detail.ops .ops-panel select:focus,
+.tl-detail.ops .ops-panel input:focus,
+.tl-detail.ops .ops-panel textarea:focus {
+  outline: none;
+  border-color: var(--ink-0);
+  box-shadow: inset 0 0 0 1px var(--ink-0);
+}
+.tl-detail.ops .ops-panel input[type="number"],
+.tl-detail.ops .ops-panel .tnum {
+  font-variant-numeric: tabular-nums;
+}
+
+/* A required field that is still empty gets the reference's amber rail —
+   the same visual grammar as the KPI strip and the decision rail, so
+   "what blocks me" reads identically everywhere on the page. */
+.tl-detail.ops .ops-panel select:required:invalid,
+.tl-detail.ops .ops-panel input:required:placeholder-shown {
+  border-color: rgba(232, 135, 14, 0.62);
+  border-left: 3px solid var(--amber);
+  background: rgba(232, 135, 14, 0.05);
+}
+
+/* Field labels — the reference's uppercase micro-label. */
+.tl-detail.ops .ops-panel label,
+.tl-detail.ops .ops-panel .fi-lab,
+.tl-detail.ops .ops-panel .lk {
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--mute-1);
+}
+/* …but never mangle checkbox/radio rows, which read as sentences. */
+.tl-detail.ops .ops-panel label:has(input[type="checkbox"]),
+.tl-detail.ops .ops-panel label:has(input[type="radio"]) {
+  font-size: 12.5px;
+  font-weight: 500;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--ink-1);
+}
+
+/* Section heads inside a panel. */
+.tl-detail.ops .ops-panel .sec-head h2 {
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--ink-0);
+}
+.tl-detail.ops .ops-panel .eyebrow,
+.tl-detail.ops .ops-panel .micro {
+  font-size: 10.5px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--mute-1);
+}
+.tl-detail.ops .ops-panel .lead {
+  font-size: 12px;
+  color: var(--mute-1);
+}
+
+/* Buttons — square, dense; primary is INK, not a coloured pill. */
+.tl-detail.ops .ops-panel .btn,
+.tl-detail.ops .ops-panel button:not(.ops-tab) {
+  border: 1px solid var(--line-2);
+  background: #fff;
+  color: var(--ink-1);
+  padding: 7px 12px;
+  font-size: 12.5px;
+  font-weight: 600;
+  font-family: inherit;
+}
+.tl-detail.ops .ops-panel .btn:hover,
+.tl-detail.ops .ops-panel button:not(.ops-tab):hover {
+  border-color: var(--ink-0);
+}
+.tl-detail.ops .ops-panel .btn.primary,
+.tl-detail.ops .ops-panel .btn-primary {
+  background: var(--ink-0);
+  border-color: var(--ink-0);
+  color: #fff;
+}
+.tl-detail.ops .ops-panel .btn.sm,
+.tl-detail.ops .ops-panel .btn-sm {
+  padding: 5px 9px;
+  font-size: 11.5px;
+}
+
+/* Value chips / tags (options, presets, tilt) — square, ink when active. */
+.tl-detail.ops .ops-panel .fq-chip,
+.tl-detail.ops .ops-panel .chip,
+.tl-detail.ops .ops-panel .tag {
+  border-radius: 0;
+  border: 1px solid var(--line-2);
+  background: #fff;
+  padding: 4px 9px;
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+}
+.tl-detail.ops .ops-panel .tag-warn {
+  border-color: var(--amber-line);
+  background: rgba(232, 135, 14, 0.1);
+  color: var(--amber-deep);
+}
+
+/* Key/value rows (sales summary, logistics) — dense, right-aligned value. */
+.tl-detail.ops .ops-panel .logi .lv,
+.tl-detail.ops .ops-panel .kv .v {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ink-0);
+  font-variant-numeric: tabular-nums;
+}
+.tl-detail.ops .ops-panel .logi .lv.muted,
+.tl-detail.ops .ops-panel .muted {
+  color: var(--mute-2);
+  font-weight: 600;
+}
+
+/* Tables / timelines — hairline rows, no zebra, tabular figures. */
+.tl-detail.ops .ops-panel table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 12.5px;
+}
+.tl-detail.ops .ops-panel th {
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--mute-1);
+  text-align: left;
+  padding: 7px 8px;
+  border-bottom: 1px solid var(--line-1);
+}
+.tl-detail.ops .ops-panel td {
+  padding: 7px 8px;
+  border-bottom: 1px solid var(--line-1);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Density: the reference removes air, not information. */
+.tl-detail.ops .ops-panel .pad {
+  padding: 14px 16px;
+}
+.tl-detail.ops .ops-panel .sec-head {
+  padding-bottom: 6px;
+}
