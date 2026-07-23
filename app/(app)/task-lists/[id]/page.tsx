@@ -1769,7 +1769,10 @@ export default async function TaskListDetailPage({
               server does not even fetch the action items, and a frozen list
               must expose no write control. */}
           {showPreValidationBoard && (
-            <section className="ops-card">
+            /* `pending-wrap` is the positioning context that lets the CSS lift
+               the block's own "+ Add item" button onto the card header line,
+               the way the reference does — without editing the moved JSX. */
+            <section className="ops-card pending-wrap">
               <div className="ops-card-h">
                 <span>Pending issues</span>
               </div>

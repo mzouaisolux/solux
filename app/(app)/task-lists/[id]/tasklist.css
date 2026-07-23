@@ -2469,3 +2469,208 @@
   color: var(--mute-1);
   margin-top: 4px;
 }
+
+/* ---- 10. RAIL CARDS ---------------------------------------------------
+   The Pre-Validation board's four blocks now sit in the 320 px rail. Their
+   JSX is the board's, verbatim (Tailwind utility classes and all), so the
+   Ops Dense look is applied from OUTSIDE — exactly like block 9 does for
+   the Next-step card. Nothing here is allowed to change what is rendered,
+   only how it reads: square corners, 11-12 px type, tabular figures, amber
+   reserved for what actually needs attention.
+   Scoped to `.tl-detail.ops .ops-aside`, so the same components rendered
+   anywhere else keep their original styling. ------------------------- */
+
+/* (a) Five cards in a sticky column overflow the viewport on a laptop; the
+       bottom one would be unreachable. Scroll inside the rail instead. */
+.tl-detail.ops .ops-aside {
+  max-height: calc(100vh - 310px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 2px;
+}
+@media (max-width: 1180px) {
+  /* One column: the rail is static, so it must not clip or scroll. */
+  .tl-detail.ops .ops-aside {
+    max-height: none;
+    overflow-y: visible;
+  }
+}
+
+/* (b) Each block carries its own uppercase title, and the card header now
+       says the same thing. Hide the inner one — but for Pending issues hide
+       only the label, never the row, or the "+ Add item" button goes with
+       it. */
+.tl-detail.ops .ops-aside [data-testid="pre-validation-blockers"] > div:first-child,
+.tl-detail.ops .ops-aside [data-testid="ai-review-card"] > div:first-child,
+.tl-detail.ops .ops-aside [data-testid="pending-issues-card"] > div:first-child > div:first-child {
+  display: none;
+}
+
+/* (c) Blocking errors — the amber list. Same rhythm as the .ops-attn-item
+       markup it replaces, so the card did not change shape. */
+.tl-detail.ops .ops-aside [data-testid="pre-validation-blockers"] ul {
+  margin-top: 0;
+}
+.tl-detail.ops .ops-aside [data-testid="pre-validation-blockers"] li {
+  border-bottom: 1px solid var(--line-1);
+  padding: 8px 0;
+  font-size: 12.5px;
+  font-weight: 700;
+  line-height: 1.35;
+  color: var(--amber-deep);
+  font-variant-numeric: tabular-nums;
+}
+.tl-detail.ops .ops-aside [data-testid="pre-validation-blockers"] li:last-child {
+  border-bottom: 0;
+}
+.tl-detail.ops .ops-aside [data-testid="pre-validation-blockers"] li > span[aria-hidden] {
+  color: var(--amber);
+}
+.tl-detail.ops .ops-aside [data-testid="pre-validation-blockers"] a {
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--mute-1);
+  text-decoration-color: var(--line-2);
+  white-space: nowrap;
+}
+/* Clear gate: the green one-liner, matching the old .ops-attn-ok. */
+.tl-detail.ops .ops-aside [data-testid="pre-validation-blockers"] > p {
+  margin-top: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent-deep);
+}
+
+/* (d) Amber is for what needs attention, never decoration. When the gate is
+       clear the block renders a <p> instead of the <ul>, and the card drops
+       back to a neutral hairline. Written as an override so a browser
+       without :has() keeps today's always-amber card rather than losing the
+       accent entirely. */
+.tl-detail.ops
+  .ops-aside
+  .ops-card.attn:has(> .ops-card-b > [data-testid="pre-validation-blockers"] > p) {
+  border-color: var(--line-1);
+  border-top: 1px solid var(--line-1);
+}
+
+/* (e) Warnings sit under the blockers inside the same card: a hairline rule
+       and a micro-eyebrow keep "non-blocking" visually subordinate. */
+.tl-detail.ops .ops-aside [data-testid="pre-validation-warnings"] {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line-1);
+}
+.tl-detail.ops .ops-aside [data-testid="pre-validation-warnings"] > div:first-child {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  color: var(--mute-2);
+}
+.tl-detail.ops .ops-aside [data-testid="pre-validation-warnings"] li {
+  font-size: 11.5px;
+  line-height: 1.35;
+  color: var(--ink-1);
+  padding: 3px 0;
+}
+
+/* (f) Pending issues — hairline rows, square chips, no pills. The block's
+       own header row keeps only the "+ Add item" button (its label is hidden
+       in (b)); lift it onto the card header line, as in the reference. */
+.tl-detail.ops .ops-aside .ops-card.pending-wrap {
+  position: relative;
+}
+.tl-detail.ops .ops-aside [data-testid="pending-issues-card"] > div:first-child {
+  position: absolute;
+  top: 8px;
+  right: 14px;
+  margin: 0;
+}
+.tl-detail.ops .ops-aside [data-testid="pending-issues-card"] [data-testid="add-action-item"] {
+  border-radius: 0;
+  border-color: var(--line-2);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 4px 8px;
+}
+.tl-detail.ops .ops-aside [data-testid="pending-issues-card"] > ul {
+  border-radius: 0;
+  border-color: var(--line-1);
+  margin-top: 0;
+}
+.tl-detail.ops .ops-aside [data-testid="pending-issues-card"] > ul > li {
+  padding: 8px 10px;
+  gap: 4px 8px;
+}
+.tl-detail.ops .ops-aside [data-testid="pending-issues-card"] span[class*="rounded-full"] {
+  border-radius: 0;
+  padding: 1px 5px;
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.tl-detail.ops .ops-aside [data-testid="pending-issues-card"] > p {
+  margin-top: 0;
+  font-size: 11.5px;
+  color: var(--mute-1);
+}
+/* The add form is a 12-column grid built for a full-width page. In a 320 px
+   rail every field has to stack — the md: breakpoints answer to the
+   viewport, not to this column, so they must be overridden here. */
+.tl-detail.ops .ops-aside [data-testid="pending-issues-card"] form {
+  grid-template-columns: minmax(0, 1fr);
+  border-radius: 0;
+  border-color: var(--line-1);
+  padding: 10px;
+  gap: 6px;
+}
+.tl-detail.ops .ops-aside [data-testid="pending-issues-card"] form > * {
+  grid-column: auto / auto !important;
+}
+.tl-detail.ops .ops-aside [data-testid="pending-issues-card"] form input,
+.tl-detail.ops .ops-aside [data-testid="pending-issues-card"] form select,
+.tl-detail.ops .ops-aside [data-testid="pending-issues-card"] form button {
+  border-radius: 0;
+  font-size: 12px;
+}
+/* The submit button keeps the page's accent green: `.po-premium .bg-solux`
+   sets it with !important, and it is the treatment "Validate →" gets two
+   cards above. Overriding it here alone would make the rail internally
+   inconsistent — the reference's ink primary is a page-wide change, tracked
+   separately. */
+.tl-detail.ops .ops-aside [data-testid="pending-issues-card"] form button[type="submit"] {
+  font-weight: 700;
+}
+/* m178 not applied: keep the explanatory banner, just square it. */
+.tl-detail.ops .ops-aside [data-testid="pending-issues-card"] > p[class*="border-amber"] {
+  border-radius: 0;
+  padding: 8px 10px;
+}
+
+/* (g) AI-extracted values — label / figure / state, one line each. */
+.tl-detail.ops .ops-aside [data-testid="ai-review-card"] > ul {
+  margin-top: 0;
+}
+.tl-detail.ops .ops-aside [data-testid="ai-review-card"] > ul > li {
+  border-bottom: 1px solid var(--line-1);
+  padding: 7px 0;
+  font-size: 11.5px;
+  gap: 2px 6px;
+}
+.tl-detail.ops .ops-aside [data-testid="ai-review-card"] > ul > li:last-child {
+  border-bottom: 0;
+}
+.tl-detail.ops .ops-aside [data-testid="ai-review-card"] b {
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+}
+.tl-detail.ops .ops-aside [data-testid="ai-review-card"] span[class*="rounded-full"] {
+  border-radius: 0;
+  padding: 1px 5px;
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
