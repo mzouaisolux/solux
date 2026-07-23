@@ -1088,19 +1088,6 @@ export default async function TaskListDetailPage({
         />
       )}
 
-      {/* m179 — FINAL VALIDATION: freeze banner, controlled revisions, and
-          the field-level diff between revisions. */}
-      {(frozen || revisions.length > 0) && (
-        <RevisionsPanel
-          taskListId={task.id}
-          frozen={frozen}
-          currentRev={currentRev}
-          revisions={revisions.map((r) => ({ ...r, snapshot: null }))}
-          diff={revisionDiff.slice(0, 200)}
-          diffLabel={revisionDiffLabel}
-          canManage={technical && canValidateTaskList}
-        />
-      )}
 
       {/* RELEASE READINESS (#7/#8) — kept for the Final Validation stage; the
           Pre-Validation board above covers the collaborative phase. */}
@@ -1167,32 +1154,6 @@ export default async function TaskListDetailPage({
       {/* Workflow next-action bar — INK bar wrapping the existing
           TaskListWorkflowActions buttons (Mark production ready / Request
           revision / Reject) + the submitted-for-validation stamp. */}
-      <div className="nextstep">
-        <div className="lead">
-          <span className="micro">Next step</span>
-          <span className="big">Move this task list to its next stage</span>
-        </div>
-        <div className="acts">
-          <TaskListWorkflowActions
-            taskListId={task.id}
-            status={status}
-            isTechnical={technical}
-            canValidate={canValidateTaskList}
-            canReject={canRejectTaskList}
-            revisionThread={revisionThread}
-            missingMappingCount={missingMappingCount}
-            tiltCheckpointPending={tiltCheckpointPending}
-            clientName={clientName}
-            taskNumber={task.number ?? null}
-          />
-        </div>
-        {task.submitted_at && (
-          <div className="stamp">
-            Submitted for validation{" "}
-            <b>{new Date(task.submitted_at).toLocaleString()}</b>
-          </div>
-        )}
-      </div>
 
       {/* POST-VALIDATION COCKPIT — the natural END of the TLM workflow.
           As soon as the task list is validated the manager generates the
@@ -1274,17 +1235,16 @@ export default async function TaskListDetailPage({
       <OpsTabs
         tabs={[
           { id: "product", label: "Product", count: requiredEmptyCount },
-          { id: "lighting", label: "Lighting" },
           {
             id: "industrial",
             label: "Industrial file",
             count:
               (tiltConflict ? 1 : 0) + (tiltCheckpointPending ? 1 : 0) || null,
           },
+          { id: "lighting", label: "Lighting" },
+          { id: "branding", label: "Stickers & branding" },
           { id: "risks", label: "Risks" },
-          { id: "docs", label: "Documents" },
-          { id: "notes", label: "Notes" },
-          { id: "branding", label: "Stickers & logistics" },
+          { id: "docs", label: "Docs & logistics" },
           { id: "activity", label: "Activity", neutral: true },
         ]}
       >
@@ -1436,51 +1396,6 @@ export default async function TaskListDetailPage({
 
       </OpsPanel>
 
-      <OpsPanel id="lighting">
-      {/* ---------- PRODUCT LIGHTING SETUP (m144) ----------
-          Sales completes the APPROVED lighting config here (Energy Study +
-          power + dimming program + optics + operating hours), with optional AI
-          Auto-fill. Non-blocking; transferred to the production order via the
-          command (quotation_id). Editable while the task list is sales-editable. */}
-      {task.quotation_id && (
-        <>
-          <div className="sec-head">
-            <div className="lhs">
-              <h2 id="tl-lighting" style={{ scrollMarginTop: 16 }}>
-                Product Lighting Setup
-              </h2>
-              <p className="micro">
-                Lighting parameters + technical studies for production,
-                controller programming and quality control.
-              </p>
-            </div>
-          </div>
-          <div className="prod-shell">
-            <ProductLightingSetupForm
-              documentId={task.quotation_id}
-              affairId={(task as any).affair_id ?? null}
-              clientId={task.client_id ?? null}
-              initial={lightingRow ?? null}
-              editable={canEditContent}
-            />
-          </div>
-
-          {/* m180 — programming PER PRODUCT LINE: the study above is the
-              source; each eligible line owns its own final program. */}
-          <div className="prod-shell" style={{ marginTop: 12 }}>
-            <LineLightingPanel
-              taskListId={task.id}
-              lines={panelLines}
-              editable={salesCanEdit && !frozen}
-              studyAvailable={studyExtractedAt != null}
-              studyName={lightingRow?.energy_study_name ?? null}
-            />
-          </div>
-        </>
-      )}
-
-      </OpsPanel>
-
       <OpsPanel id="industrial">
       {/* ---------- INDUSTRIAL PRODUCTION FILE (m159) ----------
           The task list is the complete industrial production file (owner spec
@@ -1527,6 +1442,66 @@ export default async function TaskListDetailPage({
 
       </OpsPanel>
 
+      <OpsPanel id="lighting">
+      {/* ---------- PRODUCT LIGHTING SETUP (m144) ----------
+          Sales completes the APPROVED lighting config here (Energy Study +
+          power + dimming program + optics + operating hours), with optional AI
+          Auto-fill. Non-blocking; transferred to the production order via the
+          command (quotation_id). Editable while the task list is sales-editable. */}
+      {task.quotation_id && (
+        <>
+          <div className="sec-head">
+            <div className="lhs">
+              <h2 id="tl-lighting" style={{ scrollMarginTop: 16 }}>
+                Product Lighting Setup
+              </h2>
+              <p className="micro">
+                Lighting parameters + technical studies for production,
+                controller programming and quality control.
+              </p>
+            </div>
+          </div>
+          <div className="prod-shell">
+            <ProductLightingSetupForm
+              documentId={task.quotation_id}
+              affairId={(task as any).affair_id ?? null}
+              clientId={task.client_id ?? null}
+              initial={lightingRow ?? null}
+              editable={canEditContent}
+            />
+          </div>
+
+          {/* m180 — programming PER PRODUCT LINE: the study above is the
+              source; each eligible line owns its own final program. */}
+          <div className="prod-shell" style={{ marginTop: 12 }}>
+            <LineLightingPanel
+              taskListId={task.id}
+              lines={panelLines}
+              editable={salesCanEdit && !frozen}
+              studyAvailable={studyExtractedAt != null}
+              studyName={lightingRow?.energy_study_name ?? null}
+            />
+          </div>
+        </>
+      )}
+
+      </OpsPanel>
+
+      <OpsPanel id="branding">
+      {/* ---------- STICKER REQUIREMENTS ----------
+          Often-forgotten labelling spec: which stickers, where, with
+          what artwork/instructions. Artwork files live in Attachments. */}
+      <div className="stk-shell">
+        <StickerRequirementsEditor
+          taskListId={task.id}
+          documentId={task.quotation_id ?? null}
+          initial={stickerReq}
+          editable={canEditContent}
+        />
+      </div>
+
+      </OpsPanel>
+
       <OpsPanel id="risks">
       {/* ---------- KNOWN RISKS / WARNINGS ----------
           Sits between the configuration and attachments. Compact +
@@ -1551,23 +1526,6 @@ export default async function TaskListDetailPage({
         />
       </div>
 
-      </OpsPanel>
-
-      <OpsPanel id="docs">
-      {/* ---------- PROJECT ATTACHMENTS ----------
-          Drawings, dimensions, tender docs, artwork — the project-
-          specific detail the product code alone can't carry. Shown high
-          on the page so factory/ops see it during validation. Keyed to
-          the affair, shared across versions + the quotation. */}
-      {task.quotation_id && (
-        <div className="att-shell">
-          <AttachmentsPanel documentId={task.quotation_id} />
-        </div>
-      )}
-
-      </OpsPanel>
-
-      <OpsPanel id="notes">
       {/* Header form — production notes (sales) + technical notes (TLM).
           The old shipping-method / lines / workflow-stage grid was
           removed: shipping lives in "Logistics from quotation" below,
@@ -1631,18 +1589,17 @@ export default async function TaskListDetailPage({
 
       </OpsPanel>
 
-      <OpsPanel id="branding">
-      {/* ---------- STICKER REQUIREMENTS ----------
-          Often-forgotten labelling spec: which stickers, where, with
-          what artwork/instructions. Artwork files live in Attachments. */}
-      <div className="stk-shell">
-        <StickerRequirementsEditor
-          taskListId={task.id}
-          documentId={task.quotation_id ?? null}
-          initial={stickerReq}
-          editable={canEditContent}
-        />
-      </div>
+      <OpsPanel id="docs">
+      {/* ---------- PROJECT ATTACHMENTS ----------
+          Drawings, dimensions, tender docs, artwork — the project-
+          specific detail the product code alone can't carry. Shown high
+          on the page so factory/ops see it during validation. Keyed to
+          the affair, shared across versions + the quotation. */}
+      {task.quotation_id && (
+        <div className="att-shell">
+          <AttachmentsPanel documentId={task.quotation_id} />
+        </div>
+      )}
 
       {/* Logistics inherited from the linked quotation. Read-only view
           of the commercial terms agreed with the customer. Placed BELOW
@@ -1714,6 +1671,19 @@ export default async function TaskListDetailPage({
       </OpsPanel>
 
       <OpsPanel id="activity">
+      {/* m179 — FINAL VALIDATION: freeze banner, controlled revisions, and
+          the field-level diff between revisions. */}
+      {(frozen || revisions.length > 0) && (
+        <RevisionsPanel
+          taskListId={task.id}
+          frozen={frozen}
+          currentRev={currentRev}
+          revisions={revisions.map((r) => ({ ...r, snapshot: null }))}
+          diff={revisionDiff.slice(0, 200)}
+          diffLabel={revisionDiffLabel}
+          canManage={technical && canValidateTaskList}
+        />
+      )}
       {/* ---------- FACTORY VALIDATION HISTORY ----------
           Focused, timeline-oriented view of just the validation flow
           (submit → review → validate → revise → approve). The full
@@ -1744,6 +1714,7 @@ export default async function TaskListDetailPage({
       </div>
 
       </OpsPanel>
+
       </OpsTabs>
         </div>
 
@@ -1800,6 +1771,37 @@ export default async function TaskListDetailPage({
                 </>
               )}
             </div>
+          </section>
+
+          {/* Reference parity: the ink Next-step card lives IN the rail,
+              not full-width above the tabs. Same markup, same actions. */}
+          <section className="ops-card next-wrap">
+      <div className="nextstep">
+        <div className="lead">
+          <span className="micro">Next step</span>
+          <span className="big">Move this task list to its next stage</span>
+        </div>
+        <div className="acts">
+          <TaskListWorkflowActions
+            taskListId={task.id}
+            status={status}
+            isTechnical={technical}
+            canValidate={canValidateTaskList}
+            canReject={canRejectTaskList}
+            revisionThread={revisionThread}
+            missingMappingCount={missingMappingCount}
+            tiltCheckpointPending={tiltCheckpointPending}
+            clientName={clientName}
+            taskNumber={task.number ?? null}
+          />
+        </div>
+        {task.submitted_at && (
+          <div className="stamp">
+            Submitted for validation{" "}
+            <b>{new Date(task.submitted_at).toLocaleString()}</b>
+          </div>
+        )}
+      </div>
           </section>
 
           <section className="ops-card">

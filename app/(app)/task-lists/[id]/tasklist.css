@@ -2408,3 +2408,64 @@
 .tl-detail.ops .tl-secnav {
   display: none !important;
 }
+
+/* ---- 9. RAIL PARITY --------------------------------------------------
+   The ink Next-step card now lives in the rail. Re-fit the full-width bar
+   markup into a 320 px column without touching its JSX. */
+.tl-detail.ops .ops-aside .next-wrap {
+  padding: 0;
+  border: 0;
+  box-shadow: none;
+  background: transparent;
+}
+.tl-detail.ops .ops-aside .nextstep {
+  display: block;
+  background: var(--ink-0);
+  border: 1px solid var(--ink-0);
+  border-radius: 0;
+  color: #eceaf2;
+  padding: 14px 16px;
+  margin: 0;
+}
+.tl-detail.ops .ops-aside .nextstep .lead {
+  display: block;
+  font-size: 14px;
+  font-weight: 700;
+  color: #fff;
+  margin: 0 0 12px;
+}
+.tl-detail.ops .ops-aside .nextstep .lead .micro {
+  display: block;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  color: var(--mute-2);
+  margin-bottom: 3px;
+}
+/* Actions stack full-width, primary first — the reference's rail card. */
+.tl-detail.ops .ops-aside .nextstep .acts {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+}
+.tl-detail.ops .ops-aside .nextstep .acts > * {
+  width: 100%;
+}
+.tl-detail.ops .ops-aside .nextstep button,
+.tl-detail.ops .ops-aside .nextstep .btn {
+  width: 100%;
+  justify-content: center;
+  border-radius: 0;
+}
+.tl-detail.ops .ops-aside .nextstep .stamp {
+  font-size: 10.5px;
+  color: var(--mute-1);
+  margin-top: 10px;
+  font-variant-numeric: tabular-nums;
+}
+.tl-detail.ops .ops-aside .nextstep .hint {
+  font-size: 10.5px;
+  color: var(--mute-1);
+  margin-top: 4px;
+}
