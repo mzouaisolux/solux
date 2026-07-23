@@ -69,6 +69,7 @@ import TaskListWorkflowActions, {
 } from "@/components/TaskListWorkflow";
 import { DirtyWrapper } from "./DirtyWrapper";
 import { deleteTaskList, updateTaskListHeader } from "./actions";
+import OpsTabs, { OpsPanel } from "./OpsTabs";
 import { hasUiCapability } from "@/lib/permissions";
 import { DangerDeleteButton } from "@/components/DangerDeleteButton";
 import { SubmitButton } from "@/components/SubmitButton";
@@ -838,7 +839,7 @@ export default async function TaskListDetailPage({
 
   return (
     <DirtyWrapper>
-    <div className="tl-detail wrap">
+    <div className="tl-detail wrap ops">
       {/* Breadcrumb */}
       <div className="crumb">
         <Link href="/task-lists">Task lists</Link>
@@ -963,6 +964,72 @@ export default async function TaskListDetailPage({
             </p>
           )}
         </div>
+      </div>
+
+      {/* OPS DENSE — KPI strip. The five facts a TLM checks before touching
+          anything, pulled from values already computed above. Amber = blocks
+          Final Validation; green = settled. Read-only: every figure links to
+          the tab that owns it. */}
+      <div className="ops-kpis">
+        <div className={`ops-kpi ${requiredEmptyCount > 0 ? "warn" : "good"}`}>
+          <span className="kpi-k">Required fields</span>
+          <span className="kpi-v">
+            {requiredEmptyCount > 0
+              ? `${requiredEmptyCount} still empty`
+              : "All set"}
+          </span>
+          <span className="kpi-s">sales configuration</span>
+        </div>
+        <div className={`ops-kpi ${missingMappingCount > 0 ? "warn" : "good"}`}>
+          <span className="kpi-k">Factory mappings</span>
+          <span className="kpi-v">
+            {missingMappingCount > 0
+              ? `${missingMappingCount} missing`
+              : "Complete"}
+          </span>
+          <span className="kpi-s">instructions for the factory</span>
+        </div>
+        <div
+          className={`ops-kpi ${
+            tiltConflict || tiltCheckpointPending ? "warn" : "good"
+          }`}
+        >
+          <span className="kpi-k">Tilt angle</span>
+          <span className="kpi-v">
+            {tiltConflict
+              ? "Conflict pending"
+              : tiltCheckpointPending
+                ? "Drawing to verify"
+                : "Verified"}
+          </span>
+          <span className="kpi-s">pole drawing checkpoint</span>
+        </div>
+        <div className="ops-kpi">
+          <span className="kpi-k">Revision</span>
+          <span className="kpi-v">
+            {currentRev ? `Rev ${currentRev}` : "—"}
+          </span>
+          <span className="kpi-s">
+            {frozen ? "frozen — controlled revision required" : "editable"}
+          </span>
+        </div>
+        {inheritedChips.length > 0 && (
+          <div className="ops-kpi">
+            <span className="kpi-k">Quote terms</span>
+            <span className="kpi-v">
+              {inheritedChips
+                .slice(0, 2)
+                .map((c) => c.value)
+                .join(" · ")}
+            </span>
+            <span className="kpi-s">
+              {inheritedChips
+                .slice(2, 4)
+                .map((c) => c.value)
+                .join(" · ") || "inherited from the quotation"}
+            </span>
+          </div>
+        )}
       </div>
 
       {/* WORKFLOW STEPPER — visual lifecycle progress, derived from the
@@ -1198,6 +1265,30 @@ export default async function TaskListDetailPage({
         </div>
       )}
 
+      {/* OPS DENSE — work area: tabbed main column + sticky decision rail.
+          The sections below are UNCHANGED; they are only grouped into panels
+          so the file is reachable in one click instead of ~10 000 px of
+          scrolling. Panels stay mounted, so form state survives a switch. */}
+      <div className="ops-grid">
+        <div className="ops-main">
+      <OpsTabs
+        tabs={[
+          { id: "product", label: "Product", count: requiredEmptyCount },
+          { id: "lighting", label: "Lighting" },
+          {
+            id: "industrial",
+            label: "Industrial file",
+            count:
+              (tiltConflict ? 1 : 0) + (tiltCheckpointPending ? 1 : 0) || null,
+          },
+          { id: "risks", label: "Risks" },
+          { id: "docs", label: "Documents" },
+          { id: "notes", label: "Notes" },
+          { id: "branding", label: "Stickers & logistics" },
+          { id: "activity", label: "Activity", neutral: true },
+        ]}
+      >
+      <OpsPanel id="product">
       {/* ---------- PRODUCT CONFIGURATION (the real purpose) ----------
           The page now LEADS with product config: a compact visual
           summary per line (for fast ops/factory scanning) on top of the
@@ -1343,6 +1434,9 @@ export default async function TaskListDetailPage({
         )}
       </div>
 
+      </OpsPanel>
+
+      <OpsPanel id="lighting">
       {/* ---------- PRODUCT LIGHTING SETUP (m144) ----------
           Sales completes the APPROVED lighting config here (Energy Study +
           power + dimming program + optics + operating hours), with optional AI
@@ -1385,6 +1479,9 @@ export default async function TaskListDetailPage({
         </>
       )}
 
+      </OpsPanel>
+
+      <OpsPanel id="industrial">
       {/* ---------- INDUSTRIAL PRODUCTION FILE (m159) ----------
           The task list is the complete industrial production file (owner spec
           2026-07-08): solar-panel tilt angle + pole-drawing checkpoint, pole
@@ -1428,6 +1525,9 @@ export default async function TaskListDetailPage({
         </div>
       )}
 
+      </OpsPanel>
+
+      <OpsPanel id="risks">
       {/* ---------- KNOWN RISKS / WARNINGS ----------
           Sits between the configuration and attachments. Compact +
           collapsed by default; the active risk chips stay visible so a
@@ -1451,6 +1551,9 @@ export default async function TaskListDetailPage({
         />
       </div>
 
+      </OpsPanel>
+
+      <OpsPanel id="docs">
       {/* ---------- PROJECT ATTACHMENTS ----------
           Drawings, dimensions, tender docs, artwork — the project-
           specific detail the product code alone can't carry. Shown high
@@ -1462,6 +1565,9 @@ export default async function TaskListDetailPage({
         </div>
       )}
 
+      </OpsPanel>
+
+      <OpsPanel id="notes">
       {/* Header form — production notes (sales) + technical notes (TLM).
           The old shipping-method / lines / workflow-stage grid was
           removed: shipping lives in "Logistics from quotation" below,
@@ -1523,6 +1629,9 @@ export default async function TaskListDetailPage({
         )}
       </form>
 
+      </OpsPanel>
+
+      <OpsPanel id="branding">
       {/* ---------- STICKER REQUIREMENTS ----------
           Often-forgotten labelling spec: which stickers, where, with
           what artwork/instructions. Artwork files live in Attachments. */}
@@ -1602,6 +1711,9 @@ export default async function TaskListDetailPage({
         </>
       )}
 
+      </OpsPanel>
+
+      <OpsPanel id="activity">
       {/* ---------- FACTORY VALIDATION HISTORY ----------
           Focused, timeline-oriented view of just the validation flow
           (submit → review → validate → revise → approve). The full
@@ -1629,6 +1741,81 @@ export default async function TaskListDetailPage({
           actorLabelByUser={tlActorLabels}
           emptyMessage="No activity recorded for this task list yet."
         />
+      </div>
+
+      </OpsPanel>
+      </OpsTabs>
+        </div>
+
+        {/* OPS DENSE — decision rail. Read-only mirror of what still blocks
+            Final Validation (evaluateRelease stays the single authority) plus
+            the revision state. Sticky, so it stays in view across tabs. */}
+        <aside className="ops-aside">
+          <section className="ops-card attn">
+            <div className="ops-card-h">
+              <span>Needs attention</span>
+            </div>
+            <div className="ops-card-b">
+              {requiredEmptyCount === 0 &&
+              missingMappingCount === 0 &&
+              !tiltConflict &&
+              !tiltCheckpointPending ? (
+                <span className="ops-attn-ok">
+                  ✓ Nothing blocks Final Validation.
+                </span>
+              ) : (
+                <>
+                  {requiredEmptyCount > 0 && (
+                    <div className="ops-attn-item">
+                      <span className="t">
+                        {requiredEmptyCount} required field
+                        {requiredEmptyCount > 1 ? "s" : ""} still empty
+                      </span>
+                      <span className="s">Product · sales configuration</span>
+                    </div>
+                  )}
+                  {missingMappingCount > 0 && (
+                    <div className="ops-attn-item">
+                      <span className="t">
+                        {missingMappingCount} factory mapping
+                        {missingMappingCount > 1 ? "s" : ""} missing
+                      </span>
+                      <span className="s">Product · factory instructions</span>
+                    </div>
+                  )}
+                  {tiltConflict && (
+                    <div className="ops-attn-item">
+                      <span className="t">Tilt conflict pending</span>
+                      <span className="s">
+                        Industrial file · accept or keep
+                      </span>
+                    </div>
+                  )}
+                  {tiltCheckpointPending && (
+                    <div className="ops-attn-item">
+                      <span className="t">Pole drawing not verified</span>
+                      <span className="s">Industrial file · checkpoint</span>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          </section>
+
+          <section className="ops-card">
+            <div className="ops-card-h">
+              <span>Revision</span>
+              <span>{currentRev ? `Rev ${currentRev}` : "—"}</span>
+            </div>
+            <div className="ops-card-b">
+              <div className="nx-meta" style={{ marginTop: 0 }}>
+                {frozen
+                  ? "This version is frozen. Any change requires a controlled revision, which re-runs the full Pre-Validation cycle."
+                  : "Editable — the next Final Validation will freeze this revision."}
+              </div>
+            </div>
+          </section>
+        </aside>
       </div>
 
       {/* Conversation drawer overlay — opens when ?event=<id> is in

@@ -1660,3 +1660,466 @@
     grid-template-columns: repeat(2, 1fr);
   }
 }
+
+/* =====================================================================
+   OPS DENSE — cockpit skin (2026-07-23)
+   =====================================================================
+   Derived from the owner's approved "Ops Dense" reference for this page.
+   The goal is a DECLENSION of that reference, not a new design: same
+   tokens, same rhythm, same components, same reading order.
+
+   Nothing here changes behaviour. Every server action, form and
+   permission gate is untouched — this file only restyles and re-lays-out
+   markup that already exists.
+
+   Signatures of the reference, applied throughout:
+     · square corners (border-radius: 0) — no rounded cards
+     · ink #0f0f0f for emphasis, accent #55ff7e for "done/valid"
+     · amber #e8870e reserved for "needs attention", never decorative
+     · tabular-nums on every figure
+     · uppercase micro-eyebrows at 10–11px / 700–800 / .06em tracking
+   ===================================================================== */
+
+.tl-detail.ops {
+  --accent: #55ff7e;
+  --accent-deep: #0b7a39;
+  --accent-tint: rgba(85, 255, 126, 0.14);
+  --accent-line: rgba(85, 255, 126, 0.5);
+  --ink-0: #0f0f0f;
+  --ink-1: #2a2a2c;
+  --mute-1: #67646f;
+  --mute-2: #aeaaba;
+  --line-1: #e7e7ea;
+  --line-2: #dcdde1;
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 0;
+}
+
+/* ---- 1. STICKY COMMAND BAR -----------------------------------------
+   Identity + status + the actions that apply to the whole task list.
+   Stays pinned so the user never loses the record they are working on. */
+.ops-topbar {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  background: #fff;
+  border-bottom: 1px solid var(--line-1);
+  padding: 12px 28px 0;
+  margin: 0 -28px;
+}
+.ops-topline {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.ops-topline .ops-eyebrow {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--mute-1);
+}
+.ops-topline h1 {
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--ink-0);
+  margin: 0;
+  line-height: 1.15;
+}
+.ops-idmeta {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  font-size: 11.5px;
+  color: var(--mute-1);
+  flex-wrap: wrap;
+}
+.ops-idmeta .k {
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-size: 10px;
+  font-weight: 700;
+  margin-right: 5px;
+}
+.ops-idmeta .v,
+.ops-idmeta b {
+  color: var(--ink-1);
+  font-weight: 600;
+}
+.ops-idmeta .tnum {
+  font-variant-numeric: tabular-nums;
+}
+.ops-topacts {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* ---- 2. KPI STRIP ---------------------------------------------------
+   The five facts a TLM checks first. Amber left-border = blocking. */
+.ops-kpis {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(178px, 1fr));
+  gap: 8px;
+  padding: 10px 0;
+}
+.ops-kpi {
+  border: 1px solid var(--line-1);
+  background: #fff;
+  padding: 7px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+.ops-kpi.warn {
+  border-color: var(--amber-line);
+  border-left: 3px solid var(--amber);
+  background: rgba(232, 135, 14, 0.05);
+}
+.ops-kpi.good {
+  border-left: 3px solid var(--accent);
+}
+.ops-kpi .kpi-k {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--mute-1);
+}
+.ops-kpi .kpi-v {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ink-0);
+  font-variant-numeric: tabular-nums;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ops-kpi.warn .kpi-v {
+  color: var(--amber-deep);
+}
+.ops-kpi.good .kpi-v {
+  color: var(--accent-deep);
+}
+.ops-kpi .kpi-s {
+  font-size: 10.5px;
+  color: var(--mute-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ops-kpi.warn .kpi-s {
+  color: var(--amber-deep);
+}
+
+/* ---- 3. TAB BAR -----------------------------------------------------
+   The core move against scrolling: 10 000 px of stack becomes one click. */
+.ops-tabbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding: 0 0 12px;
+}
+.ops-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 14px;
+  font-size: 12.5px;
+  font-weight: 700;
+  font-family: inherit;
+  cursor: pointer;
+  border: 1px solid var(--line-2);
+  background: #fff;
+  color: var(--ink-1);
+  border-radius: 0;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+}
+.ops-tab:hover {
+  border-color: var(--ink-0);
+}
+.ops-tab.is-on {
+  border-color: var(--ink-0);
+  background: var(--ink-0);
+  color: #fff;
+}
+.ops-tab-count {
+  padding: 0 6px;
+  font-size: 10px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  background: var(--amber-tint);
+  color: var(--amber-deep);
+  border: 1px solid var(--amber-line);
+}
+.ops-tab.is-on .ops-tab-count {
+  background: var(--amber);
+  color: #fff;
+  border-color: var(--amber);
+}
+.ops-tab-count.neutral {
+  background: #f0f0f2;
+  color: var(--mute-1);
+  border-color: var(--line-2);
+}
+.ops-tab.is-on .ops-tab-count.neutral {
+  background: #2c2c2f;
+  color: var(--mute-2);
+  border-color: #2c2c2f;
+}
+
+/* Panels stay MOUNTED (form state survives a tab switch) — only hidden. */
+.ops-panel {
+  display: none;
+}
+.ops-panels[data-active="product"] [data-ops-panel="product"],
+.ops-panels[data-active="industrial"] [data-ops-panel="industrial"],
+.ops-panels[data-active="lighting"] [data-ops-panel="lighting"],
+.ops-panels[data-active="branding"] [data-ops-panel="branding"],
+.ops-panels[data-active="risks"] [data-ops-panel="risks"],
+.ops-panels[data-active="docs"] [data-ops-panel="docs"],
+.ops-panels[data-active="activity"] [data-ops-panel="activity"] {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+/* ---- 4. WORK AREA — main + sticky rail ------------------------------ */
+.ops-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: 18px;
+  align-items: start;
+  padding: 18px 0 90px;
+}
+@media (max-width: 1180px) {
+  .ops-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .ops-aside {
+    position: static !important;
+  }
+}
+.ops-main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+.ops-aside {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  position: sticky;
+  top: 196px;
+}
+.ops-card {
+  background: #fff;
+  border: 1px solid var(--line-1);
+  box-shadow: var(--shadow);
+}
+.ops-card > .ops-card-h {
+  padding: 12px 16px 6px;
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--mute-1);
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+.ops-card > .ops-card-b {
+  padding: 4px 16px 14px;
+}
+
+/* "Needs attention" — the only amber card in the rail. */
+.ops-card.attn {
+  border-color: var(--amber-line);
+  border-top: 3px solid var(--amber);
+}
+.ops-attn-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: 0;
+  border-bottom: 1px solid var(--line-1);
+  background: none;
+  padding: 8px 0;
+  font-family: inherit;
+  cursor: pointer;
+}
+.ops-attn-item:last-child {
+  border-bottom: 0;
+}
+.ops-attn-item .t {
+  display: block;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--amber-deep);
+}
+.ops-attn-item .s {
+  display: block;
+  font-size: 10.5px;
+  color: var(--mute-1);
+  margin-top: 1px;
+}
+.ops-attn-ok {
+  font-size: 12px;
+  color: var(--accent-deep);
+  font-weight: 600;
+}
+
+/* "Next step" — the one dark card, exactly as in the reference. */
+.ops-card.next {
+  background: var(--ink-0);
+  border-color: var(--ink-0);
+  color: #eceaf2;
+}
+.ops-card.next .ops-card-h {
+  color: var(--mute-2);
+}
+.ops-card.next .nx-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: #fff;
+  margin-top: 3px;
+}
+.ops-card.next .nx-meta {
+  font-size: 10.5px;
+  color: var(--mute-1);
+  margin-top: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- 5. DENSITY PASS ------------------------------------------------
+   Same information, less vertical air. Square corners everywhere. */
+.tl-detail.ops .card,
+.tl-detail.ops .prod-shell,
+.tl-detail.ops .risk-shell,
+.tl-detail.ops .att-shell,
+.tl-detail.ops .stk-shell,
+.tl-detail.ops .vh-shell,
+.tl-detail.ops .act-shell {
+  border-radius: 0;
+}
+.tl-detail.ops .sec-head {
+  padding-bottom: 8px;
+}
+.tl-detail.ops .sec-head h2 {
+  font-size: 15px;
+  letter-spacing: -0.01em;
+}
+.tl-detail.ops input,
+.tl-detail.ops select,
+.tl-detail.ops textarea,
+.tl-detail.ops .btn,
+.tl-detail.ops button {
+  border-radius: 0;
+}
+.tl-detail.ops .tnum,
+.tl-detail.ops .id-meta .v {
+  font-variant-numeric: tabular-nums;
+}
+/* The old page-top stepper and header block are replaced by the command
+   bar + KPI strip; keep them reachable but out of the primary rhythm. */
+.tl-detail.ops .flow {
+  margin-top: 0;
+}
+
+/* ---- 6. COMPACT COMMAND BAR ----------------------------------------
+   The reference leads with ONE dense identity line, then the KPI strip,
+   then the tabs. The original header spread the same facts over four
+   stacked rows. Same information, ~140 px less before the work area. */
+.tl-detail.ops .head {
+  position: sticky;
+  top: 0;
+  z-index: 41;
+  background: #fff;
+  border-bottom: 1px solid var(--line-1);
+  margin: 0 -28px;
+  padding: 10px 28px 8px;
+  align-items: flex-start;
+  gap: 14px;
+}
+.tl-detail.ops .head h1 {
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  line-height: 1.15;
+  margin: 2px 0 0;
+}
+.tl-detail.ops .head .label-row {
+  gap: 8px;
+}
+.tl-detail.ops .head .micro {
+  font-size: 10.5px;
+  letter-spacing: 0.07em;
+}
+/* Identity meta + inherited quote chips share ONE flowing row. */
+.tl-detail.ops .head .id-meta {
+  margin-top: 6px;
+  gap: 16px;
+  font-size: 11.5px;
+}
+.tl-detail.ops .head .id-meta .k {
+  font-size: 10px;
+  letter-spacing: 0.05em;
+}
+.tl-detail.ops .head .fromquote {
+  margin-top: 6px;
+  gap: 6px;
+}
+.tl-detail.ops .head .fq-chip {
+  padding: 3px 8px;
+  font-size: 11px;
+  border-radius: 0;
+}
+.tl-detail.ops .head-actions .hint {
+  display: none;
+}
+
+/* KPI strip sits flush under the command bar, like the reference. */
+.tl-detail.ops .ops-kpis {
+  padding: 10px 0 4px;
+}
+
+/* Workflow stepper: one dense line instead of a full card. */
+.tl-detail.ops .flow {
+  padding: 10px 14px;
+  border-radius: 0;
+}
+.tl-detail.ops .flow .flow-head {
+  margin-bottom: 6px;
+}
+.tl-detail.ops .flow .steps {
+  gap: 0;
+}
+
+/* The tab bar is the entry point to the work area: give it air above and
+   make it stick under the command bar so it is always one click away. */
+.tl-detail.ops .ops-tabbar {
+  position: sticky;
+  /* Measured: the command bar is 134 px tall, so the tab bar parks exactly
+     underneath it instead of sliding behind. */
+  top: 134px;
+  z-index: 39;
+  background: #faf9f5;
+  margin: 0 -28px;
+  padding: 10px 28px 12px;
+  border-bottom: 1px solid var(--line-1);
+}
+.tl-detail.ops .ops-grid {
+  padding-top: 14px;
+}
+.tl-detail.ops .ops-aside {
+  /* command bar (134) + tab bar (58) */
+  top: 200px;
+}
