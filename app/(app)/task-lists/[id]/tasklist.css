@@ -2700,3 +2700,47 @@
   border-left: 3px solid var(--amber);
   background: rgba(232, 135, 14, 0.05);
 }
+
+/* ---- 12. SAVE LINE AT THE TOP -----------------------------------------
+   The reference keeps the line's primary action in view: caption on the
+   left, ink-weight button on the right, both on the panel's header row. */
+.tl-detail .cfg-line .cfg-save {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-left: auto;
+  padding-left: 16px;
+}
+.tl-detail .cfg-line .cfg-save-note {
+  font-size: 10.5px;
+  color: var(--mute-1);
+  text-align: right;
+  max-width: 210px;
+  line-height: 1.3;
+}
+.tl-detail.ops .cfg-line .cfg-save button {
+  border-radius: 0;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 7px 14px;
+  white-space: nowrap;
+}
+/* Quantity stops being the row's right edge, so it no longer needs to hug it. */
+.tl-detail.ops .cfg-line .qwrap {
+  text-align: left;
+  padding-left: 24px;
+}
+@media (max-width: 900px) {
+  .tl-detail .cfg-line {
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+  .tl-detail .cfg-line .cfg-save {
+    margin-left: 0;
+    padding-left: 0;
+    width: 100%;
+    justify-content: space-between;
+  }
+}
