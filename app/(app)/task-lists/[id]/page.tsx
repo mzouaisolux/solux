@@ -14,7 +14,10 @@ import { StickerRequirementsEditor } from "@/components/documents/StickerRequire
 import { RiskFlagsEditor } from "@/components/documents/RiskFlagsEditor";
 import { IndustrialFileEditor } from "@/components/documents/IndustrialFileEditor";
 import {
-  PreValidationBoard,
+  PreValidationBlockers,
+  PreValidationWarnings,
+  PendingIssuesCard,
+  AiReviewCard,
   type BoardAiField,
 } from "@/components/PreValidationBoard";
 import { RevisionsPanel } from "@/components/RevisionsPanel";
@@ -1058,35 +1061,12 @@ export default async function TaskListDetailPage({
         </div>
       </div>
 
-      {/* m178 — PRE-VALIDATION BOARD: the dashboard of the collaborative
-          phase. Aggregates the SAME signals the server-side release gate
-          enforces (no second source of truth) + the departments' own pending
-          items. Visible to every role; edit affordances follow the role. */}
-      {showPreValidationBoard && (
-        <PreValidationBoard
-          taskListId={task.id}
-          items={actionItems}
-          users={boardUsers}
-          signals={{
-            requiredEmptyCount,
-            missingMappingCount,
-            tiltCheckpointPending,
-            tiltConflictPending: tiltConflict,
-            hasOpenRevision: !!revisionThread.request && !revisionThread.request.resolved,
-            lineCount: (lines ?? []).length,
-            missingRequiredProgramming,
-          }}
-          aiFields={boardAiFields}
-          warnings={boardWarnings}
-          canCreate={m178Live && (technical || salesCanEdit || status === "under_validation")}
-          canBlock={technical}
-          isTechnical={technical}
-          userId={currentUserId ?? null}
-          m178Live={m178Live}
-          documentId={task.quotation_id ?? null}
-          canReviewAi={technical || salesCanEdit}
-        />
-      )}
+      {/* m178 — PRE-VALIDATION BOARD: no longer a full-width block here. Its
+          four parts now live in the decision rail below (Ops Dense reference
+          order: Needs attention · Next step · Pending issues · AI-extracted
+          values), which is where the reference puts them. Same components,
+          same props, same server data — see the <aside className="ops-aside">
+          at the bottom of this file. */}
 
 
       {/* RELEASE READINESS (#7/#8) — kept for the Final Validation stage; the
@@ -1722,54 +1702,34 @@ export default async function TaskListDetailPage({
             Final Validation (evaluateRelease stays the single authority) plus
             the revision state. Sticky, so it stays in view across tabs. */}
         <aside className="ops-aside">
+          {/* 1 — NEEDS ATTENTION. Was a hand-rolled list that re-derived four
+              of the gates; it now renders PreValidationBlockers, the same
+              component the board used, so the rail mirrors computeBlockers in
+              full (blocking action items, open revision, empty task list and
+              missing programming included) instead of a subset. It still only
+              MIRRORS: evaluateRelease remains the sole authority that gates.
+              The non-blocking warnings are folded in underneath — the
+              reference rail has no home for them and they must not be
+              silently dropped. */}
           <section className="ops-card attn">
             <div className="ops-card-h">
               <span>Needs attention</span>
             </div>
             <div className="ops-card-b">
-              {requiredEmptyCount === 0 &&
-              missingMappingCount === 0 &&
-              !tiltConflict &&
-              !tiltCheckpointPending ? (
-                <span className="ops-attn-ok">
-                  ✓ Nothing blocks Final Validation.
-                </span>
-              ) : (
-                <>
-                  {requiredEmptyCount > 0 && (
-                    <div className="ops-attn-item">
-                      <span className="t">
-                        {requiredEmptyCount} required field
-                        {requiredEmptyCount > 1 ? "s" : ""} still empty
-                      </span>
-                      <span className="s">Product · sales configuration</span>
-                    </div>
-                  )}
-                  {missingMappingCount > 0 && (
-                    <div className="ops-attn-item">
-                      <span className="t">
-                        {missingMappingCount} factory mapping
-                        {missingMappingCount > 1 ? "s" : ""} missing
-                      </span>
-                      <span className="s">Product · factory instructions</span>
-                    </div>
-                  )}
-                  {tiltConflict && (
-                    <div className="ops-attn-item">
-                      <span className="t">Tilt conflict pending</span>
-                      <span className="s">
-                        Industrial file · accept or keep
-                      </span>
-                    </div>
-                  )}
-                  {tiltCheckpointPending && (
-                    <div className="ops-attn-item">
-                      <span className="t">Pole drawing not verified</span>
-                      <span className="s">Industrial file · checkpoint</span>
-                    </div>
-                  )}
-                </>
-              )}
+              <PreValidationBlockers
+                signals={{
+                  requiredEmptyCount,
+                  missingMappingCount,
+                  tiltCheckpointPending,
+                  tiltConflictPending: tiltConflict,
+                  hasOpenRevision:
+                    !!revisionThread.request && !revisionThread.request.resolved,
+                  lineCount: (lines ?? []).length,
+                  missingRequiredProgramming,
+                }}
+                items={actionItems}
+              />
+              <PreValidationWarnings warnings={boardWarnings} />
             </div>
           </section>
 
@@ -1803,6 +1763,50 @@ export default async function TaskListDetailPage({
         )}
       </div>
           </section>
+
+          {/* 3 — PENDING ISSUES. Same guard as the old full-width board
+              (`showPreValidationBoard`): outside the collaborative phase the
+              server does not even fetch the action items, and a frozen list
+              must expose no write control. */}
+          {showPreValidationBoard && (
+            <section className="ops-card">
+              <div className="ops-card-h">
+                <span>Pending issues</span>
+              </div>
+              <div className="ops-card-b">
+                <PendingIssuesCard
+                  taskListId={task.id}
+                  items={actionItems}
+                  users={boardUsers}
+                  canCreate={
+                    m178Live &&
+                    (technical || salesCanEdit || status === "under_validation")
+                  }
+                  canBlock={technical}
+                  isTechnical={technical}
+                  userId={currentUserId ?? null}
+                  m178Live={m178Live}
+                />
+              </div>
+            </section>
+          )}
+
+          {/* 4 — AI-EXTRACTED VALUES. AiReviewCard returns null when there is
+              nothing extracted, so the card header is guarded too. */}
+          {showPreValidationBoard && boardAiFields.length > 0 && (
+            <section className="ops-card">
+              <div className="ops-card-h">
+                <span>AI-extracted values</span>
+              </div>
+              <div className="ops-card-b">
+                <AiReviewCard
+                  aiFields={boardAiFields}
+                  documentId={task.quotation_id ?? null}
+                  canReviewAi={technical || salesCanEdit}
+                />
+              </div>
+            </section>
+          )}
 
           <section className="ops-card">
             <div className="ops-card-h">
