@@ -1,0 +1,31 @@
+FAMILY,MODEL,FIELD_KEY,LABEL,VALUE_KIND,UNIT,VALUE,SCOPE,SORT
+Colarsun,CS-20,nominal_flux,Nominal flux,number,lm,3920,common,10
+Colarsun,CS-20,nominal_power,Nominal power,number,W,20,common,20
+Colarsun,CS-20,efficiency,Efficiency,number,lm/W,196,common,30
+Colarsun,CS-20,led,LED,text,,PHILIPS Luxeon 30-30,common,40
+Colarsun,CS-20,led_lifetime,LED lifetime,text,,Over 100.000 Hrs - LM80,common,50
+Colarsun,CS-20,optics,Optics,text,,TI / TII / TIII / T-IV / T-V / T10 / T35 I 2300K to 6000K,common,60
+Colarsun,CS-20,battery_technology,Battery technology,text,,Lithium Iron Phosphate LIFEPO4,common,90
+Colarsun,CS-20,battery_capacity,Battery capacity,number,Wh,460,common,100
+Colarsun,CS-20,autonomy,Autonomy,text,,> 24 hours at full charge,common,110
+Colarsun,CS-20,charging_time,Charging time,text,,5/6,common,120
+Colarsun,CS-20,battery_lifespan,Battery lifespan,text,,Over 5000 CYCLES @ 50% DOD,common,130
+Colarsun,CS-20,working_temp,Working temperature,text,,-10°c to 70°c (optional -40°c TO 70°c ),common,140
+Colarsun,CS-20,solar_panel,Solar panel,text,,145W,common,150
+Colarsun,CS-20,cells_type,Solar cell type,text,,TOPCON Monocrystaline Panel Carton size 1330 x 400 x 360 Grade A,common,170
+Colarsun,CS-20,sensor,Sensor,text,,Microwave 360° Motion Sensor,common,190
+Colarsun,CS-20,controller,Controller,text,,MPPT Smart Controller,common,195
+Colarsun,CS-20,cabling,Cabling,text,,Waterproof Connector,common,196
+Colarsun,CS-20,protection,Protection,text,,Battery Management System (BMS),common,197
+Colarsun,CS-20,material,Material,text,,Aluminium,common,200
+Colarsun,CS-20,installation,Installation,text,,- Plug & Play,common,210
+Colarsun,CS-20,pole_mounting,Pole mounting,text,,76mm to 100mm,common,215
+Colarsun,CS-20,certifications,Certifications,text,,IEC / TUV / EMC / LM-79-08 / LM-80 / IK8 / IP68 / CE / ULOR,common,240
+Colarsun,CS-20,warranty_pv,PV performance warranty,number,years,25,common,250
+Colarsun,CS-20,warranty_luminaire,Luminaire warranty,number,years,5,common,260
+Colarsun,CS-20,light_height,Light height,text,,From 3 to 4 meters,model,300
+Colarsun,CS-20,carton_size,Carton size,text,mm,1330 x 400 x 360,model,320
+Colarsun,CS-20,net_weight,Net weight,number,kg,23.6,model,330
+Colarsun,CS-20,gross_weight,Gross weight,number,kg,24.7,model,335
+Colarsun,CS-20,warranty_battery,Battery & controller warranty,number,years,5,model,340
+Colarsun,CS-20,product_code,Product code,text,,CS-20,model,350

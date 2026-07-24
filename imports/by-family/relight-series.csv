@@ -1,0 +1,32 @@
+FAMILY,MODEL,FIELD_KEY,LABEL,VALUE_KIND,UNIT,VALUE,SCOPE,SORT
+ReLight Series,RL-DUAL,nominal_flux,Nominal flux,number,lm,19600,common,10
+ReLight Series,RL-DUAL,nominal_power,Nominal power,number,W,100,common,20
+ReLight Series,RL-DUAL,efficiency,Efficiency,number,lm/W,196,common,30
+ReLight Series,RL-DUAL,led,LED,text,,PHILIPS Luxeon 30-30,common,40
+ReLight Series,RL-DUAL,led_lifetime,LED lifetime,text,,Plus de 100.000 Hrs - LM80,common,50
+ReLight Series,RL-DUAL,optics,Optics,text,,TII-S / T3-M/ T-V / 2300 à 6500K,common,60
+ReLight Series,RL-DUAL,battery_technology,Battery technology,text,,Lithium Iron Phosphate LIFEPO4,common,90
+ReLight Series,RL-DUAL,battery_capacity,Battery capacity,number,Wh,1720,common,100
+ReLight Series,RL-DUAL,autonomy,Autonomy,text,,> 24 hours at full charge,common,110
+ReLight Series,RL-DUAL,charging_time,Charging time,text,,5/6,common,120
+ReLight Series,RL-DUAL,battery_lifespan,Battery lifespan,text,,Over 5000 CYCLES @ 50% DOD,common,130
+ReLight Series,RL-DUAL,working_temp,Working temperature,text,,-10°C à 70°C (optional -40°C à 70°C),common,140
+ReLight Series,RL-DUAL,solar_panel,Solar panel,text,,2*200W / 18V,common,150
+ReLight Series,RL-DUAL,cells_type,Solar cell type,text,,Monocrystalline Topcon Grade A,common,170
+ReLight Series,RL-DUAL,sensor,Sensor,text,,Microwaves 360° motion sensor,common,190
+ReLight Series,RL-DUAL,controller,Controller,text,,MPPT Smart Controller (SOLUX BRIDGE en option),common,195
+ReLight Series,RL-DUAL,cabling,Cabling,text,,Waterproof connectors -Plug and,common,196
+ReLight Series,RL-DUAL,protection,Protection,text,,Protection Battery Management,common,197
+ReLight Series,RL-DUAL,material,Material,text,,Aluminium,common,200
+ReLight Series,RL-DUAL,installation,Installation,text,,ReLight 30min,common,210
+ReLight Series,RL-DUAL,pole_mounting,Pole mounting,text,,76 mm to 114 mm,common,215
+ReLight Series,RL-DUAL,certifications,Certifications,text,,IEC / TUV / EMC / LM-79 / LM-80 / IK8 / IP65 / CE / ULOR / LVD / UKCA,common,240
+ReLight Series,RL-DUAL,warranty_pv,PV performance warranty,number,years,25,common,250
+ReLight Series,RL-DUAL,warranty_luminaire,Luminaire warranty,number,years,5,common,260
+ReLight Series,RL-DUAL,light_height,Light height,text,,From 8 to 10 meters,model,300
+ReLight Series,RL-DUAL,product_dimensions,Product dimensions,text,mm,2 *1260 x 880 x 271,model,310
+ReLight Series,RL-DUAL,carton_size,Carton size,text,mm,1320 x 945 x 245 60904,model,320
+ReLight Series,RL-DUAL,net_weight,Net weight,number,kg,42,model,330
+ReLight Series,RL-DUAL,gross_weight,Gross weight,number,kg,43,model,335
+ReLight Series,RL-DUAL,warranty_battery,Battery & controller warranty,number,years,5,model,340
+ReLight Series,RL-DUAL,product_code,Product code,text,,RL-DUAL,model,350

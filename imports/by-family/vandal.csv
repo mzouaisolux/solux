@@ -1,0 +1,45 @@
+FAMILY,MODEL,FIELD_KEY,LABEL,VALUE_KIND,UNIT,VALUE,SCOPE,SORT
+Vandal,VDL B-45,nominal_flux,Nominal flux,number,lm,588,common,10
+Vandal,VDL B-45,nominal_power,Nominal power,number,W,3,common,20
+Vandal,VDL B-45,efficiency,Efficiency,number,lm/W,196,common,30
+Vandal,VDL B-45,led,LED,text,,PHILIPS Luxeon 30-30,common,40
+Vandal,VDL B-45,led_lifetime,LED lifetime,text,,Over 100.000 Hrs - LM80,common,50
+Vandal,VDL B-45,optics,Optics,text,,Asymetric & Symetric I 2300 to 6000 K I DUAL CCT OPTIONAL,common,60
+Vandal,VDL B-45,battery_technology,Battery technology,text,,Lithium Iron Phosphate LIFEPO4,common,90
+Vandal,VDL B-45,battery_capacity,Battery capacity,number,Wh,38,common,100
+Vandal,VDL B-45,autonomy,Autonomy,text,,Over 24 hours at full charge,common,110
+Vandal,VDL B-45,charging_time,Charging time,text,,6,common,120
+Vandal,VDL B-45,battery_lifespan,Battery lifespan,text,,Over 5000 CYCLES @ 50% DOD,common,130
+Vandal,VDL B-45,working_temp,Working temperature,text,,-10°C to 70 °C (optional -40°C TO 70°C ),common,140
+Vandal,VDL B-45,solar_panel,Solar panel,text,,"6,3 Wc",common,150
+Vandal,VDL B-45,cells_type,Solar cell type,text,,Monocrystaline Panel Grade A,common,170
+Vandal,VDL B-45,sensor,Sensor,text,,Microwave Motion sensor,common,190
+Vandal,VDL B-45,material,Material,text,,Aluminium & polycarbonate,common,200
+Vandal,VDL B-45,installation,Installation,text,,I No cabling - No tranching,common,210
+Vandal,VDL B-45,certifications,Certifications,text,,IEC / TUV / EMC / LM-80 / IK10 / IP67 / CE / ULOR / UKCA,common,240
+Vandal,VDL B-45,warranty_pv,PV performance warranty,number,years,25,common,250
+Vandal,VDL B-45,warranty_luminaire,Luminaire warranty,number,years,5,common,260
+Vandal,VDL B-45,light_height,Light height,number,cm,45,model,300
+Vandal,VDL B-45,product_dimensions,Product dimensions,text,mm,450 x 280 x 280,model,310
+Vandal,VDL B-45,carton_size,Carton size,text,mm,530 x 730 x 770,model,320
+Vandal,VDL B-45,net_weight,Net weight,number,kg,4.2,model,330
+Vandal,VDL B-45,warranty_battery,Battery & controller warranty,number,years,3,model,340
+Vandal,VDL B-45,product_code,Product code,text,,VDL B-45,model,350
+Vandal,VDL B-80,light_height,Light height,number,cm,80,model,300
+Vandal,VDL B-80,product_dimensions,Product dimensions,text,mm,800 x 280 x 280,model,310
+Vandal,VDL B-80,carton_size,Carton size,text,mm,910 x 750 x 770,model,320
+Vandal,VDL B-80,net_weight,Net weight,number,kg,5.2,model,330
+Vandal,VDL B-80,warranty_battery,Battery & controller warranty,number,years,5,model,340
+Vandal,VDL B-80,product_code,Product code,text,,VDL B-80,model,350
+Vandal,VDL E-100,light_height,Light height,number,cm,80,model,300
+Vandal,VDL E-100,product_dimensions,Product dimensions,text,mm,650 x 280 x 280,model,310
+Vandal,VDL E-100,carton_size,Carton size,text,mm,1090 x 730 x 770,model,320
+Vandal,VDL E-100,net_weight,Net weight,number,kg,5.3,model,330
+Vandal,VDL E-100,warranty_battery,Battery & controller warranty,number,years,5,model,340
+Vandal,VDL E-100,product_code,Product code,text,,VDL E-100,model,350
+Vandal,VDL E-65,light_height,Light height,number,cm,45,model,300
+Vandal,VDL E-65,product_dimensions,Product dimensions,text,mm,650 x 280 x 280,model,310
+Vandal,VDL E-65,carton_size,Carton size,text,mm,750 x 730 x 770,model,320
+Vandal,VDL E-65,net_weight,Net weight,number,kg,4.3,model,330
+Vandal,VDL E-65,warranty_battery,Battery & controller warranty,number,years,5,model,340
+Vandal,VDL E-65,product_code,Product code,text,,VDL E-65,model,350

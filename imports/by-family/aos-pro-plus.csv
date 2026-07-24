@@ -1,0 +1,32 @@
+FAMILY,MODEL,FIELD_KEY,LABEL,VALUE_KIND,UNIT,VALUE,SCOPE,SORT
+AOS Pro⁺,AP+30,nominal_flux,Nominal flux,number,lm,5880,common,10
+AOS Pro⁺,AP+30,nominal_power,Nominal power,number,W,30,common,20
+AOS Pro⁺,AP+30,efficiency,Efficiency,number,lm/W,196,common,30
+AOS Pro⁺,AP+30,led,LED,text,,PHILIPS Luxeon 30-30,common,40
+AOS Pro⁺,AP+30,led_lifetime,LED lifetime,text,,Over 100.000 Hrs - LM80,common,50
+AOS Pro⁺,AP+30,optics,Optics,text,,TI / T35 / 2300 to 6000K,common,60
+AOS Pro⁺,AP+30,battery_technology,Battery technology,text,,Lithium Iron Phosphate LIFEPO4,common,90
+AOS Pro⁺,AP+30,battery_capacity,Battery capacity,number,Wh,307,common,100
+AOS Pro⁺,AP+30,autonomy,Autonomy,text,,> 24 hours at full charge,common,110
+AOS Pro⁺,AP+30,charging_time,Charging time,text,,5/6,common,120
+AOS Pro⁺,AP+30,battery_lifespan,Battery lifespan,text,,Over 5000 CYCLES @ 50% DOD,common,130
+AOS Pro⁺,AP+30,working_temp,Working temperature,text,,-10°C to 70 °C (optional -40°C TO 85 °C ),common,140
+AOS Pro⁺,AP+30,solar_panel,Solar panel,text,,60W / 18V,common,150
+AOS Pro⁺,AP+30,cells_type,Solar cell type,text,,TOPCON Monocrystaline Panel Grade A,common,170
+AOS Pro⁺,AP+30,sensor,Sensor,text,,Microwave 360° Motion Sensor,common,190
+AOS Pro⁺,AP+30,controller,Controller,text,,MPPT Smart Controller,common,195
+AOS Pro⁺,AP+30,cabling,Cabling,text,,Waterproof Connector,common,196
+AOS Pro⁺,AP+30,protection,Protection,text,,Battery Management System (BMS),common,197
+AOS Pro⁺,AP+30,material,Material,text,,Aluminium & Stainless steel,common,200
+AOS Pro⁺,AP+30,installation,Installation,text,,"and operation, this unit is an",common,210
+AOS Pro⁺,AP+30,pole_mounting,Pole mounting,text,,76mm to 89mm,common,215
+AOS Pro⁺,AP+30,certifications,Certifications,text,,IEC / TUV / EMC / LM-80 / IK8 / IP68 / CE / ULOR / UKCA,common,240
+AOS Pro⁺,AP+30,warranty_pv,PV performance warranty,number,years,25,common,250
+AOS Pro⁺,AP+30,warranty_luminaire,Luminaire warranty,number,years,5,common,260
+AOS Pro⁺,AP+30,light_height,Light height,text,,From 3 to 4 meters,model,300
+AOS Pro⁺,AP+30,product_dimensions,Product dimensions,text,mm,910 x 398 x 343,model,310
+AOS Pro⁺,AP+30,carton_size,Carton size,text,mm,980 x 460 x 260,model,320
+AOS Pro⁺,AP+30,net_weight,Net weight,number,kg,14.85,model,330
+AOS Pro⁺,AP+30,gross_weight,Gross weight,number,kg,17.5,model,335
+AOS Pro⁺,AP+30,warranty_battery,Battery & controller warranty,number,years,5,model,340
+AOS Pro⁺,AP+30,product_code,Product code,text,,AP+30,model,350

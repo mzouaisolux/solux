@@ -1,0 +1,31 @@
+FAMILY,MODEL,FIELD_KEY,LABEL,VALUE_KIND,UNIT,VALUE,SCOPE,SORT
+Totem⁺,TT+-20,nominal_flux,Nominal flux,number,lm,3920,common,10
+Totem⁺,TT+-20,nominal_power,Nominal power,number,W,20,common,20
+Totem⁺,TT+-20,efficiency,Efficiency,number,lm/W,196,common,30
+Totem⁺,TT+-20,led,LED,text,,PHILIPS Luxeon 30-30,common,40
+Totem⁺,TT+-20,led_lifetime,LED lifetime,text,,Over 100.000 Hrs - LM80,common,50
+Totem⁺,TT+-20,optics,Optics,text,,TI / TII / TIII / T-IV / T-V / T10 / T35 - 2300 to 6000K,common,60
+Totem⁺,TT+-20,battery_technology,Battery technology,text,,Lithium Iron Phosphate LIFEPO4,common,90
+Totem⁺,TT+-20,battery_capacity,Battery capacity,number,Wh,307,common,100
+Totem⁺,TT+-20,autonomy,Autonomy,text,,Over 24 hours at full charge,common,110
+Totem⁺,TT+-20,charging_time,Charging time,text,,6-7,common,120
+Totem⁺,TT+-20,battery_lifespan,Battery lifespan,text,,Over 8000 CYCLES - 30% DOD,common,130
+Totem⁺,TT+-20,working_temp,Working temperature,text,,-10°C to 70 °C (optional -40°C TO 70°C ),common,140
+Totem⁺,TT+-20,solar_panel,Solar panel,text,,Vertical 115 Watts / 18V,common,150
+Totem⁺,TT+-20,cells_type,Solar cell type,text,,Monocrystaline Panel Grade A,common,170
+Totem⁺,TT+-20,sensor,Sensor,text,,Microwave 360° Sensor,common,190
+Totem⁺,TT+-20,controller,Controller,text,,"MPPT Controller, (Solux Bridge Optional)",common,195
+Totem⁺,TT+-20,cabling,Cabling,text,,"Waterproof Connector, (Plug and Play)",common,196
+Totem⁺,TT+-20,protection,Protection,text,,Battery Management System (BMS),common,197
+Totem⁺,TT+-20,material,Material,text,,Aluminium and stainless steel,common,200
+Totem⁺,TT+-20,installation,Installation,text,,I No cabling - No tranching,common,210
+Totem⁺,TT+-20,certifications,Certifications,text,,IEC / TUV / EMC / LM-80 / IK08 / IP66 / CE / ULOR / UKCA / LVD,common,240
+Totem⁺,TT+-20,warranty_pv,PV performance warranty,number,years,25,common,250
+Totem⁺,TT+-20,warranty_luminaire,Luminaire warranty,number,years,5,common,260
+Totem⁺,TT+-20,light_height,Light height,text,,2.7 m,model,300
+Totem⁺,TT+-20,product_dimensions,Product dimensions,text,mm,2700 x 310 x 370,model,310
+Totem⁺,TT+-20,carton_size,Carton size,text,mm,2840 x 430 x 300,model,320
+Totem⁺,TT+-20,net_weight,Net weight,number,kg,36,model,330
+Totem⁺,TT+-20,gross_weight,Gross weight,number,kg,39,model,335
+Totem⁺,TT+-20,warranty_battery,Battery & controller warranty,number,years,5,model,340
+Totem⁺,TT+-20,product_code,Product code,text,,TT+-20,model,350

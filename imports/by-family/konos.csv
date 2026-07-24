@@ -1,0 +1,31 @@
+FAMILY,MODEL,FIELD_KEY,LABEL,VALUE_KIND,UNIT,VALUE,SCOPE,SORT
+Konos,PL-008,nominal_flux,Nominal flux,number,lm,3920,common,10
+Konos,PL-008,nominal_power,Nominal power,number,W,20,common,20
+Konos,PL-008,efficiency,Efficiency,number,lm/W,196,common,30
+Konos,PL-008,led,LED,text,,PHILIPS Luxeon 30-30,common,40
+Konos,PL-008,led_lifetime,LED lifetime,text,,Over 100.000 Hrs - LM80,common,50
+Konos,PL-008,optics,Optics,text,,T III / T-V / 2300K to 6500K,common,60
+Konos,PL-008,battery_technology,Battery technology,text,,Lithium Iron Phosphate LIFEPO4,common,90
+Konos,PL-008,battery_capacity,Battery capacity,number,Wh,320,common,100
+Konos,PL-008,autonomy,Autonomy,text,,> 24 hours at full charge,common,110
+Konos,PL-008,charging_time,Charging time,text,,6,common,120
+Konos,PL-008,battery_lifespan,Battery lifespan,text,,Over 5000 CYCLES @ 50% DOD,common,130
+Konos,PL-008,working_temp,Working temperature,text,,-10°C to 70°C (optional -40°C TO 70°C ),common,140
+Konos,PL-008,solar_panel,Solar panel,text,,45 W / 18 V,common,150
+Konos,PL-008,cells_type,Solar cell type,text,,Monocrystaline Panel Grade A,common,170
+Konos,PL-008,sensor,Sensor,text,,PIR 180° sensor,common,190
+Konos,PL-008,controller,Controller,text,,MPPT Smart Controller,common,195
+Konos,PL-008,cabling,Cabling,text,,Waterproof Connector,common,196
+Konos,PL-008,protection,Protection,text,,Battery Management System (BMS),common,197
+Konos,PL-008,material,Material,text,,Aluminium & Stainless Steel,common,200
+Konos,PL-008,installation,Installation,text,,"No cabling or teaching is required, Easy to install.",common,210
+Konos,PL-008,certifications,Certifications,text,,IEC / TUV / EMC / LM-79-08 / LM-80 / IK8 / IP65 / CE / ULOR / LVD,common,240
+Konos,PL-008,warranty_pv,PV performance warranty,number,years,20,common,250
+Konos,PL-008,warranty_luminaire,Luminaire warranty,number,years,5,common,260
+Konos,PL-008,light_height,Light height,text,,From 3 to 5 meters,model,300
+Konos,PL-008,product_dimensions,Product dimensions,text,mm,D 600 x H 470,model,310
+Konos,PL-008,carton_size,Carton size,text,mm,680 x 680 x 560 60904,model,320
+Konos,PL-008,net_weight,Net weight,number,kg,10.1,model,330
+Konos,PL-008,gross_weight,Gross weight,number,kg,13.55,model,335
+Konos,PL-008,warranty_battery,Battery & controller warranty,number,years,3,model,340
+Konos,PL-008,product_code,Product code,text,,PL-008,model,350

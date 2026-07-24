@@ -1,0 +1,32 @@
+FAMILY,MODEL,FIELD_KEY,LABEL,VALUE_KIND,UNIT,VALUE,SCOPE,SORT
+SSLX Performance,SX-40,nominal_flux,Nominal flux,number,lm,7840,common,10
+SSLX Performance,SX-40,nominal_power,Nominal power,number,W,40,common,20
+SSLX Performance,SX-40,efficiency,Efficiency,number,lm/W,196,common,30
+SSLX Performance,SX-40,led,LED,text,,PHILIPS Luxeon 30-30,common,40
+SSLX Performance,SX-40,led_lifetime,LED lifetime,text,,Over 100.000 Hrs - LM80,common,50
+SSLX Performance,SX-40,optics,Optics,text,,TII-S / T3-M/ T-V / 2300 to 6000K,common,60
+SSLX Performance,SX-40,battery_technology,Battery technology,text,,Lithium Iron Phosphate LIFEPO4,common,90
+SSLX Performance,SX-40,battery_capacity,Battery capacity,number,Wh,614.4,common,100
+SSLX Performance,SX-40,autonomy,Autonomy,text,,>24 hours at full charge,common,110
+SSLX Performance,SX-40,charging_time,Charging time,text,,5/6,common,120
+SSLX Performance,SX-40,battery_lifespan,Battery lifespan,text,,Over 5000 CYCLES @ 50% DOD,common,130
+SSLX Performance,SX-40,working_temp,Working temperature,text,,-10°C to 70 °C (optional -40°C TO 70 °C ),common,140
+SSLX Performance,SX-40,solar_panel,Solar panel,text,,135W / 18V,common,150
+SSLX Performance,SX-40,cells_type,Solar cell type,text,,Monocrystaline Topcon Grade A,common,170
+SSLX Performance,SX-40,sensor,Sensor,text,,Microwave 360° Motion Sensor,common,190
+SSLX Performance,SX-40,controller,Controller,text,,MPPT SMART CONTROLLER,common,195
+SSLX Performance,SX-40,cabling,Cabling,text,,Waterproof Connector,common,196
+SSLX Performance,SX-40,protection,Protection,text,,Battery Management System (BMS),common,197
+SSLX Performance,SX-40,material,Material,text,,Aluminium,common,200
+SSLX Performance,SX-40,installation,Installation,text,,SSLX Performance 40,common,210
+SSLX Performance,SX-40,pole_mounting,Pole mounting,text,,76mm to 89mm,common,215
+SSLX Performance,SX-40,certifications,Certifications,text,,IEC / TUV / EMC / LM-79 / LM-80 / IK8 / IP65 / CE / ULOR / LVD / UKCA,common,240
+SSLX Performance,SX-40,warranty_pv,PV performance warranty,number,years,25,common,250
+SSLX Performance,SX-40,warranty_luminaire,Luminaire warranty,number,years,5,common,260
+SSLX Performance,SX-40,light_height,Light height,text,,From 5 to 6 meters,model,300
+SSLX Performance,SX-40,product_dimensions,Product dimensions,text,mm,990 x 670 x 271,model,310
+SSLX Performance,SX-40,carton_size,Carton size,text,mm,1060 x 730 x 245 60904,model,320
+SSLX Performance,SX-40,net_weight,Net weight,number,kg,15.75,model,330
+SSLX Performance,SX-40,gross_weight,Gross weight,number,kg,19,model,335
+SSLX Performance,SX-40,warranty_battery,Battery & controller warranty,number,years,5,model,340
+SSLX Performance,SX-40,product_code,Product code,text,,SX-40,model,350

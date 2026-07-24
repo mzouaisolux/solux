@@ -1,0 +1,27 @@
+FAMILY,MODEL,FIELD_KEY,LABEL,VALUE_KIND,UNIT,VALUE,SCOPE,SORT
+Ada,SL-021 45,nominal_flux,Nominal flux,number,lm,420,common,10
+Ada,SL-021 45,nominal_power,Nominal power,number,W,3.5,common,20
+Ada,SL-021 45,efficiency,Efficiency,number,lm/W,120,common,30
+Ada,SL-021 45,led,LED,text,,PHILIPS Luxeon 30-30,common,40
+Ada,SL-021 45,led_lifetime,LED lifetime,text,,Over 100.000 Hrs - LM80,common,50
+Ada,SL-021 45,optics,Optics,text,,T-V / 2300K to 6500K (Dual CCT optional),common,60
+Ada,SL-021 45,battery_technology,Battery technology,text,,Lithium Iron Phosphate LIFEPO4,common,90
+Ada,SL-021 45,battery_capacity,Battery capacity,number,Wh,38,common,100
+Ada,SL-021 45,autonomy,Autonomy,text,,>24 hours at full charge,common,110
+Ada,SL-021 45,charging_time,Charging time,text,,6,common,120
+Ada,SL-021 45,battery_lifespan,Battery lifespan,text,,Over 5000 CYCLES @ 50% DOD,common,130
+Ada,SL-021 45,working_temp,Working temperature,text,,-10°C to 70°C (optional -40°C TO 70°C ),common,140
+Ada,SL-021 45,solar_panel,Solar panel,text,,6 Wc,common,150
+Ada,SL-021 45,cells_type,Solar cell type,text,,Monocrystaline Panel Grade A,common,170
+Ada,SL-021 45,sensor,Sensor,text,,PIR 180° sensor,common,190
+Ada,SL-021 45,material,Material,text,,Die Cast aluminium,common,200
+Ada,SL-021 45,installation,Installation,text,,will meet your lighting needs. Ada is,common,210
+Ada,SL-021 45,certifications,Certifications,text,,IEC / TUV / EMC / LM-79 / LM-80 / IK8 / IP65 / CE / ULOR / UKCA / LVD,common,240
+Ada,SL-021 45,warranty_pv,PV performance warranty,number,years,20,common,250
+Ada,SL-021 45,warranty_luminaire,Luminaire warranty,number,years,3,common,260
+Ada,SL-021 45,light_height,Light height,number,cm,45,model,300
+Ada,SL-021 45,product_dimensions,Product dimensions,text,mm,D 26cm x H 45cm,model,310
+Ada,SL-021 45,carton_size,Carton size,text,mm,50,model,320
+Ada,SL-021 45,net_weight,Net weight,number,kg,3.2,model,330
+Ada,SL-021 45,warranty_battery,Battery & controller warranty,number,years,3,model,340
+Ada,SL-021 45,product_code,Product code,text,,SL-021 45,model,350

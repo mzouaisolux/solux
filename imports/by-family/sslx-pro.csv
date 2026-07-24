@@ -1,0 +1,32 @@
+FAMILY,MODEL,FIELD_KEY,LABEL,VALUE_KIND,UNIT,VALUE,SCOPE,SORT
+SSLX Pro,SP-30,nominal_flux,Nominal flux,number,lm,5880,common,10
+SSLX Pro,SP-30,nominal_power,Nominal power,number,W,30,common,20
+SSLX Pro,SP-30,efficiency,Efficiency,number,lm/W,196,common,30
+SSLX Pro,SP-30,led,LED,text,,PHILIPS Luxeon 30-30,common,40
+SSLX Pro,SP-30,led_lifetime,LED lifetime,text,,Over 100 000 hours LM80,common,50
+SSLX Pro,SP-30,optics,Optics,text,,TI-M / TII-S / T3-M / T-V - 2300 to 6500K,common,60
+SSLX Pro,SP-30,battery_technology,Battery technology,text,,Lithium Iron Phosphate LIFEPO4,common,90
+SSLX Pro,SP-30,battery_capacity,Battery capacity,number,Wh,460,common,100
+SSLX Pro,SP-30,autonomy,Autonomy,text,,> 24 hours at full charge,common,110
+SSLX Pro,SP-30,charging_time,Charging time,text,,5/6,common,120
+SSLX Pro,SP-30,battery_lifespan,Battery lifespan,text,,Over 5000 CYCLES @ 50% DOD,common,130
+SSLX Pro,SP-30,working_temp,Working temperature,text,,-10°C to 70 °C (optional -40°C TO 70°C ),common,140
+SSLX Pro,SP-30,solar_panel,Solar panel,text,,125W / 18V,common,150
+SSLX Pro,SP-30,cells_type,Solar cell type,text,,TOPCON Monocrystaline Panel Grade A,common,170
+SSLX Pro,SP-30,sensor,Sensor,text,,Microwave 360° Motion Sensor,common,190
+SSLX Pro,SP-30,controller,Controller,text,,MPPT Smart Controller,common,195
+SSLX Pro,SP-30,cabling,Cabling,text,,Waterproof Connector,common,196
+SSLX Pro,SP-30,protection,Protection,text,,Battery Management System (BMS),common,197
+SSLX Pro,SP-30,material,Material,text,,Aluminium & Stainless steel,common,200
+SSLX Pro,SP-30,installation,Installation,text,,I No cabling - No trenching,common,210
+SSLX Pro,SP-30,pole_mounting,Pole mounting,text,,76mm to 89mm,common,215
+SSLX Pro,SP-30,certifications,Certifications,text,,IEC / TUV / EMC / LM-80 / IK8 / IP68 / CE / ULOR / UKCA / LVD,common,240
+SSLX Pro,SP-30,warranty_pv,PV performance warranty,number,years,25,common,250
+SSLX Pro,SP-30,warranty_luminaire,Luminaire warranty,number,years,5,common,260
+SSLX Pro,SP-30,light_height,Light height,text,,From 4 to 5 meters,model,300
+SSLX Pro,SP-30,product_dimensions,Product dimensions,text,mm,1410 x 560 x 150,model,310
+SSLX Pro,SP-30,carton_size,Carton size,text,mm,1460 x 610 x 260,model,320
+SSLX Pro,SP-30,net_weight,Net weight,number,kg,19.3,model,330
+SSLX Pro,SP-30,gross_weight,Gross weight,number,kg,23.7,model,335
+SSLX Pro,SP-30,warranty_battery,Battery & controller warranty,number,years,5,model,340
+SSLX Pro,SP-30,product_code,Product code,text,,SP-30,model,350
