@@ -1,0 +1,503 @@
+{
+  "name": "Solux Integrations — inbound logger + signed webhook receiver + package delivery",
+  "nodes": [
+    {
+      "parameters": { "httpMethod": "POST", "path": "solux-events", "options": {} },
+      "id": "b1a1c001-0000-4000-8000-000000000001",
+      "name": "Solux Webhook (outbound events)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [-260, -120],
+      "webhookId": "solux-events"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Verify the HMAC-SHA256 signature Solux sends on every delivery.\n// Set WHSEC to your endpoint's signing secret (whsec_...), shown once at\n// creation in Settings → Integrations → Outbound webhooks.\nconst crypto = require('crypto');\nconst WHSEC = 'whsec_REPLACE_WITH_YOUR_SIGNING_SECRET';\n\nconst item = $input.first();\nconst headers = item.json.headers || {};\nconst raw = JSON.stringify(item.json.body);\nconst expected = 'sha256=' + crypto.createHmac('sha256', WHSEC).update(raw).digest('hex');\nconst got = headers['x-solux-signature'];\nif (expected !== got) {\n  throw new Error('Invalid Solux signature — rejecting delivery');\n}\nreturn [{ json: item.json.body }];"
+      },
+      "id": "b1a1c001-0000-4000-8000-000000000002",
+      "name": "Verify signature",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [40, -120]
+    },
+    {
+      "parameters": {
+        "operation": "removeItemsSeenInPreviousExecutions",
+        "logic": "removeItemsWithAlreadySeenKeyValues",
+        "dedupeValue": "={{ $json.idempotency_key || $json.event_id }}",
+        "options": {}
+      },
+      "id": "b1a1c001-0000-4000-8000-000000000040",
+      "name": "Dedupe on idempotency key",
+      "type": "n8n-nodes-base.removeDuplicates",
+      "typeVersion": 2,
+      "position": [190, -300]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            { "conditions": { "options": { "caseSensitive": true }, "conditions": [ { "leftValue": "={{ $json.event }}", "rightValue": "quotation.sent", "operator": { "type": "string", "operation": "equals" } } ] }, "outputKey": "quotation.sent" },
+            { "conditions": { "options": { "caseSensitive": true }, "conditions": [ { "leftValue": "={{ $json.event }}", "rightValue": "spec_sheet.sent", "operator": { "type": "string", "operation": "equals" } } ] }, "outputKey": "spec_sheet.sent" }
+          ]
+        },
+        "options": { "fallbackOutput": "extra" }
+      },
+      "id": "b1a1c001-0000-4000-8000-000000000003",
+      "name": "Route by event",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [340, -120]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": { "__rl": true, "value": "YOUR_SPREADSHEET_ID", "mode": "id" },
+        "sheetName": { "__rl": true, "value": "Sheet1", "mode": "name" },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Quote": "={{ $json.payload.number }}",
+            "Client": "={{ $json.payload.client_name }}",
+            "Recipient": "={{ $json.payload.recipient_email }}",
+            "Sales": "={{ $json.payload.sales_name }}",
+            "Status from": "={{ $json.payload.from }}",
+            "Status to": "={{ $json.payload.to }}",
+            "Sent at": "={{ $now.toISO() }}",
+            "Link": "=https://smbke.vercel.app/documents/{{ $json.entity.id }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "c2b1d001-0000-4000-8000-000000000058",
+      "name": "Log sent quote to Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [640, -640]
+    },
+    {
+      "parameters": {
+        "fromEmail": "Solux <contact@solux-light.com>",
+        "toEmail": "sales@solux-light.com",
+        "subject": "=Quote {{ $json.payload.number }} sent",
+        "emailFormat": "text",
+        "text": "=Quotation {{ $json.payload.number }} moved {{ $json.payload.from }} → {{ $json.payload.to }}.\nClient: {{ $json.payload.client_name }} · Sales: {{ $json.payload.sales_name }}\n\nOpen: https://smbke.vercel.app/documents/{{ $json.entity.id }}",
+        "options": { "appendAttribution": false }
+      },
+      "id": "c2b1d001-0000-4000-8000-000000000051",
+      "name": "Notify sales (quote sent)",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [640, -540]
+    },
+    {
+      "parameters": { "resume": "timeInterval", "amount": 3, "unit": "days" },
+      "id": "c2b1d001-0000-4000-8000-000000000052",
+      "name": "Wait 3 days",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [640, -440],
+      "webhookId": "c2b1d001-wait-followup-3"
+    },
+    {
+      "parameters": {
+        "fromEmail": "Solux <contact@solux-light.com>",
+        "toEmail": "sales@solux-light.com",
+        "subject": "=Follow up (day 3): quote {{ $json.payload.number }}",
+        "emailFormat": "text",
+        "text": "=Day 3 — quotation {{ $json.payload.number }} ({{ $json.payload.client_name }}) — any reply from the client yet?\n\nOpen: https://smbke.vercel.app/documents/{{ $json.entity.id }}",
+        "options": { "appendAttribution": false }
+      },
+      "id": "c2b1d001-0000-4000-8000-000000000053",
+      "name": "Follow-up reminder (day 3)",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [860, -440]
+    },
+    {
+      "parameters": { "resume": "timeInterval", "amount": 5, "unit": "days" },
+      "id": "c2b1d001-0000-4000-8000-000000000054",
+      "name": "Wait 5 days",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [640, -360],
+      "webhookId": "c2b1d001-wait-followup-5"
+    },
+    {
+      "parameters": {
+        "fromEmail": "Solux <contact@solux-light.com>",
+        "toEmail": "sales@solux-light.com",
+        "subject": "=Follow up (day 5): quote {{ $json.payload.number }}",
+        "emailFormat": "text",
+        "text": "=Day 5 — quotation {{ $json.payload.number }} still has no reply. Time for a second nudge to the client.\n\nOpen: https://smbke.vercel.app/documents/{{ $json.entity.id }}",
+        "options": { "appendAttribution": false }
+      },
+      "id": "c2b1d001-0000-4000-8000-000000000055",
+      "name": "Follow-up reminder (day 5)",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [860, -360]
+    },
+    {
+      "parameters": { "resume": "timeInterval", "amount": 10, "unit": "days" },
+      "id": "c2b1d001-0000-4000-8000-000000000056",
+      "name": "Wait 10 days",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [640, -280],
+      "webhookId": "c2b1d001-wait-followup-10"
+    },
+    {
+      "parameters": {
+        "fromEmail": "Solux <contact@solux-light.com>",
+        "toEmail": "sales@solux-light.com",
+        "subject": "=Follow up (day 10): quote {{ $json.payload.number }}",
+        "emailFormat": "text",
+        "text": "=Day 10 — quotation {{ $json.payload.number }} is still open. Consider a call, or revising the offer.\n\nOpen: https://smbke.vercel.app/documents/{{ $json.entity.id }}",
+        "options": { "appendAttribution": false }
+      },
+      "id": "c2b1d001-0000-4000-8000-000000000057",
+      "name": "Follow-up reminder (day 10)",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [860, -280]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "version": 2 },
+          "combinator": "and",
+          "conditions": [
+            { "id": "c1", "leftValue": "={{ $json.payload.channel }}", "rightValue": "package", "operator": { "type": "string", "operation": "equals" } }
+          ]
+        },
+        "options": {}
+      },
+      "id": "b1a1c001-0000-4000-8000-000000000005",
+      "name": "Package channel?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [640, -120]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": false, "version": 2 },
+          "combinator": "and",
+          "conditions": [
+            { "id": "r1", "leftValue": "={{ $json.payload.recipient_source }}", "rightValue": "contact", "operator": { "type": "string", "operation": "equals" } },
+            { "id": "r2", "leftValue": "={{ $json.payload.recipient_email }}", "rightValue": "@solux-light.com", "operator": { "type": "string", "operation": "notEndsWith" } }
+          ]
+        },
+        "options": {}
+      },
+      "id": "b1a1c001-0000-4000-8000-000000000013",
+      "name": "Recipient safe to send?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [860, -180]
+    },
+    {
+      "parameters": {
+        "url": "={{ $('Verify signature').item.json.payload.quote_url }}",
+        "options": { "response": { "response": { "responseFormat": "file", "outputPropertyName": "quote" } } }
+      },
+      "id": "b1a1c001-0000-4000-8000-000000000007",
+      "name": "Fetch quote PDF",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1060, -240]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "version": 2 },
+          "combinator": "and",
+          "conditions": [
+            { "id": "s1", "leftValue": "={{ $('Verify signature').item.json.payload.specs_url }}", "rightValue": "", "operator": { "type": "string", "operation": "notEmpty", "singleValue": true } }
+          ]
+        },
+        "options": {}
+      },
+      "id": "b1a1c001-0000-4000-8000-000000000015",
+      "name": "Has datasheets?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1280, -240]
+    },
+    {
+      "parameters": {
+        "url": "={{ $('Verify signature').item.json.payload.specs_url }}",
+        "options": { "response": { "response": { "responseFormat": "file", "outputPropertyName": "specs" } } }
+      },
+      "id": "b1a1c001-0000-4000-8000-000000000016",
+      "name": "Fetch datasheets PDF",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1500, -300]
+    },
+    {
+      "parameters": {
+        "fromEmail": "Solux <contact@solux-light.com>",
+        "toEmail": "={{ $('Verify signature').item.json.payload.recipient_email }}",
+        "subject": "=Solux quotation {{ $('Verify signature').item.json.payload.quote_number }} — offer and technical datasheets",
+        "emailFormat": "text",
+        "text": "=Dear {{ $('Verify signature').item.json.payload.recipient_name || $('Verify signature').item.json.payload.client_name || 'Sir or Madam' }},\n\nThank you for your interest in Solux lighting. Please find attached our quotation {{ $('Verify signature').item.json.payload.quote_number }}, together with the technical datasheets for the quoted products — sent as two separate PDF attachments.\n\nIf you have any questions about the offer or the specifications, simply reply to this email and our team will be glad to help.\n\nKind regards,\nSolux Sales\ncontact@solux-light.com | www.solux-light.com",
+        "options": {
+          "ccEmail": "sales@solux-light.com",
+          "replyTo": "={{ $('Verify signature').item.json.payload.sales_email || 'sales@solux-light.com' }}",
+          "attachments": "quote,specs",
+          "appendAttribution": false
+        }
+      },
+      "id": "b1a1c001-0000-4000-8000-000000000008",
+      "name": "Send quote + datasheets (SMTP = contact@)",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [1720, -300]
+    },
+    {
+      "parameters": {
+        "fromEmail": "Solux <contact@solux-light.com>",
+        "toEmail": "={{ $('Verify signature').item.json.payload.recipient_email }}",
+        "subject": "=Solux quotation {{ $('Verify signature').item.json.payload.quote_number }}",
+        "emailFormat": "text",
+        "text": "=Dear {{ $('Verify signature').item.json.payload.recipient_name || $('Verify signature').item.json.payload.client_name || 'Sir or Madam' }},\n\nThank you for your interest in Solux lighting. Please find attached our quotation {{ $('Verify signature').item.json.payload.quote_number }}.\n\nIf you have any questions about the offer, simply reply to this email and our team will be glad to help.\n\nKind regards,\nSolux Sales\ncontact@solux-light.com | www.solux-light.com",
+        "options": {
+          "ccEmail": "sales@solux-light.com",
+          "replyTo": "={{ $('Verify signature').item.json.payload.sales_email || 'sales@solux-light.com' }}",
+          "attachments": "quote",
+          "appendAttribution": false
+        }
+      },
+      "id": "b1a1c001-0000-4000-8000-000000000017",
+      "name": "Send quote only (SMTP = contact@)",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [1500, -160]
+    },
+    {
+      "parameters": {
+        "fromEmail": "Solux Ops <contact@solux-light.com>",
+        "toEmail": "sales@solux-light.com",
+        "subject": "=[HELD] Package NOT sent — {{ $('Verify signature').item.json.payload.quote_number }} ({{ $('Verify signature').item.json.payload.client_name }})",
+        "emailFormat": "text",
+        "text": "=A quotation package was built but HELD — the recipient isn't a safe external contact, so it was NOT emailed to the customer.\n\nQuote: {{ $('Verify signature').item.json.payload.quote_number }}\nClient: {{ $('Verify signature').item.json.payload.client_name }}\nResolved recipient: {{ $('Verify signature').item.json.payload.recipient_email || '(none)' }}\nRecipient source: {{ $('Verify signature').item.json.payload.recipient_source }}  (needs 'contact')\nReason: {{ ($('Verify signature').item.json.payload.recipient_email || '').endsWith('@solux-light.com') ? 'internal @solux-light.com address' : 'no maintained primary-contact email' }}\n\nFix: set the client's real buyer as their PRIMARY contact (with email) in /clients, then re-send the quote.\n\nQuote PDF (signed, 24h): {{ $('Verify signature').item.json.payload.quote_url }}",
+        "options": { "appendAttribution": false }
+      },
+      "id": "b1a1c001-0000-4000-8000-000000000009",
+      "name": "Hold — notify ops (weak/internal recipient)",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [1080, -60]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            { "conditions": { "options": { "caseSensitive": true, "version": 2 }, "combinator": "and", "conditions": [ { "leftValue": "={{ $json.payload.channel }}", "rightValue": "package", "operator": { "type": "string", "operation": "equals" } } ] }, "outputKey": "package" },
+            { "conditions": { "options": { "caseSensitive": true, "version": 2 }, "combinator": "and", "conditions": [ { "leftValue": "={{ $json.payload.channel }}", "rightValue": "email", "operator": { "type": "string", "operation": "equals" } }, { "leftValue": "={{ $json.payload.mode }}", "rightValue": "send", "operator": { "type": "string", "operation": "equals" } } ] }, "outputKey": "email" },
+            { "conditions": { "options": { "caseSensitive": true, "version": 2 }, "combinator": "and", "conditions": [ { "leftValue": "={{ $json.payload.channel }}", "rightValue": "whatsapp", "operator": { "type": "string", "operation": "equals" } }, { "leftValue": "={{ $json.payload.mode }}", "rightValue": "send", "operator": { "type": "string", "operation": "equals" } } ] }, "outputKey": "whatsapp" }
+          ]
+        },
+        "options": { "fallbackOutput": "extra" }
+      },
+      "id": "b1a1c001-0000-4000-8000-000000000044",
+      "name": "Route spec_sheet.sent by channel",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [640, -120]
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.payload.datasheet_url }}",
+        "options": { "response": { "response": { "responseFormat": "file", "outputPropertyName": "datasheet" } } }
+      },
+      "id": "b1a1c001-0000-4000-8000-000000000041",
+      "name": "Fetch datasheet PDF",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [940, 120]
+    },
+    {
+      "parameters": {
+        "fromEmail": "Solux <contact@solux-light.com>",
+        "toEmail": "={{ $('Verify signature').item.json.payload.recipient }}",
+        "subject": "=Solux — {{ $('Verify signature').item.json.payload.product_name }} datasheet{{ $('Verify signature').item.json.payload.version ? ' (' + $('Verify signature').item.json.payload.version + ')' : '' }}",
+        "emailFormat": "text",
+        "text": "={{ $('Verify signature').item.json.payload.note || 'Dear customer,\\n\\nPlease find attached the requested datasheet.\\n\\nKind regards,\\nSolux Sales\\ncontact@solux-light.com | www.solux-light.com' }}",
+        "options": {
+          "ccEmail": "sales@solux-light.com",
+          "attachments": "datasheet",
+          "appendAttribution": false
+        }
+      },
+      "id": "b1a1c001-0000-4000-8000-000000000042",
+      "name": "Send datasheet (SMTP = contact@)",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [1240, 120]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://graph.facebook.com/v21.0/PHONE_NUMBER_ID_REPLACE/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "Bearer WHATSAPP_ACCESS_TOKEN_REPLACE" },
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ messaging_product: 'whatsapp', to: ($json.payload.recipient || '').replace(/[^0-9]/g, ''), type: 'template', template: { name: 'datasheet_share_REPLACE', language: { code: 'en' }, components: [ { type: 'header', parameters: [ { type: 'document', document: { link: $json.payload.datasheet_url, filename: $json.payload.datasheet_filename } } ] }, { type: 'body', parameters: [ { type: 'text', text: $json.payload.product_name } ] } ] } }) }}",
+        "options": {}
+      },
+      "id": "b1a1c001-0000-4000-8000-000000000043",
+      "name": "Send WhatsApp template + datasheet (Meta Cloud API)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [940, 260]
+    },
+    {
+      "parameters": {},
+      "id": "b1a1c001-0000-4000-8000-000000000014",
+      "name": "Model-page single send (ignore)",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [860, 20]
+    },
+    {
+      "parameters": {},
+      "id": "b1a1c001-0000-4000-8000-000000000006",
+      "name": "Other events (configure)",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [640, 0]
+    },
+    {
+      "parameters": {},
+      "id": "b1a1c001-0000-4000-8000-000000000010",
+      "name": "Inbound message received (trigger)",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [-260, 260]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            { "id": "a1", "name": "phone", "value": "+8490xxxxxxx", "type": "string" },
+            { "id": "a2", "name": "channel", "value": "whatsapp", "type": "string" },
+            { "id": "a3", "name": "direction", "value": "inbound", "type": "string" },
+            { "id": "a4", "name": "summary", "value": "Customer asked about SP-60 lead time", "type": "string" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "b1a1c001-0000-4000-8000-000000000011",
+      "name": "Build interaction",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [40, 260]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://smbke.vercel.app/api/integrations/interactions",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "Bearer sk_live_REPLACE_WITH_YOUR_API_KEY" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ phone: $json.phone, channel: $json.channel, direction: $json.direction, summary: $json.summary }) }}",
+        "options": {}
+      },
+      "id": "b1a1c001-0000-4000-8000-000000000012",
+      "name": "Log to Solux (inbound API)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [340, 260]
+    },
+    {
+      "parameters": { "httpMethod": "POST", "path": "solux-inbound", "options": {} },
+      "id": "b1a1c001-0000-4000-8000-000000000030",
+      "name": "Platform inbound webhook (Zalo/WhatsApp)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [-260, 820],
+      "webhookId": "solux-inbound"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Normalize a WhatsApp Business / Zalo OA inbound payload into the Solux\n// inbound-API shape. Adjust field paths to your provider's webhook format.\nconst b = ($input.first().json.body) || {};\nlet phone = '', text = '', channel = 'whatsapp';\nconst wa = b?.entry?.[0]?.changes?.[0]?.value?.messages?.[0];\nif (wa) { channel = 'whatsapp'; phone = wa.from; text = wa.text?.body || ''; }\nelse if (b?.sender?.id) { channel = 'zalo'; phone = b.sender.id; text = b.message?.text || ''; }\nreturn [{ json: { phone, channel, direction: 'inbound', summary: text } }];"
+      },
+      "id": "b1a1c001-0000-4000-8000-000000000031",
+      "name": "Normalize inbound",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [40, 820]
+    }
+  ],
+  "connections": {
+    "Solux Webhook (outbound events)": { "main": [[{ "node": "Verify signature", "type": "main", "index": 0 }]] },
+    "Verify signature": { "main": [[{ "node": "Dedupe on idempotency key", "type": "main", "index": 0 }]] },
+    "Dedupe on idempotency key": { "main": [[{ "node": "Route by event", "type": "main", "index": 0 }]] },
+    "Route by event": {
+      "main": [
+        [
+          { "node": "Log sent quote to Sheet", "type": "main", "index": 0 },
+          { "node": "Notify sales (quote sent)", "type": "main", "index": 0 },
+          { "node": "Wait 3 days", "type": "main", "index": 0 },
+          { "node": "Wait 5 days", "type": "main", "index": 0 },
+          { "node": "Wait 10 days", "type": "main", "index": 0 }
+        ],
+        [{ "node": "Package channel?", "type": "main", "index": 0 }],
+        [{ "node": "Other events (configure)", "type": "main", "index": 0 }]
+      ]
+    },
+    "Wait 3 days": { "main": [[{ "node": "Follow-up reminder (day 3)", "type": "main", "index": 0 }]] },
+    "Wait 5 days": { "main": [[{ "node": "Follow-up reminder (day 5)", "type": "main", "index": 0 }]] },
+    "Wait 10 days": { "main": [[{ "node": "Follow-up reminder (day 10)", "type": "main", "index": 0 }]] },
+    "Package channel?": {
+      "main": [
+        [{ "node": "Recipient safe to send?", "type": "main", "index": 0 }],
+        [{ "node": "Route spec_sheet.sent by channel", "type": "main", "index": 0 }]
+      ]
+    },
+    "Recipient safe to send?": {
+      "main": [
+        [{ "node": "Fetch quote PDF", "type": "main", "index": 0 }],
+        [{ "node": "Hold — notify ops (weak/internal recipient)", "type": "main", "index": 0 }]
+      ]
+    },
+    "Fetch quote PDF": { "main": [[{ "node": "Has datasheets?", "type": "main", "index": 0 }]] },
+    "Has datasheets?": {
+      "main": [
+        [{ "node": "Fetch datasheets PDF", "type": "main", "index": 0 }],
+        [{ "node": "Send quote only (SMTP = contact@)", "type": "main", "index": 0 }]
+      ]
+    },
+    "Fetch datasheets PDF": { "main": [[{ "node": "Send quote + datasheets (SMTP = contact@)", "type": "main", "index": 0 }]] },
+    "Route spec_sheet.sent by channel": {
+      "main": [
+        [],
+        [{ "node": "Fetch datasheet PDF", "type": "main", "index": 0 }],
+        [{ "node": "Send WhatsApp template + datasheet (Meta Cloud API)", "type": "main", "index": 0 }],
+        [{ "node": "Model-page single send (ignore)", "type": "main", "index": 0 }]
+      ]
+    },
+    "Fetch datasheet PDF": { "main": [[{ "node": "Send datasheet (SMTP = contact@)", "type": "main", "index": 0 }]] },
+    "Inbound message received (trigger)": { "main": [[{ "node": "Build interaction", "type": "main", "index": 0 }]] },
+    "Build interaction": { "main": [[{ "node": "Log to Solux (inbound API)", "type": "main", "index": 0 }]] },
+    "Platform inbound webhook (Zalo/WhatsApp)": { "main": [[{ "node": "Normalize inbound", "type": "main", "index": 0 }]] },
+    "Normalize inbound": { "main": [[{ "node": "Log to Solux (inbound API)", "type": "main", "index": 0 }]] }
+  },
+  "active": false,
+  "settings": { "executionOrder": "v1" },
+  "pinData": {}
+}

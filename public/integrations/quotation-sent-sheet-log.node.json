@@ -1,0 +1,31 @@
+{
+  "nodes": [
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": { "__rl": true, "value": "YOUR_SPREADSHEET_ID", "mode": "id" },
+        "sheetName": { "__rl": true, "value": "Sheet1", "mode": "name" },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Quote": "={{ $json.payload.number }}",
+            "Client": "={{ $json.payload.client_name }}",
+            "Recipient": "={{ $json.payload.recipient_email }}",
+            "Sales": "={{ $json.payload.sales_name }}",
+            "Status from": "={{ $json.payload.from }}",
+            "Status to": "={{ $json.payload.to }}",
+            "Sent at": "={{ $now.toISO() }}",
+            "Link": "=https://smbke.vercel.app/documents/{{ $json.entity.id }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "c2b1d001-0000-4000-8000-000000000058",
+      "name": "Log sent quote to Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [920, -460]
+    }
+  ],
+  "connections": {}
+}

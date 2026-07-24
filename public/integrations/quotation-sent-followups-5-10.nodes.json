@@ -1,0 +1,66 @@
+{
+  "nodes": [
+    {
+      "parameters": {
+        "resume": "timeInterval",
+        "amount": 5,
+        "unit": "days"
+      },
+      "id": "c2b1d001-0000-4000-8000-000000000054",
+      "name": "Wait 5 days",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [920, 60],
+      "webhookId": "c2b1d001-wait-followup-5"
+    },
+    {
+      "parameters": {
+        "sendTo": "sales@solux-light.com",
+        "subject": "=Follow up (day 5): quote {{ $json.payload.number }}",
+        "emailType": "text",
+        "message": "=Day 5 — quotation {{ $json.payload.number }} still has no reply. Time for a second nudge to the client.\n\nOpen: https://smbke.vercel.app/documents/{{ $json.entity.id }}",
+        "options": {}
+      },
+      "id": "c2b1d001-0000-4000-8000-000000000055",
+      "name": "Follow-up reminder (day 5)",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "position": [1180, 60]
+    },
+    {
+      "parameters": {
+        "resume": "timeInterval",
+        "amount": 10,
+        "unit": "days"
+      },
+      "id": "c2b1d001-0000-4000-8000-000000000056",
+      "name": "Wait 10 days",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [920, 200],
+      "webhookId": "c2b1d001-wait-followup-10"
+    },
+    {
+      "parameters": {
+        "sendTo": "sales@solux-light.com",
+        "subject": "=Follow up (day 10): quote {{ $json.payload.number }}",
+        "emailType": "text",
+        "message": "=Day 10 — quotation {{ $json.payload.number }} is still open. Consider a call, or revising the offer.\n\nOpen: https://smbke.vercel.app/documents/{{ $json.entity.id }}",
+        "options": {}
+      },
+      "id": "c2b1d001-0000-4000-8000-000000000057",
+      "name": "Follow-up reminder (day 10)",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "position": [1180, 200]
+    }
+  ],
+  "connections": {
+    "Wait 5 days": {
+      "main": [[{ "node": "Follow-up reminder (day 5)", "type": "main", "index": 0 }]]
+    },
+    "Wait 10 days": {
+      "main": [[{ "node": "Follow-up reminder (day 10)", "type": "main", "index": 0 }]]
+    }
+  }
+}

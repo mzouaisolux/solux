@@ -1,0 +1,45 @@
+{
+  "_comment": "PRD-006 package delivery — customer email nodes. Attach on the spec_sheet.sent branch AFTER a channel filter (payload.channel === 'package') and the recipient_source guard (=== 'contact'). Two nodes: fetch the signed PDF, then send it. Field expressions read from the 'Verify signature' node, which returns the envelope body (so $json.payload.* is available). From-address = the address/alias on the connected Gmail credential (set it to contact@solux-light.com); n8n cannot override the authenticated sender, only senderName + reply-to.",
+  "nodes": [
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $('Verify signature').item.json.payload.package_url }}",
+        "options": {
+          "response": {
+            "response": { "responseFormat": "file", "outputPropertyName": "data" }
+          }
+        }
+      },
+      "id": "e4d1f001-0000-4000-8000-000000000070",
+      "name": "Fetch package PDF",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [940, -120]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $('Verify signature').item.json.payload.recipient_email }}",
+        "subject": "=Solux quotation {{ $('Verify signature').item.json.payload.quote_number }} — offer and technical datasheets",
+        "emailType": "text",
+        "message": "=Dear {{ $('Verify signature').item.json.payload.recipient_name || $('Verify signature').item.json.payload.client_name || 'Sir or Madam' }},\n\nThank you for your interest in Solux lighting. Please find attached our quotation {{ $('Verify signature').item.json.payload.quote_number }}, together with the technical datasheet for each quoted product — combined into a single PDF for your convenience.\n\nIf you have any questions about the offer or the specifications, simply reply to this email and our team will be glad to help.\n\nKind regards,\nSolux Sales\ncontact@solux-light.com | www.solux-light.com",
+        "options": {
+          "senderName": "Solux",
+          "ccList": "sales@solux-light.com",
+          "replyTo": "={{ $('Verify signature').item.json.payload.sales_email || 'sales@solux-light.com' }}",
+          "attachmentsUi": {
+            "attachmentsBinary": [{ "property": "data" }]
+          }
+        }
+      },
+      "id": "e4d1f001-0000-4000-8000-000000000071",
+      "name": "Send package to customer",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "position": [1240, -120]
+    }
+  ],
+  "connections": {
+    "Fetch package PDF": { "main": [[{ "node": "Send package to customer", "type": "main", "index": 0 }]] }
+  }
+}

@@ -1,0 +1,53 @@
+{
+  "_comment": "PRD-006 package delivery — recipient guard + Hold ops alert. Insert on the spec_sheet.sent/channel=package branch BEFORE 'Fetch package PDF'. TRUE output (safe recipient) → connect to 'Fetch package PDF' (see package-delivery-email.node.json). FALSE output (weak/internal recipient) → 'Hold — notify ops', which does NOT send to the customer; it alerts ops so the package can be handled manually. Fields read from the 'Verify signature' node (envelope body).",
+  "nodes": [
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": false, "typeValidation": "strict" },
+          "combinator": "and",
+          "conditions": [
+            {
+              "leftValue": "={{ $('Verify signature').item.json.payload.recipient_source }}",
+              "rightValue": "contact",
+              "operator": { "type": "string", "operation": "equals" }
+            },
+            {
+              "leftValue": "={{ $('Verify signature').item.json.payload.recipient_email }}",
+              "rightValue": "@solux-light.com",
+              "operator": { "type": "string", "operation": "notEndsWith" }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "f5e1a001-0000-4000-8000-000000000080",
+      "name": "Recipient safe to send?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [640, -120]
+    },
+    {
+      "parameters": {
+        "sendTo": "sales@solux-light.com",
+        "subject": "=[HELD] Package NOT sent — {{ $('Verify signature').item.json.payload.quote_number }} ({{ $('Verify signature').item.json.payload.client_name }})",
+        "emailType": "text",
+        "message": "=A quotation package was built but HELD — the recipient isn't a safe external contact, so it was NOT emailed to the customer.\n\nQuote: {{ $('Verify signature').item.json.payload.quote_number }}\nClient: {{ $('Verify signature').item.json.payload.client_name }}\nResolved recipient: {{ $('Verify signature').item.json.payload.recipient_email || '(none)' }}\nRecipient source: {{ $('Verify signature').item.json.payload.recipient_source }}  (needs 'contact')\nReason: {{ ($('Verify signature').item.json.payload.recipient_email || '').endsWith('@solux-light.com') ? 'internal @solux-light.com address' : 'no maintained primary-contact email' }}\n\nFix: set the client's real buyer as their PRIMARY contact (with email) in /clients, then re-send the quote.\n\nPackage PDF (signed, 24h): {{ $('Verify signature').item.json.payload.package_url }}",
+        "options": { "senderName": "Solux Ops" }
+      },
+      "id": "f5e1a001-0000-4000-8000-000000000081",
+      "name": "Hold — notify ops",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "position": [940, 60]
+    }
+  ],
+  "connections": {
+    "Recipient safe to send?": {
+      "main": [
+        [{ "node": "Fetch package PDF", "type": "main", "index": 0 }],
+        [{ "node": "Hold — notify ops", "type": "main", "index": 0 }]
+      ]
+    }
+  }
+}

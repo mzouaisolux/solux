@@ -1,0 +1,72 @@
+{
+  "nodes": [
+    {
+      "parameters": {
+        "rule": { "interval": [{ "field": "weeks", "weeksInterval": 1, "triggerAtDay": [1], "triggerAtHour": 8 }] }
+      },
+      "id": "d3c1e001-0000-4000-8000-000000000060",
+      "name": "Weekly (Mon 08:00)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [-260, 1100]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://smbke.vercel.app/api/integrations/contact-audit",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "Bearer REPLACE_WITH_YOUR_CRON_SECRET" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "d3c1e001-0000-4000-8000-000000000061",
+      "name": "Fetch contact audit",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [40, 1100]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "typeValidation": "strict" },
+          "combinator": "and",
+          "conditions": [
+            {
+              "leftValue": "={{ $json.flagged_count }}",
+              "rightValue": 0,
+              "operator": { "type": "number", "operation": "gt" }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "d3c1e001-0000-4000-8000-000000000062",
+      "name": "Any flagged?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [340, 1100]
+    },
+    {
+      "parameters": {
+        "sendTo": "sales@solux-light.com",
+        "subject": "=Contact-data audit — {{ $json.flagged_count }} client(s) need attention",
+        "emailType": "text",
+        "message": "={{ $json.flagged_count }} client(s) whose quote package would NOT deliver cleanly:\n\n{{ $json.clients.map(c => '- ' + c.client_name + ' [' + c.audit_status + '] → ' + (c.recipient_email || 'no email') + (c.has_nondraft_quote ? ' (sends quotes)' : '')).join('\\n') }}\n\nFix in /clients, then re-run. Audit generated {{ $json.generated_at }}.",
+        "options": {}
+      },
+      "id": "d3c1e001-0000-4000-8000-000000000063",
+      "name": "Email audit alert",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "position": [640, 1020]
+    }
+  ],
+  "connections": {
+    "Weekly (Mon 08:00)": { "main": [[{ "node": "Fetch contact audit", "type": "main", "index": 0 }]] },
+    "Fetch contact audit": { "main": [[{ "node": "Any flagged?", "type": "main", "index": 0 }]] },
+    "Any flagged?": { "main": [[{ "node": "Email audit alert", "type": "main", "index": 0 }], []] }
+  }
+}

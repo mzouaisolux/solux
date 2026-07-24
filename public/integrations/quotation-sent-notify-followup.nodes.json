@@ -1,0 +1,50 @@
+{
+  "nodes": [
+    {
+      "parameters": {
+        "sendTo": "sales@solux-light.com",
+        "subject": "=Quote {{ $json.payload.number }} sent",
+        "emailType": "text",
+        "message": "=Quotation {{ $json.payload.number }} moved {{ $json.payload.from }} → {{ $json.payload.to }}.\n\nOpen: https://smbke.vercel.app/documents/{{ $json.entity.id }}",
+        "options": {}
+      },
+      "id": "c2b1d001-0000-4000-8000-000000000051",
+      "name": "Notify sales (quote sent)",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "position": [920, -320]
+    },
+    {
+      "parameters": {
+        "resume": "timeInterval",
+        "amount": 3,
+        "unit": "days"
+      },
+      "id": "c2b1d001-0000-4000-8000-000000000052",
+      "name": "Wait 3 days",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [920, -160],
+      "webhookId": "c2b1d001-wait-followup"
+    },
+    {
+      "parameters": {
+        "sendTo": "sales@solux-light.com",
+        "subject": "=Follow up: quote {{ $json.payload.number }}",
+        "emailType": "text",
+        "message": "=Follow up on quotation {{ $json.payload.number }} — any reply from the client yet?\n\nOpen: https://smbke.vercel.app/documents/{{ $json.entity.id }}",
+        "options": {}
+      },
+      "id": "c2b1d001-0000-4000-8000-000000000053",
+      "name": "Follow-up reminder",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "position": [1180, -160]
+    }
+  ],
+  "connections": {
+    "Wait 3 days": {
+      "main": [[{ "node": "Follow-up reminder", "type": "main", "index": 0 }]]
+    }
+  }
+}
