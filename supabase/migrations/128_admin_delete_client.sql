@@ -83,4 +83,3 @@ commit;
 --   --  "Cannot permanently delete…"; clean client → deletes, returns void.
 -- ROLLBACK:  drop function if exists admin_delete_client(uuid);
 -- ---------------------------------------------------------------------
-   /Users/mehdizouai/Library/Mobile Documents/com~apple~CloudDocs/IA MEHDI CLAUDE/APP FACTURATION/supabase/migrations/127_project_request_status_counts.sql

@@ -24,7 +24,19 @@ export async function updateSession(request: NextRequest) {
   const { data: { user } } = await supabase.auth.getUser();
 
   const { pathname } = request.nextUrl;
-  const isPublic = pathname.startsWith("/login") || pathname.startsWith("/_next") || pathname === "/favicon.ico";
+  // Token-authenticated API routes authenticate by Bearer/secret with NO user
+  // session, and must return JSON — never a 302 to the HTML login page. Exempt
+  // them from the session redirect (they do their own auth in-handler).
+  const isTokenApi =
+    pathname.startsWith("/api/specs") ||
+    pathname.startsWith("/api/datasheets") ||
+    pathname.startsWith("/api/hooks/") ||
+    pathname.startsWith("/api/integrations/");
+  const isPublic =
+    pathname.startsWith("/login") ||
+    pathname.startsWith("/_next") ||
+    pathname === "/favicon.ico" ||
+    isTokenApi;
 
   if (!user && !isPublic) {
     const url = request.nextUrl.clone();

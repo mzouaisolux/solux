@@ -151,6 +151,12 @@ export type QuotationPDFData = {
      * back to listing values from `selected_options` (legacy path).
      */
     visible_config_fields?: Array<{ field_name: string; value: string }>;
+    /**
+     * m177 — the frozen spec-version label for this line ("2604"), rendered
+     * under the product name as "Spec 2604". Proves which spec revision the
+     * client was quoted. Optional/back-compat: undefined prints nothing.
+     */
+    spec_label?: string | null;
     quantity: number;
     unit_price: number;
     total_price: number;
@@ -762,6 +768,10 @@ function LinesTable({ data }: { data: QuotationPDFData }) {
             <View style={s.colDescription}>
               <Text style={s.descPrimary}>{line.product_name}</Text>
               {sub && <Text style={s.descSecondary}>{sub}</Text>}
+              {line.spec_label != null &&
+                String(line.spec_label).trim() !== "" && (
+                  <Text style={s.descSecondary}>Spec {line.spec_label}</Text>
+                )}
             </View>
             <View style={s.colClientRef}>
               <Text style={s.tableBodyCell}>

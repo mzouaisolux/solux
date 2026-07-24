@@ -20,7 +20,7 @@
 
 import type { ProductionOrderStatus, ProductionPaymentState } from "./types.ts";
 import type { OperationsAlertLevel } from "./operations-alerts.ts";
-import type { Capability } from "./permissions.ts";
+import type { Capability } from "@/lib/permissions";
 
 /** BL profile completeness on the client (drives the BL cell colour). */
 export type BlStatus = "complete" | "partial" | "missing";

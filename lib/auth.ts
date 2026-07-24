@@ -22,6 +22,7 @@ export const VIEW_AS_COOKIE = "solux_view_as_role";
  */
 export const getCurrentUserRole = cache(async function getCurrentUserRole(): Promise<{
   userId: string | null;
+  email: string | null;
   role: Role | null;
   isSuperAdmin: boolean;
 }> {
@@ -29,7 +30,8 @@ export const getCurrentUserRole = cache(async function getCurrentUserRole(): Pro
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  if (!user) return { userId: null, role: null, isSuperAdmin: false };
+  if (!user)
+    return { userId: null, email: null, role: null, isSuperAdmin: false };
 
   const { data } = await supabase
     .from("user_roles")
@@ -43,7 +45,11 @@ export const getCurrentUserRole = cache(async function getCurrentUserRole(): Pro
   // purposes, since the DB column stays "admin" for RLS compatibility.
   const role: Role | null = isSuperAdmin ? "super_admin" : dbRole;
 
-  return { userId: user.id, role, isSuperAdmin };
+  // `email` is surfaced here so the app shell (layout, Nav) can render the
+  // signed-in identity WITHOUT a second `supabase.auth.getUser()` round-trip.
+  // This function is React-`cache()`d, so the whole layout+page render shares
+  // ONE auth-server validation instead of several.
+  return { userId: user.id, email: user.email ?? null, role, isSuperAdmin };
 });
 
 /**
@@ -56,16 +62,23 @@ export const getCurrentUserRole = cache(async function getCurrentUserRole(): Pro
  */
 export const getEffectiveRole = cache(async function getEffectiveRole(): Promise<{
   userId: string | null;
+  email: string | null;
   realRole: Role | null;
   effectiveRole: Role | null;
   isSuperAdmin: boolean;
   isSimulating: boolean;
 }> {
-  const { userId, role: realRole, isSuperAdmin } = await getCurrentUserRole();
+  const {
+    userId,
+    email,
+    role: realRole,
+    isSuperAdmin,
+  } = await getCurrentUserRole();
 
   if (!isSuperAdmin) {
     return {
       userId,
+      email,
       realRole,
       effectiveRole: realRole,
       isSuperAdmin,
@@ -83,6 +96,7 @@ export const getEffectiveRole = cache(async function getEffectiveRole(): Promise
   if (!isValid || candidate === realRole) {
     return {
       userId,
+      email,
       realRole,
       effectiveRole: realRole,
       isSuperAdmin,
@@ -92,6 +106,7 @@ export const getEffectiveRole = cache(async function getEffectiveRole(): Promise
 
   return {
     userId,
+    email,
     realRole,
     effectiveRole: candidate,
     isSuperAdmin,

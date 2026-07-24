@@ -60,5 +60,4 @@ alter table production_task_lists
 notify pgrst, 'reload schema';
 
 commit;
-```
 

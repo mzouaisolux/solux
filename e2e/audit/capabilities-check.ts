@@ -26,9 +26,9 @@ import {
   CAPABILITY_CATALOG,
   ALL_CAPABILITY_KEYS,
   groupCapabilities,
-} from "../../lib/capabilities.ts";
+} from "../../features/Permissions/lib/capabilities.ts";
 
-const ROOTS = ["app", "lib", "components"];
+const ROOTS = ["app", "lib", "components", "features"];
 const PERM_FNS = [
   "requireCapability",
   "requireCapabilityOrAdmin",
@@ -36,7 +36,7 @@ const PERM_FNS = [
   "hasUiCapability",
   "canAccessOrAdmin",
 ];
-const CATALOG_FILE = path.resolve("lib/capabilities.ts");
+const CATALOG_FILE = path.resolve("features/Permissions/lib/capabilities.ts");
 
 function walk(dir: string, out: string[] = []): string[] {
   for (const e of fs.readdirSync(dir, { withFileTypes: true })) {

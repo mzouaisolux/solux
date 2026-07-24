@@ -14,7 +14,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { canSeeRecord, type VisibilityScope } from "../lib/visibility.ts";
+import { canSeeRecord, type VisibilityScope } from "../features/Permissions/lib/visibility.ts";
 import { TASK_LIST_TLM_QUEUE } from "../lib/types.ts";
 
 const scope = (over: Partial<VisibilityScope>): VisibilityScope => ({

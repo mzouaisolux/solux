@@ -74,13 +74,33 @@ export default async function AdminProductEditPage({
           <input type="hidden" name="id" value={product.id} />
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <label className="block">
-              <span className="text-sm font-medium">Name *</span>
+              <span className="text-sm font-medium">Name</span>
               <input
                 name="name"
                 defaultValue={product.name ?? ""}
-                required
                 className="mt-1 w-full rounded border px-3 py-2"
               />
+              <p className="text-xs text-neutral-500 mt-1">
+                Set a <b>Variant</b> below to auto-name as{" "}
+                <b>Category + Variant</b>. Edit here only to override.
+              </p>
+            </label>
+            <label className="block">
+              <span className="text-sm font-medium">
+                Variant{" "}
+                <span className="text-xs text-neutral-500">
+                  (e.g. B-80, 120 — blank for single-model families)
+                </span>
+              </span>
+              <input
+                name="variant"
+                placeholder="B-80"
+                className="mt-1 w-full rounded border px-3 py-2"
+              />
+              <p className="text-xs text-neutral-500 mt-1">
+                Name becomes <b>Category + Variant</b> (e.g. &ldquo;Vandal
+                B-80&rdquo;). Leave blank to keep the Name above.
+              </p>
             </label>
             <label className="block">
               <span className="text-sm font-medium">

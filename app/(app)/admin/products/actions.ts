@@ -4,6 +4,22 @@ import { createClient } from "@/lib/supabase/server";
 import { requireCapabilityOrAdmin } from "@/lib/permissions";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
+import { composeProductName } from "@/lib/product-name";
+
+/**
+ * Resolve a product's `name` from the form, applying the naming convention:
+ * FAMILY (category) + VARIANT. When a `variant` is provided the name is composed
+ * from it (single source of truth — see lib/product-name.ts); otherwise fall
+ * back to a typed `name` so genuine oddballs can still be set by hand.
+ */
+function resolveProductName(
+  formData: FormData,
+  family: string | null
+): string | null {
+  const variant = str(formData, "variant");
+  if (variant !== null) return composeProductName(family, variant);
+  return str(formData, "name");
+}
 
 function str(fd: FormData, key: string) {
   const v = fd.get(key);
@@ -43,9 +59,6 @@ export async function createProduct(formData: FormData) {
   await requireCapabilityOrAdmin("admin.manage_products");
   const supabase = createClient();
 
-  const name = str(formData, "name");
-  if (!name) throw new Error("Product name is required");
-
   // Category is mandatory and must come from the categories table (no free text).
   const categoryId = str(formData, "category_id");
   if (!categoryId) throw new Error("Please select a category");
@@ -58,6 +71,10 @@ export async function createProduct(formData: FormData) {
   // denormalized `category` text alongside it for backward compat.
   const cat = await resolveCategory(supabase, categoryId);
   if (!cat.category_id) throw new Error("Please select a category");
+
+  // Name = FAMILY (category) + VARIANT when a variant is given, else a typed name.
+  const name = resolveProductName(formData, cat.category);
+  if (!name) throw new Error("Enter a Variant, or a Name.");
   const { data: inserted, error } = await supabase
     .from("products")
     .insert({
@@ -113,8 +130,10 @@ export async function updateProduct(formData: FormData) {
   if (!categoryId) throw new Error("Please select a category");
   const cat = await resolveCategory(supabase, categoryId);
   if (!cat.category_id) throw new Error("Please select a category");
+  const name = resolveProductName(formData, cat.category);
+  if (!name) throw new Error("Enter a Variant, or a Name.");
   const payload: Record<string, any> = {
-    name: str(formData, "name"),
+    name,
     sku: str(formData, "sku"),
     category: cat.category,
     category_id: cat.category_id,

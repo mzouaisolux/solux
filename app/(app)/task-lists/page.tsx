@@ -2,7 +2,7 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { getEffectiveRole } from "@/lib/auth";
 import { resolveUserLabelStrings } from "@/lib/user-display";
-import { getVisibilityScope, canSeeRecord } from "@/lib/visibility";
+import { getVisibilityScope, canSeeRecord } from "@/features/Permissions/lib/visibility";
 import { TaskListStatusBadge } from "@/components/TaskListWorkflow";
 import { SalesFilter, type SalesOption } from "@/components/task-lists/SalesFilter";
 import {

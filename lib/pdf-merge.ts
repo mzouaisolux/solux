@@ -38,10 +38,41 @@ const HAIR = rgb(0.86, 0.87, 0.88);
  * skipped and reported in `skipped` so the caller can surface them; the
  * dossier itself is never lost to a bad attachment.
  */
+/**
+ * Concatenate several PDFs into one, no base dossier and no separator pages —
+ * used to bundle the selected datasheets into a single "datasheets" attachment
+ * (Change 2). Each source keeps its own pages/branding. A source that fails to
+ * parse is skipped and reported, never aborting the bundle.
+ */
+export async function mergePdfs(
+  items: { bytes: ArrayBuffer | Uint8Array; label?: string | null }[]
+): Promise<{ bytes: Uint8Array; embedded: string[]; skipped: string[] }> {
+  const out = await PDFDocument.create();
+  const embedded: string[] = [];
+  const skipped: string[] = [];
+  for (const item of items) {
+    try {
+      const src = await PDFDocument.load(item.bytes, { ignoreEncryption: true });
+      const pages = await out.copyPages(src, src.getPageIndices());
+      pages.forEach((p) => out.addPage(p));
+      embedded.push(item.label ?? "");
+    } catch {
+      skipped.push(item.label ?? "");
+    }
+  }
+  const bytes = await out.save();
+  return { bytes, embedded, skipped };
+}
+
 export async function mergeDossierWithAppendix(
   dossierBytes: ArrayBuffer | Uint8Array,
-  items: AppendixPayload[]
+  items: AppendixPayload[],
+  /** Options. `separators` (default true) inserts a labelled A4 page before
+   *  each appended file — the Production Dossier wants them; the quotation
+   *  package (branded datasheets that carry their own header) does not. */
+  opts: { separators?: boolean } = {}
 ): Promise<{ bytes: Uint8Array; embedded: string[]; skipped: string[] }> {
+  const withSeparators = opts.separators !== false;
   const out = await PDFDocument.load(dossierBytes);
   const helv = await out.embedFont(StandardFonts.Helvetica);
   const helvBold = await out.embedFont(StandardFonts.HelveticaBold);
@@ -111,7 +142,7 @@ export async function mergeDossierWithAppendix(
           ignoreEncryption: true,
         });
         const pages = await out.copyPages(src, src.getPageIndices());
-        drawSeparator(item);
+        if (withSeparators) drawSeparator(item);
         for (const p of pages) out.addPage(p);
       } else {
         // image — embed at native resolution, draw fitted to the page frame
@@ -127,7 +158,7 @@ export async function mergeDossierWithAppendix(
           bytes[2] === 0x4e &&
           bytes[3] === 0x47;
         const img = isPng ? await out.embedPng(bytes) : await out.embedJpg(bytes);
-        drawSeparator(item);
+        if (withSeparators) drawSeparator(item);
         const page = out.addPage([A4.width, A4.height]);
         const frameW = A4.width - MARGIN * 2;
         const frameH = A4.height - MARGIN * 2 - 24; // caption strip at bottom

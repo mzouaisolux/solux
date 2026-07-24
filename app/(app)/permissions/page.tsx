@@ -1,7 +1,3 @@
-import { redirect } from "next/navigation";
-
-// /permissions lands on the Action-permissions matrix by default. The
-// distinct sub-paths (/actions, /teams) keep the tab highlight unambiguous.
-export default function PermissionsIndex() {
-  redirect("/permissions/actions");
-}
+// Route stub — implementation lives in the Permissions feature folder.
+// See features/Permissions/routes/index.tsx (and features/Permissions/_MAP.md).
+export { default } from "@/features/Permissions/routes/index";

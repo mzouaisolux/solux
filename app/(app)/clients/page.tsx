@@ -6,7 +6,7 @@ import { resolveUserLabelStrings } from "@/lib/user-display";
 import NewClientPanel from "./NewClientPanel";
 import ClientsWorkspaceList from "./ClientsWorkspaceList";
 import { isTechnicalRole, DOC_ACTIVE_STATUSES } from "@/lib/types";
-import { getVisibilityScope, canSeeRow } from "@/lib/visibility";
+import { getVisibilityScope, canSeeRow } from "@/features/Permissions/lib/visibility";
 import { hasUiCapability } from "@/lib/permissions";
 import { parseListScope, type ListScope } from "@/lib/queries";
 import { ScopeTabs } from "@/components/ScopeTabs";
