@@ -19,6 +19,19 @@ export type Role =
 export const isAdminLike = (role: Role | null): boolean =>
   role === "admin" || role === "super_admin";
 
+/**
+ * The set of roles whose role_permissions grants make up a role's EFFECTIVE
+ * capability set. Policy: `super_admin` outranks `admin` and always holds at
+ * least every right admin has — so its effective grants are the union of its
+ * own rows and admin's (a strict superset: super_admin ⊇ admin, plus any
+ * super_admin-only grants). Every other role stands on its own rows.
+ *
+ * Pure + server-free so the capability loader and the unit tests share one
+ * source of truth for this rule.
+ */
+export const rolesForCapabilityLoad = (role: Role): Role[] =>
+  role === "super_admin" ? ["super_admin", "admin"] : [role];
+
 /** True when the role has technical-review privileges on task lists
  *  and production orders (working days, deadlines, shipment edits, etc.).
  *  Operations is treated identically to Task List Manager — same scope
@@ -1579,6 +1592,20 @@ export type DocumentLine = {
    * (lib/costing-apply refuses ambiguity instead).
    */
   source_component?: "product" | "pole" | null;
+  /**
+   * m182 — per-line "send this datasheet?" choice (Change 1). Default true;
+   * set false to exclude this line's datasheet from the customer send. Does
+   * not affect the spec-version pin (provenance), only delivery.
+   */
+  include_datasheet?: boolean;
+  /**
+   * m177 — the SPEC-VERSION PIN (Section 17). FK → spec_versions.id, the family
+   * spec version this line was sold against. Defaults to the family's current
+   * version and is FROZEN when the document is sent, so a quotation always
+   * proves what the client saw even after a newer spec is published. Null =
+   * unpinned (no spec versions exist for the family, or a legacy line).
+   */
+  spec_version_id?: string | null;
   // UI-only (not persisted): set when a line was pre-filled from a previous quotation
   previous_unit_price?: number;
 };

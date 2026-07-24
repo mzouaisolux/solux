@@ -14,6 +14,9 @@ import {
   mergeSrConfig,
   type SrConfigField,
 } from "@/lib/sr-line-config";
+import { latestVersionIdByCategory } from "@/features/product-knowledge-hub/lib/versionLabel";
+import { generateQuotationPackage } from "@/lib/quotation-package-server";
+import { resolveUserLabels } from "@/lib/user-display";
 import { loadCostingSettings } from "@/lib/pricing-settings";
 import { computeCostingStatus } from "@/lib/costing-validity";
 import {
@@ -960,9 +963,110 @@ export async function updateDocumentStatus(formData: FormData) {
     .eq("id", id);
   if (error) throw new Error(error.message);
 
+  // ---- m177 FREEZE-THE-PIN-AT-SEND (Section 17) -------------------------
+  // A quotation must prove what the client was actually sold. Specs are
+  // versioned per family and the catalogue follows the CURRENT version (a live
+  // pointer); at SEND we snapshot that pointer onto each line so production —
+  // months later, possibly a version behind — builds exactly what the client
+  // saw. Only lines whose pin is still NULL are set, so a re-send never
+  // re-pins (the first send is the truth). Best-effort + soft-failing: an
+  // unmigrated env (no spec_version_id column / no spec_versions) simply skips
+  // it and the send proceeds — pinning must never block a send.
+  if (target === "sent") {
+    try {
+      const { data: pinLines } = await supabase
+        .from("document_lines")
+        .select("id, spec_version_id, category_id, products(category_id)")
+        .eq("document_id", id);
+      const pending = ((pinLines ?? []) as any[]).filter(
+        (l) => !l.spec_version_id
+      );
+      const catOf = (l: any): string | null =>
+        l.category_id ?? l.products?.category_id ?? null;
+      const cats = Array.from(
+        new Set(pending.map(catOf).filter(Boolean))
+      ) as string[];
+      if (cats.length) {
+        const { data: vers } = await supabase
+          .from("spec_versions")
+          .select("id, category_id, published_at")
+          .in("category_id", cats);
+        const latest = latestVersionIdByCategory((vers ?? []) as any[]);
+        await Promise.all(
+          pending.map((l) => {
+            const cat = catOf(l);
+            const vid = cat ? latest.get(cat) : undefined;
+            if (!vid) return Promise.resolve();
+            return supabase
+              .from("document_lines")
+              .update({ spec_version_id: vid })
+              .eq("id", l.id);
+          })
+        );
+      }
+    } catch {
+      /* pre-m177 env or no spec versions — skip, never block the send. */
+    }
+  }
+
+  // ---- m178 QUOTATION PACKAGE (PRD-006) --------------------------------
+  // With the pins now frozen, assemble the immutable "what we sent" packet —
+  // the generated quote PDF followed by each line's pinned datasheet — store
+  // it, and announce it for delivery (n8n). Best-effort and self-contained: it
+  // skips cleanly when no quote PDF exists yet, and never blocks the send.
+  if (target === "sent") {
+    try {
+      const { data: userRes } = await supabase.auth.getUser();
+      // Best-effort; outcome is recorded in quotation_packages + spec_sheet.sent
+      // (no console noise in prod — attach_disabled is an expected skip).
+      await generateQuotationPackage(supabase, id, userRes?.user?.id ?? null);
+    } catch {
+      // package assembly is best-effort — never block a send.
+    }
+  }
+
   // Audit log — pick the right event_type + severity. won / lost /
   // cancelled get distinct types so the dashboard "Recent critical
   // events" feed can filter them precisely.
+  // Enrich the status event with client + recipient, for the quotation.sent
+  // webhook / sales tracker. Best-effort: prefers the client's PRIMARY CONTACT
+  // email, else the client record email — same rule as the package delivery.
+  let clientName: string | null = null;
+  let recipientEmail: string | null = null;
+  let salesName: string | null = null;
+  try {
+    const { data: cdoc } = await supabase
+      .from("documents")
+      .select("client_id, sales_owner_id, created_by, clients(company_name, email)")
+      .eq("id", id)
+      .maybeSingle();
+    const cl = (cdoc as any)?.clients ?? null;
+    clientName = cl?.company_name ?? null;
+    recipientEmail = cl?.email ?? null;
+    const clientId = (cdoc as any)?.client_id;
+    if (clientId) {
+      const { data: pc } = await supabase
+        .from("contacts")
+        .select("email")
+        .eq("client_id", clientId)
+        .eq("is_primary", true)
+        .not("email", "is", null)
+        .limit(1)
+        .maybeSingle();
+      if ((pc as any)?.email) recipientEmail = (pc as any).email;
+    }
+    // Which sales rep: the quote's OWNER (m066), else its creator.
+    const salesId =
+      (cdoc as any)?.sales_owner_id ?? (cdoc as any)?.created_by ?? null;
+    if (salesId) {
+      const labels = await resolveUserLabels([salesId]);
+      const l = labels.get(salesId);
+      salesName = l?.displayName ?? l?.label ?? null;
+    }
+  } catch {
+    /* best-effort — never block the status change on enrichment */
+  }
+
   const eventType =
     raw === "won"
       ? "doc.won"
@@ -979,7 +1083,14 @@ export async function updateDocumentStatus(formData: FormData) {
       raw === "cancelled"
         ? `Quotation ${prev?.number ?? id.slice(0, 8) + "…"} cancelled — linked task lists and production orders auto-cancelled`
         : `Status: ${previousStatus ?? "—"} → ${raw}`,
-    payload: { from: previousStatus, to: raw, number: prev?.number ?? null },
+    payload: {
+      from: previousStatus,
+      to: raw,
+      number: prev?.number ?? null,
+      client_name: clientName,
+      recipient_email: recipientEmail,
+      sales_name: salesName,
+    },
     bestEffort: true,
   });
 

@@ -20,5 +20,5 @@
   },
   "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
   "//exclude": "*.tmp.ts are throwaway audit scratch (see .gitignore: 'scratch: temp audit scripts'). 27 predate that ignore rule and are still tracked; their type errors were failing `next build` for the whole app. Scratch must not gate a production build.",
-  "exclude": ["node_modules", "tests", "**/*.tmp.ts", "**/*.tmp.mjs"]
+  "exclude": ["node_modules", "tests", "e2e", "**/*.tmp.ts", "**/*.tmp.mjs"]
 }

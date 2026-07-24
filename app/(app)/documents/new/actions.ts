@@ -29,6 +29,13 @@ import {
   PRICING_NOTIF_COALESCE_MINUTES,
   type AuditableLine,
 } from "@/lib/pricing-audit";
+import { requireCapability } from "@/lib/permissions";
+import { emitEvent } from "@/lib/events";
+import {
+  latestVersionIdByCategory,
+  buildVersionLabelsForCategories,
+} from "@/features/product-knowledge-hub/lib/versionLabel";
+import { renderSpecSheet } from "@/features/product-knowledge-hub/render/renderSpecSheet";
 import type {
   Currency,
   DocType,
@@ -82,6 +89,9 @@ export type SaveDocumentInput = {
   commission_amount: number;
   commission_description: string | null;
   show_commission_in_pdf: boolean;
+  /** PRD-006 — attach the pinned datasheets to the customer send (default true
+   *  when omitted, e.g. the project→quotation generator). */
+  attach_datasheets?: boolean;
   /** Logistics extras (m146). Insurance = a single amount; additional_charges
    *  = repeatable {label, amount} rows (ECTN, BESC, FERI, inspection…). Both
    *  optional; added to total_price but NOT to the commission base. Persisted
@@ -237,6 +247,8 @@ export async function saveDocument(
       approved_at: l.approved_at ?? null,
       // m140 — product|pole tag for the selective Keep/Apply flow.
       source_component: l.source_component ?? null,
+      // m182 — per-line "send this datasheet?" choice. Default true.
+      include_datasheet: l.include_datasheet ?? true,
     }));
 
   // Insert lines, tolerating environments where m139/m140 are not yet
@@ -247,9 +259,16 @@ export async function saveDocument(
   const m139Cols =
     /(pricing_source|source_project_request_id|approved_by|approved_at)/;
   const insertLineRows = async (docId: string) => {
-    const rows = buildLineRows(docId);
-    const attempt = await supabase.from("document_lines").insert(rows);
+    let rows: any[] = buildLineRows(docId);
+    let attempt = await supabase.from("document_lines").insert(rows);
     if (!attempt.error) return;
+    // m182 not applied — strip include_datasheet and fall through to the
+    // existing m139/m140 cascade with the remaining columns.
+    if (/include_datasheet/.test(attempt.error.message ?? "")) {
+      rows = rows.map(({ include_datasheet, ...rest }) => rest);
+      attempt = await supabase.from("document_lines").insert(rows);
+      if (!attempt.error) return;
+    }
     if (/source_component/.test(attempt.error.message ?? "")) {
       // m140 not applied — strip only its column, keep the m139 lock.
       const noM140 = rows.map(({ source_component, ...rest }) => rest);
@@ -475,6 +494,8 @@ export async function saveDocument(
       affair_name: input.affair_name?.trim() || null,
       insurance_cost,
       additional_charges: clean_charges,
+      // m179 — per-quote datasheet-attach choice (shares the fallback below).
+      attach_datasheets: input.attach_datasheets ?? true,
     };
 
     {
@@ -484,7 +505,7 @@ export async function saveDocument(
         .eq("id", input.edit_of);
       if (
         attempt.error &&
-        /(warranty_years|offer_validity|affair_name|insurance_cost|additional_charges)/.test(
+        /(warranty_years|offer_validity|affair_name|insurance_cost|additional_charges|attach_datasheets)/.test(
           attempt.error.message ?? ""
         )
       ) {
@@ -665,6 +686,8 @@ export async function saveDocument(
     // m146 — logistics extras (shares the retry-without fallback below).
     insurance_cost,
     additional_charges: clean_charges,
+    // m179 — per-quote datasheet-attach choice (shares the fallback below).
+    attach_datasheets: input.attach_datasheets ?? true,
   };
 
   // One insert attempt for a candidate number. Encapsulates the "newer
@@ -682,7 +705,7 @@ export async function saveDocument(
       .then((attempt) => {
         if (
           attempt.error &&
-          /(warranty_years|offer_validity|affair_name|affair_id|version|root_document_id|original_sales_request|insurance_cost|additional_charges)/.test(
+          /(warranty_years|offer_validity|affair_name|affair_id|version|root_document_id|original_sales_request|insurance_cost|additional_charges|attach_datasheets)/.test(
             attempt.error.message ?? ""
           )
         ) {
@@ -846,4 +869,225 @@ export async function saveDocument(
   revalidatePath("/clients");
   revalidatePath("/dashboard");
   return { id: inserted!.id, number: numberRow };
+}
+
+/**
+ * PRD-006 — live datasheet plan for the Preview step. For each draft line,
+ * resolve its family's CURRENT spec version (a live pointer — NOTHING is
+ * frozen here) and whether a datasheet exists for it, so the rep can see what
+ * would attach before deciding. Read-only, best-effort: any failure yields an
+ * empty plan and the Preview simply shows no per-line breakdown.
+ */
+export type DraftDatasheetItem = {
+  product_name: string;
+  spec_label: string | null;
+  has_datasheet: boolean;
+  is_catalogue: boolean;
+};
+
+export async function resolveDraftDatasheetPlan(
+  lineInputs: {
+    product_id: string | null;
+    category_id: string | null;
+    product_name: string | null;
+  }[]
+): Promise<DraftDatasheetItem[]> {
+  try {
+    const supabase = createClient();
+
+    // A draft line often has product_id but NO category_id yet (the DB trigger
+    // stamps category_id only at save). So resolve the family from the PRODUCT,
+    // exactly like freeze-at-send — don't trust the line's category_id alone.
+    const productIds = Array.from(
+      new Set(lineInputs.map((l) => l.product_id).filter(Boolean))
+    ) as string[];
+    const nameById = new Map<string, string>();
+    const catByProduct = new Map<string, string>();
+    if (productIds.length) {
+      const { data: prods } = await supabase
+        .from("products")
+        .select("id, name, category_id")
+        .in("id", productIds);
+      for (const p of (prods ?? []) as any[]) {
+        nameById.set(p.id, p.name);
+        if (p.category_id) catByProduct.set(p.id, p.category_id);
+      }
+    }
+    const effectiveCat = (l: { product_id: string | null; category_id: string | null }) =>
+      l.category_id ?? (l.product_id ? catByProduct.get(l.product_id) ?? null : null);
+
+    const cats = Array.from(
+      new Set(lineInputs.map(effectiveCat).filter(Boolean))
+    ) as string[];
+
+    const currentVerByCat = new Map<string, { id: string; version: string }>();
+    const labelById = new Map<string, string>();
+    if (cats.length) {
+      const { data: vers } = await supabase
+        .from("spec_versions")
+        .select("id, category_id, version, published_at")
+        .in("category_id", cats);
+      const rows = (vers ?? []) as any[];
+      for (const [id, label] of buildVersionLabelsForCategories(rows)) {
+        labelById.set(id, label);
+      }
+      const latest = latestVersionIdByCategory(rows);
+      const verById = new Map(rows.map((v) => [v.id, v]));
+      for (const [cat, id] of latest) {
+        currentVerByCat.set(cat, { id, version: (verById.get(id) as any)?.version });
+      }
+    }
+
+    return lineInputs.map((l) => {
+      // A catalogue line = one backed by a product (its family resolves from it).
+      if (!l.product_id) {
+        return {
+          product_name: l.product_name ?? "—",
+          spec_label: null,
+          has_datasheet: false,
+          is_catalogue: false,
+        };
+      }
+      const cat = effectiveCat(l);
+      const cur = cat ? currentVerByCat.get(cat) : undefined;
+      const spec_label = cur ? labelById.get(cur.id) ?? null : null;
+      // "Will attach" = the family has a current spec version. Send renders the
+      // datasheet on demand if it isn't pre-rendered, so any product with a
+      // published spec attaches — no dependency on the model page being opened.
+      const has_datasheet = !!cur;
+      return {
+        product_name: nameById.get(l.product_id) ?? l.product_name ?? "—",
+        spec_label,
+        has_datasheet,
+        is_catalogue: true,
+      };
+    });
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * PRD-006 — the actual datasheet FILES for the Preview merge. For each line
+ * that will attach, ensure a rendered datasheet exists (render on demand if
+ * not) and return a short-lived signed URL, in line order. The browser fetches
+ * these and merges them onto the quote PDF (pdf-merge) so the rep sees and
+ * downloads the full package before sending. Best-effort: failures are skipped.
+ */
+export type DraftDatasheetFile = {
+  product_name: string;
+  spec_label: string | null;
+  file_name: string;
+  signed_url: string | null;
+};
+
+export async function buildDraftDatasheetFiles(
+  lineInputs: {
+    product_id: string | null;
+    category_id: string | null;
+    product_name: string | null;
+  }[]
+): Promise<DraftDatasheetFile[]> {
+  try {
+    const supabase = createClient();
+    const productIds = Array.from(
+      new Set(lineInputs.map((l) => l.product_id).filter(Boolean))
+    ) as string[];
+    if (!productIds.length) return [];
+
+    const nameById = new Map<string, string>();
+    const skuById = new Map<string, string>();
+    const catByProduct = new Map<string, string>();
+    const { data: prods } = await supabase
+      .from("products")
+      .select("id, name, sku, category_id")
+      .in("id", productIds);
+    for (const p of (prods ?? []) as any[]) {
+      nameById.set(p.id, p.name);
+      if (p.sku) skuById.set(p.id, p.sku);
+      if (p.category_id) catByProduct.set(p.id, p.category_id);
+    }
+    const effCat = (l: { product_id: string | null; category_id: string | null }) =>
+      l.category_id ?? (l.product_id ? catByProduct.get(l.product_id) ?? null : null);
+
+    const cats = Array.from(
+      new Set(lineInputs.map(effCat).filter(Boolean))
+    ) as string[];
+    const curByCat = new Map<string, { id: string; version: string }>();
+    const labelById = new Map<string, string>();
+    if (cats.length) {
+      const { data: vers } = await supabase
+        .from("spec_versions")
+        .select("id, category_id, version, published_at")
+        .in("category_id", cats);
+      const rows = (vers ?? []) as any[];
+      for (const [id, label] of buildVersionLabelsForCategories(rows)) {
+        labelById.set(id, label);
+      }
+      const latest = latestVersionIdByCategory(rows);
+      const verById = new Map(rows.map((v) => [v.id, v]));
+      for (const [c, id] of latest) {
+        curByCat.set(c, { id, version: (verById.get(id) as any)?.version });
+      }
+    }
+
+    // Existing rendered datasheets (avoid re-rendering), figma_override preferred.
+    const versionStrings = Array.from(
+      new Set(Array.from(curByCat.values()).map((v) => v.version).filter(Boolean))
+    ) as string[];
+    const pathByKey = new Map<string, string>();
+    if (versionStrings.length) {
+      const { data: docs } = await supabase
+        .from("spec_documents")
+        .select("product_id, spec_version, kind, storage_path")
+        .in("product_id", productIds)
+        .in("spec_version", versionStrings);
+      const best = new Map<string, any>();
+      for (const d of (docs ?? []) as any[]) {
+        if (!d.storage_path) continue;
+        const k = `${d.product_id} ${d.spec_version}`;
+        const cur = best.get(k);
+        if (!cur || (d.kind === "figma_override" && cur.kind !== "figma_override")) {
+          best.set(k, d);
+        }
+      }
+      for (const [k, d] of best) pathByKey.set(k, d.storage_path);
+    }
+
+    const out: DraftDatasheetFile[] = [];
+    for (const l of lineInputs) {
+      if (!l.product_id) continue;
+      const cat = effCat(l);
+      const cur = cat ? curByCat.get(cat) : undefined;
+      if (!cur?.version) continue; // no spec → nothing to attach
+      const key = `${l.product_id} ${cur.version}`;
+      let path = pathByKey.get(key) ?? null;
+      let signed: string | null = null;
+      if (!path) {
+        // Render on demand — mirrors the send-time assembler.
+        try {
+          const r = await renderSpecSheet(l.product_id, cur.version);
+          path = r.path;
+          signed = r.signedUrl;
+        } catch {
+          continue;
+        }
+      }
+      if (!signed && path) {
+        const { data } = await supabase.storage
+          .from("documents")
+          .createSignedUrl(path, 60 * 30);
+        signed = data?.signedUrl ?? null;
+      }
+      out.push({
+        product_name: nameById.get(l.product_id) ?? l.product_name ?? "—",
+        spec_label: labelById.get(cur.id) ?? null,
+        file_name: `${skuById.get(l.product_id) ?? "datasheet"}_${cur.version}.pdf`,
+        signed_url: signed,
+      });
+    }
+    return out;
+  } catch {
+    return [];
+  }
 }

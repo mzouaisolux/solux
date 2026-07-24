@@ -38,3 +38,5 @@ e2e/.runs
 # misc
 .DS_Store
 *.log
+features/product-knowledge-hub/scripts/__pycache__/
+e2e/tsconfig.tsbuildinfo

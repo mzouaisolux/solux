@@ -32,7 +32,7 @@
 import { cache } from "react";
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentUserRole, getEffectiveRole } from "@/lib/auth";
-import { isAdminLike, type Role } from "@/lib/types";
+import { isAdminLike, rolesForCapabilityLoad, type Role } from "@/lib/types";
 import type { Capability } from "@/lib/capabilities";
 
 /* ===========================================================================
@@ -84,10 +84,18 @@ const loadEnabledCapabilities = cache(async function loadEnabledCapabilities(rol
     return cached.enabledSet;
   }
   const supabase = createClient();
+  // Policy: super_admin outranks admin and always holds at least every right
+  // admin has. Its effective grants are the union of its own rows and admin's
+  // (super_admin ⊇ admin), so a new admin-facing capability can never be
+  // invisible to a super-admin just because only the admin role_permissions
+  // row was seeded. View-As is unaffected — hasUiCapability loads the
+  // *simulated* role directly, so a super-admin viewing as sales sees exactly
+  // what sales sees.
+  const rolesToLoad = rolesForCapabilityLoad(role);
   const { data, error } = await supabase
     .from("role_permissions")
     .select("permission_key")
-    .eq("role", role)
+    .in("role", rolesToLoad)
     .eq("enabled", true);
   if (error) {
     console.error(

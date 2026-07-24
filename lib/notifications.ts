@@ -306,6 +306,7 @@ export async function getNotificationSummary(
     project_request: [],
     affair: [],
     system: [],
+    spec_change_request: [],
   };
   for (const e of surfacedEvents) {
     if (e.entity_id) byType[e.entity_type].push(e.entity_id);

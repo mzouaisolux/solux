@@ -23,12 +23,14 @@
  * - Events are immutable. RLS allows INSERT but never UPDATE/DELETE.
  */
 
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/server";
 import {
   NOTIFICATION_CATALOG,
   shouldEmitOnce,
 } from "@/lib/notification-catalog";
 import { getCurrentUserRole } from "@/lib/auth";
+import { enqueueWebhookDeliveries } from "@/features/Intergration/lib/webhook-dispatch";
 
 // Pure types + palettes live in `lib/events-shared.ts` so client
 // components (OperationsFeed, EventDetailDrawer, etc.) can import
@@ -100,6 +102,10 @@ const DEFAULT_SEVERITY: Record<EventType, EventSeverity> = {
   "client.contact_added": "low",
   "client.contact_updated": "low",
   "client.contact_deleted": "low",
+  "client.interaction_logged": "low",
+  // Inbound customer message — HIGH so it rings the client owner's bell
+  // (the owner should see a reply promptly). Read at emit time from the row.
+  "client.message_received": "high",
   "affair.action_planned": "low",
   "affair.action_done": "low",
   "affair.action_deleted": "low",
@@ -148,10 +154,21 @@ const DEFAULT_SEVERITY: Record<EventType, EventSeverity> = {
   "pr.won": "medium",
   "pr.lost": "low",
   "pr.cancelled": "critical",
+  // Product Knowledge Hub (m160): submit needs an approver's eyes; publish is
+  // the notable outcome; reject sends it back to draft.
+  "spec.submitted": "medium",
+  "spec.published": "medium",
+  "spec.schema_changed": "low",
+  "spec_sheet.sent": "low",
+  "business.message.sent": "low",
+  "spec.rejected": "medium",
   "pr.cost_revision_dismissed": "medium",
   "admin.permissions_changed": "high",
   "admin.user_role_changed": "high",
   "import.batch_completed": "low",
+  "import.requested": "low",
+  "import.file_reviewed": "medium",
+  "datasheet.refresh_needed": "medium",
   "system.dev_reset": "critical",
 };
 
@@ -184,20 +201,42 @@ export type EmitEventArgs = {
  * the audit row and a console.warn surfaces it.
  */
 export async function emitEvent(args: EmitEventArgs): Promise<void> {
+  const { userId } = await getCurrentUserRole();
+  await emitEventWith(createClient(), userId, args);
+}
+
+/**
+ * Session-free emit. Same behavior as `emitEvent` but takes the Supabase client
+ * and the acting user's id explicitly, so it can run from trusted server
+ * contexts that have NO user session — e.g. the inbound n8n import callback
+ * (`/api/hooks/import-callback`), which passes the service-role client and a
+ * null/system actor. `emitEvent` is just this with (cookie client, current user).
+ *
+ * Using the service-role client here is what lets the callback write the audit
+ * row (and fan out) despite having no session — the cookie client would be
+ * RLS-blocked and, being best-effort, would silently drop the event.
+ */
+export async function emitEventWith(
+  supabase: SupabaseClient,
+  actorId: string | null,
+  args: EmitEventArgs
+): Promise<void> {
   try {
-    const supabase = createClient();
-    const { userId } = await getCurrentUserRole();
     const severity = args.severity ?? DEFAULT_SEVERITY[args.event_type] ?? "low";
 
-    const { error } = await supabase.from("events").insert({
-      entity_type: args.entity_type,
-      entity_id: args.entity_id,
-      event_type: args.event_type,
-      severity,
-      message: args.message,
-      payload: args.payload ?? {},
-      actor_id: userId,
-    });
+    const { data: inserted, error } = await supabase
+      .from("events")
+      .insert({
+        entity_type: args.entity_type,
+        entity_id: args.entity_id,
+        event_type: args.event_type,
+        severity,
+        message: args.message,
+        payload: args.payload ?? {},
+        actor_id: actorId,
+      })
+      .select("id")
+      .maybeSingle();
 
     if (error) {
       console.error(
@@ -212,6 +251,18 @@ export async function emitEvent(args: EmitEventArgs): Promise<void> {
       if (!args.bestEffort) {
         throw new Error(`Event emission failed: ${error.message}`);
       }
+    } else {
+      // Integrations fan-out (Step 4b): if this event maps to a subscribed
+      // webhook, enqueue delivery rows. Best-effort + fully self-contained
+      // (own try/catch inside), so it can never break event emission.
+      await enqueueWebhookDeliveries({
+        event_id: (inserted as { id: string } | null)?.id ?? null,
+        event_type: args.event_type,
+        entity_type: args.entity_type,
+        entity_id: args.entity_id,
+        message: args.message,
+        payload: args.payload ?? null,
+      });
     }
   } catch (e: any) {
     console.error("[emitEvent] uncaught error:", e?.message);

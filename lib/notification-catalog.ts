@@ -45,6 +45,13 @@ export type NotificationCatalogEntry = {
 
 /** Every emitted event, described once. Severities mirror events.ts. */
 export const NOTIFICATION_CATALOG: Record<EventType, NotificationCatalogEntry> = {
+  // ---- product knowledge hub ----
+  "spec.submitted": { entity: "spec_change_request", category: "workflow", severity: "medium", label: "Spec change submitted" },
+  "spec.published": { entity: "spec_change_request", category: "workflow", severity: "medium", label: "Spec published" },
+  "spec.schema_changed": { entity: "system", category: "workflow", severity: "low", label: "Spec schema changed" },
+  "spec_sheet.sent": { entity: "document", category: "crm", severity: "low", label: "Spec sheet sent to customer" },
+  "business.message.sent": { entity: "client", category: "crm", severity: "low", label: "Business message sent" },
+  "spec.rejected": { entity: "spec_change_request", category: "workflow", severity: "medium", label: "Spec change rejected" },
   // ---- production_order ----
   "po.created": { entity: "production_order", category: "production", severity: "medium", label: "Production order created" },
   "po.status_changed": { entity: "production_order", category: "production", severity: "medium", label: "Production status changed" },
@@ -105,7 +112,12 @@ export const NOTIFICATION_CATALOG: Record<EventType, NotificationCatalogEntry> =
   "client.contact_added": { entity: "client", category: "bookkeeping", severity: "low", label: "Contact added" },
   "client.contact_updated": { entity: "client", category: "bookkeeping", severity: "low", label: "Contact updated" },
   "client.contact_deleted": { entity: "client", category: "bookkeeping", severity: "low", label: "Contact deleted" },
+  "client.interaction_logged": { entity: "client", category: "bookkeeping", severity: "low", label: "Interaction logged" },
+  "client.message_received": { entity: "client", category: "crm", severity: "high", label: "Customer replied" },
   // ---- historical invoice import (read-only island) ----
+  "import.requested": { entity: "spec_change_request", category: "workflow", severity: "low", label: "Baseline import requested" },
+  "import.file_reviewed": { entity: "spec_change_request", category: "workflow", severity: "medium", label: "Import file needs review" },
+  "datasheet.refresh_needed": { entity: "spec_change_request", category: "workflow", severity: "medium", label: "Datasheet needs a glossy refresh" },
   "import.batch_completed": { entity: "client", category: "bookkeeping", severity: "low", label: "Historical invoices imported" },
   // ---- affair (CRM) ----
   "affair.action_planned": { entity: "affair", category: "bookkeeping", severity: "low", label: "Next action planned" },

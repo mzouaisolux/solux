@@ -102,7 +102,9 @@ test("super-admin (all caps, admin-like) sees every category", () => {
     "orders",
     "sales",
     "catalog",
+    "product-knowledge-hub",
     "pricing",
+    "settings",
     "admin",
   ]);
 });

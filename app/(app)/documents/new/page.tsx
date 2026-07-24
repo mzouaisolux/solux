@@ -11,7 +11,7 @@ import type { CostMap } from "@/lib/types";
 export default async function NewDocumentPage({
   searchParams,
 }: {
-  searchParams?: { revise?: string; edit?: string; affair?: string; client?: string };
+  searchParams?: { revise?: string; edit?: string; affair?: string; client?: string; product?: string };
 }) {
   const supabase = createClient();
 
@@ -329,6 +329,32 @@ export default async function NewDocumentPage({
       "The project this link pointed to no longer exists. Select a client and project below.";
   }
 
+  // Knowledge Hub "Add to quote" (?product=<sku>): seed a FRESH quote with one
+  // catalogue line for that product (same line shape the revise path uses).
+  // Ignored when revising/editing an existing document.
+  let presetLine: any = null;
+  const productSku = searchParams?.product || null;
+  if (productSku && !sourceId) {
+    const p = (products ?? []).find((x: any) => x.sku === productSku);
+    if (p) {
+      presetLine = {
+        product_id: p.id,
+        category_id: (p as any).category_id ?? null,
+        quantity: 1,
+        selected_options: {},
+        unit_price: 0,
+        total_price: 0,
+        pricing_mode: "auto",
+        pricing_tier: "medium",
+        original_unit_price: 0,
+        discount_type: null,
+        discount_value: 0,
+        client_product_name: null,
+        config_values: {},
+      };
+    }
+  }
+
   // Admin-only: cost prices. Sales users literally can't read this (RLS).
   let costs: CostMap | null = null;
   if (isAdmin) {
@@ -402,7 +428,8 @@ export default async function NewDocumentPage({
         </div>
       )}
       <NewDocumentForm
-        key={sourceId ?? affairParamId ?? clientParamId ?? "new"}
+        key={sourceId ?? affairParamId ?? clientParamId ?? (presetLine ? `product:${productSku}` : "new")}
+        presetLine={presetLine}
         products={products ?? []}
         options={options ?? []}
         clients={clients ?? []}

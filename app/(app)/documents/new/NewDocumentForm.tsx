@@ -25,7 +25,12 @@ import { suggestClientCode } from "@/lib/client-code";
 import { createClient as createBrowserSupabase } from "@/lib/supabase/client";
 import { saveBlobAs } from "@/lib/saveBlob";
 import { buildPdfFilename } from "@/lib/pdf-filename";
-import { saveDocument } from "./actions";
+import {
+  saveDocument,
+  resolveDraftDatasheetPlan,
+  buildDraftDatasheetFiles,
+  type DraftDatasheetItem,
+} from "./actions";
 import { savePdfPath } from "../[id]/actions";
 import { quickCreateAffair } from "@/app/(app)/affairs/actions";
 import { requestCostingRevision } from "@/app/(app)/projects/actions";
@@ -166,6 +171,7 @@ export default function NewDocumentForm({
   presetClientId = null,
   lockClient = false,
   staleLinkNotice = null,
+  presetLine = null,
 }: {
   products: Product[];
   options: Option[];
@@ -207,6 +213,9 @@ export default function NewDocumentForm({
   /** The ?client= / ?affair= id in the URL no longer resolves (row deleted) —
    *  the server degraded to the unlocked flow; explain why to the user. */
   staleLinkNotice?: string | null;
+  /** ?product=<sku> (Knowledge Hub "Add to quote"): a single catalogue line to
+   *  seed a FRESH quote with. Ignored in revise/edit (they keep their lines). */
+  presetLine?: DocumentLine | null;
 }) {
   // Revision mode: are we creating a new version of an existing quote?
   const isRevision = !!reviseOfId && !!initialDoc;
@@ -474,7 +483,11 @@ export default function NewDocumentForm({
     // Fresh quotes start EMPTY so the Products empty-state (with its primary
     // "Add Catalogue Product" CTA) guides the first action. Edit / revise / SR
     // flows keep their existing lines.
-    initialDoc?.lines?.length ? (initialDoc.lines as DocumentLine[]) : []
+    initialDoc?.lines?.length
+      ? (initialDoc.lines as DocumentLine[])
+      : presetLine
+        ? [presetLine]
+        : []
   );
 
   const [history, setHistory] = useState<ClientHistoryItem[]>([]);
@@ -488,6 +501,33 @@ export default function NewDocumentForm({
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewBuilding, setPreviewBuilding] = useState(false);
   const [savingFromPreview, setSavingFromPreview] = useState(false);
+  // PRD-006 — per-quote choice to attach the pinned datasheets on the customer
+  // send (default true). `datasheetPlan` is the live "what would attach"
+  // breakdown shown in Preview; resolved best-effort when the preview opens.
+  const [attachDatasheets, setAttachDatasheets] = useState(
+    (initialDoc as any)?.attach_datasheets ?? true
+  );
+  const [datasheetPlan, setDatasheetPlan] = useState<DraftDatasheetItem[] | null>(
+    null
+  );
+  // Change 1 — per-line "send this datasheet?" choice. Stores the line INDICES
+  // the rep has un-ticked in the Preview panel (index-aligned to `lines`, since
+  // datasheetPlan is resolved from `lines` in order). Default: nothing excluded.
+  const [excludedDatasheetIdx, setExcludedDatasheetIdx] = useState<Set<number>>(
+    new Set()
+  );
+  const toggleDatasheetIdx = (i: number) =>
+    setExcludedDatasheetIdx((prev) => {
+      const next = new Set(prev);
+      next.has(i) ? next.delete(i) : next.add(i);
+      return next;
+    });
+  // Change 2 — the combined datasheets PDF (the SELECTED specs, deduped) for the
+  // Preview view + Download, built when attach is on. Kept SEPARATE from
+  // previewBlob (the quote-only PDF): the send now delivers these as TWO
+  // attachments, so they must never be merged into one file here either.
+  const [specsBlob, setSpecsBlob] = useState<Blob | null>(null);
+  const [specsUrl, setSpecsUrl] = useState<string | null>(null);
 
   const anyManual = lines.some((l) => l.pricing_mode === "manual");
   const itemsTotal = lines.reduce((s, l) => s + Number(l.total_price || 0), 0);
@@ -880,11 +920,18 @@ export default function NewDocumentForm({
       commission_amount: commission,
       commission_description: commissionDescription.trim() || null,
       show_commission_in_pdf: showCommissionInPdf,
+      // PRD-006 — attach the pinned datasheets to the customer send.
+      attach_datasheets: attachDatasheets,
       // Advisory validation (m068) — flag the saved quote for a manager's
       // review. Never blocks the save.
       request_validation: requestValidation,
       validation_request_note: validationRequestNote.trim() || null,
-      lines: lines.map(({ previous_unit_price, ...rest }) => rest),
+      // Change 1 — carry each line's "send this datasheet?" choice (index-aligned
+      // to datasheetPlan). Un-ticked lines save include_datasheet = false.
+      lines: lines.map(({ previous_unit_price, ...rest }, i) => ({
+        ...rest,
+        include_datasheet: !excludedDatasheetIdx.has(i),
+      })),
     };
   }
 
@@ -899,7 +946,10 @@ export default function NewDocumentForm({
    * type — used for very early-stage previews when no client is
    * selected yet.
    */
-  function buildPdfData(previewNumber?: string | null): QuotationPDFData {
+  function buildPdfData(
+    previewNumber?: string | null,
+    plan?: DraftDatasheetItem[] | null
+  ): QuotationPDFData {
     const selectedClient = clients.find((c) => c.id === clientId) ?? null;
     const paymentLabel = formatPaymentTerms(paymentMode, paymentTerms);
     const selectedBank =
@@ -952,7 +1002,7 @@ export default function NewDocumentForm({
               (selectedClient as any).default_attention_to ?? null,
           }
         : null,
-      lines: lines.map((l) => {
+      lines: lines.map((l, i) => {
         const product = products.find((p) => p.id === l.product_id);
         // Same visibility rule as the doc page: keep only config
         // fields where visible_in_quotation = true AND
@@ -1005,6 +1055,9 @@ export default function NewDocumentForm({
           original_unit_price: l.original_unit_price,
           discount_type: l.discount_type,
           discount_value: l.discount_value,
+          // PRD-006 — the live current spec label ("2604") from the plan, so the
+          // preview PDF shows it under the product (the saved doc page pins it).
+          spec_label: plan?.[i]?.spec_label ?? null,
         };
       }),
     };
@@ -1031,16 +1084,70 @@ export default function NewDocumentForm({
           previewNumber = nextNum;
         }
       }
+      const lineInputs = lines.map((l) => ({
+        product_id: l.product_id || null,
+        category_id: (l as any).category_id ?? null,
+        // Fallback name for non-catalogue lines; the resolver fills the real
+        // product name for catalogue lines from the DB.
+        product_name: l.client_product_name ?? null,
+      }));
+
+      // PRD-006 — resolve the datasheet plan (panel + per-line spec labels).
+      const plan = await resolveDraftDatasheetPlan(lineInputs).catch(
+        () => [] as DraftDatasheetItem[]
+      );
+      setDatasheetPlan(plan);
+
+      // Quote PDF (quote-only) — the base, and what Save stores as pdf_url.
       const [{ pdf }, { default: QuotationPDF }] = await Promise.all([
         import("@react-pdf/renderer"),
         import("@/components/QuotationPDF"),
       ]);
-      const blob = await pdf(
-        <QuotationPDF data={buildPdfData(previewNumber)} />
+      const quoteBlob = await pdf(
+        <QuotationPDF data={buildPdfData(previewNumber, plan)} />
       ).toBlob();
-      const url = URL.createObjectURL(blob);
-      setPreviewBlob(blob);
-      setPreviewUrl(url);
+      setPreviewBlob(quoteBlob);
+      setPreviewUrl(URL.createObjectURL(quoteBlob));
+
+      // Change 2 — when attaching, build the SELECTED datasheets into ONE
+      // separate "datasheets" PDF (deduped) for Preview + Download — matching the
+      // two-attachment send. Respects the per-line checkboxes (excluded lines are
+      // dropped) and de-duplicates repeats. Best-effort: on failure the
+      // quote-only preview still shows.
+      if (attachDatasheets) {
+        try {
+          // Only the ticked lines (index-aligned to datasheetPlan / lines).
+          const includedLineInputs = lineInputs.filter(
+            (_, i) => !excludedDatasheetIdx.has(i)
+          );
+          const files = await buildDraftDatasheetFiles(includedLineInputs);
+          const payloads: { label: string; bytes: Uint8Array }[] = [];
+          const seenFiles = new Set<string>();
+          for (const f of files) {
+            if (!f.signed_url) continue;
+            const dedupeKey = f.file_name || f.signed_url;
+            if (seenFiles.has(dedupeKey)) continue; // de-dupe repeats
+            seenFiles.add(dedupeKey);
+            const res = await fetch(f.signed_url);
+            if (!res.ok) continue;
+            payloads.push({
+              label: f.product_name,
+              bytes: new Uint8Array(await res.arrayBuffer()),
+            });
+          }
+          if (payloads.length) {
+            const { mergePdfs } = await import("@/lib/pdf-merge");
+            const { bytes } = await mergePdfs(payloads);
+            const specs = new Blob([bytes as BlobPart], {
+              type: "application/pdf",
+            });
+            setSpecsBlob(specs);
+            setSpecsUrl(URL.createObjectURL(specs));
+          }
+        } catch {
+          /* merge is best-effort — the quote-only preview still shows. */
+        }
+      }
     } catch (e: any) {
       setError(e?.message ?? "Failed to build preview");
     } finally {
@@ -1049,12 +1156,17 @@ export default function NewDocumentForm({
   }
 
   function closePreview() {
+    setDatasheetPlan(null);
     if (previewUrl) URL.revokeObjectURL(previewUrl);
+    if (specsUrl) URL.revokeObjectURL(specsUrl);
     setPreviewUrl(null);
     setPreviewBlob(null);
+    setSpecsUrl(null);
+    setSpecsBlob(null);
   }
 
   async function handleDownloadFromPreview() {
+    // The quote PDF (the datasheets are a separate download — Change 2).
     if (!previewBlob) return;
     const selectedClient = clients.find((c) => c.id === clientId);
     const filename = buildPdfFilename({
@@ -1065,8 +1177,15 @@ export default function NewDocumentForm({
       version: initialDoc?.version ?? null,
     });
     // Native Save-As dialog (Chromium) with graceful fallback to Downloads.
-    // previewBlob is already in state → the user gesture is fresh here.
+    // The blob is already in state → the user gesture is fresh here.
     await saveBlobAs(previewBlob, filename);
+  }
+
+  async function handleDownloadDatasheets() {
+    if (!specsBlob) return;
+    const selectedClient = clients.find((c) => c.id === clientId);
+    const num = createdNumber ?? selectedClient?.company_name ?? "quotation";
+    await saveBlobAs(specsBlob, `${num}_Datasheets.pdf`);
   }
 
   async function persist(blob: Blob | null) {
@@ -3485,6 +3604,98 @@ export default function NewDocumentForm({
                 title="Quotation preview"
               />
             </div>
+            {/* PRD-006 — attach spec sheets to the customer send (default on).
+                The spec version is recorded on the quote at send regardless. */}
+            <div className="border-t px-4 py-3">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <div className="text-sm font-medium">Attach spec sheets</div>
+                  <div className="text-xs text-neutral-500">
+                    Append each product&apos;s datasheet to the customer send.
+                    The spec version is recorded on the quote either way.
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={attachDatasheets}
+                  aria-label="Attach spec sheets"
+                  onClick={() => setAttachDatasheets((v: boolean) => !v)}
+                  className={`relative h-6 w-11 flex-none rounded-full transition-colors ${
+                    attachDatasheets ? "bg-solux" : "bg-neutral-300"
+                  }`}
+                >
+                  <span
+                    className={`absolute top-0.5 h-5 w-5 rounded-full bg-white transition-all ${
+                      attachDatasheets ? "left-[22px]" : "left-0.5"
+                    }`}
+                  />
+                </button>
+              </div>
+              {attachDatasheets &&
+                datasheetPlan &&
+                datasheetPlan.length > 0 && (
+                  <>
+                    <ul className="mt-3 space-y-1">
+                      {datasheetPlan.map((it, i) => {
+                        const excluded = excludedDatasheetIdx.has(i);
+                        return (
+                          <li
+                            key={i}
+                            className="flex items-center gap-2 text-sm"
+                          >
+                            {it.has_datasheet ? (
+                              <input
+                                type="checkbox"
+                                checked={!excluded}
+                                onChange={() => toggleDatasheetIdx(i)}
+                                aria-label={`Attach ${it.product_name} datasheet`}
+                                className="h-4 w-4 accent-solux"
+                              />
+                            ) : (
+                              <span className="text-neutral-400">—</span>
+                            )}
+                            <span
+                              className={
+                                it.has_datasheet && !excluded
+                                  ? ""
+                                  : "text-neutral-500"
+                              }
+                            >
+                              {it.product_name}
+                            </span>
+                            {it.spec_label && (
+                              <span className="text-neutral-400">
+                                · Spec {it.spec_label}
+                              </span>
+                            )}
+                            <span className="ml-auto text-xs text-neutral-500">
+                              {it.has_datasheet
+                                ? excluded
+                                  ? "excluded"
+                                  : "will attach"
+                                : it.is_catalogue
+                                  ? "no datasheet"
+                                  : "—"}
+                            </span>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                    <div className="mt-2 text-xs text-neutral-500">
+                      {
+                        datasheetPlan.filter(
+                          (it, i) =>
+                            it.has_datasheet && !excludedDatasheetIdx.has(i)
+                        ).length
+                      }{" "}
+                      of{" "}
+                      {datasheetPlan.filter((i) => i.has_datasheet).length}{" "}
+                      datasheets selected.
+                    </div>
+                  </>
+                )}
+            </div>
             <div className="flex items-center justify-end gap-3 p-4 border-t bg-neutral-50">
               <button
                 type="button"
@@ -3500,8 +3711,18 @@ export default function NewDocumentForm({
                 disabled={savingFromPreview}
                 className="rounded border px-3 py-2 text-sm hover:bg-neutral-50 disabled:opacity-50"
               >
-                Download
+                Download quote
               </button>
+              {specsBlob && (
+                <button
+                  type="button"
+                  onClick={handleDownloadDatasheets}
+                  disabled={savingFromPreview}
+                  className="rounded border px-3 py-2 text-sm hover:bg-neutral-50 disabled:opacity-50"
+                >
+                  Download datasheets
+                </button>
+              )}
               <button
                 type="button"
                 onClick={handleSaveFromPreview}

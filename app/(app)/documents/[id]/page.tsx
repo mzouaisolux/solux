@@ -5,6 +5,7 @@ import GeneratePdfButton from "./GeneratePdfButton";
 import { SendButton } from "@/components/delivery/SendButton";
 import { QuotationSendMenuActions } from "@/components/delivery/QuotationSendMenuActions";
 import { buildPdfFilename } from "@/lib/pdf-filename";
+import { SendSpecSheetButton } from "@/features/Intergration/components/SendSpecSheetButton";
 import { StatusBadge } from "@/components/StatusBadge";
 import { loadDocumentProfitability } from "@/lib/profitability-server";
 import { ProfitabilityChip } from "@/components/profitability/ProfitabilityChip";
@@ -82,6 +83,8 @@ import {
   totalFreight,
 } from "@/lib/logistics";
 import type { QuotationPDFData } from "@/components/QuotationPDF";
+import { buildVersionLabelsForCategories } from "@/features/product-knowledge-hub/lib/versionLabel";
+import { buildQuotationPdfData } from "@/lib/quotation-pdf-data";
 import { isCustomPoleConfig } from "@/lib/custom-pole";
 import {
   CUSTOM_OPTION_SENTINEL,
@@ -187,7 +190,7 @@ export default async function DocumentViewPage({
     supabase
       .from("document_lines")
       .select(
-        "id, quantity, selected_options, unit_price, total_price, pricing_mode, pricing_tier, original_unit_price, discount_type, discount_value, client_product_name, config_values, product_id, product_name, product_sku, product_category, products(name, category, category_id)"
+        "id, quantity, selected_options, unit_price, total_price, pricing_mode, pricing_tier, original_unit_price, discount_type, discount_value, client_product_name, config_values, product_id, product_name, product_sku, product_category, spec_version_id, category_id, products(name, category, category_id)"
       )
       .eq("document_id", params.id),
     // Resilient: the wooden_box_cost column may be missing (migration 007 not
@@ -267,6 +270,31 @@ export default async function DocumentViewPage({
     unit_price: Number(c.unit_price),
     wooden_box_cost: Number(c.wooden_box_cost ?? 0),
   }));
+
+  // m177 — the frozen spec-version LABEL per line ("Spec 2604"), for the screen
+  // and the customer PDF. Labels are built per family so same-month collision
+  // suffixes (-r2) stay scoped, then merged into one id→label map. Soft-fail:
+  // pre-m177 envs (no spec_version_id / spec_versions) render nothing.
+  let specLabelById = new Map<string, string>();
+  const hasPins = ((lines ?? []) as any[]).some((l) => l.spec_version_id);
+  if (hasPins) {
+    const lineCats = Array.from(
+      new Set(
+        ((lines ?? []) as any[])
+          .map((l) => l.category_id ?? l.products?.category_id)
+          .filter(Boolean)
+      )
+    ) as string[];
+    if (lineCats.length) {
+      const { data: specVers } = await supabase
+        .from("spec_versions")
+        .select("id, category_id, version, published_at")
+        .in("category_id", lineCats);
+      specLabelById = buildVersionLabelsForCategories((specVers ?? []) as any[]);
+    }
+  }
+  const specLabelForLine = (l: any): string | null =>
+    l?.spec_version_id ? specLabelById.get(l.spec_version_id) ?? null : null;
 
   const freightFromContainers = totalFreight(containers);
   const effectiveFreight = containers.length
@@ -383,32 +411,6 @@ export default async function DocumentViewPage({
     allowedFieldsByCategory.get(cat)!.add(name);
   }
 
-  /** Build the visible-on-PDF config fields for a given line. */
-  function buildVisibleConfig(
-    categoryId: string | null,
-    configValues: Record<string, unknown> | null
-  ): Array<{ field_name: string; value: string }> {
-    if (!configValues || typeof configValues !== "object") return [];
-    // Custom pole lines carry a structured spec (line_type/pole_spec) that is
-    // NOT customer config — the description already lives in the line name.
-    if (isCustomPoleConfig(configValues)) return [];
-    const allowed = categoryId
-      ? allowedFieldsByCategory.get(categoryId)
-      : null;
-    const out: Array<{ field_name: string; value: string }> = [];
-    for (const [k, v] of Object.entries(configValues)) {
-      if (v == null) continue;
-      const str = String(v).trim();
-      if (str === "") continue;
-      // If we have a visibility map and the field isn't in it, skip.
-      // If we don't (defensive fallback), show everything so the user
-      // sees SOMETHING rather than an empty subline.
-      if (allowed && !allowed.has(k)) continue;
-      out.push({ field_name: k, value: str });
-    }
-    return out;
-  }
-
   // PDF client shape — merge the embedded client (used elsewhere on the
   // page) with the side-fetched extras (address / vat / default attn)
   // from m036.
@@ -425,82 +427,26 @@ export default async function DocumentViewPage({
       }
     : null;
 
-  const pdfData: QuotationPDFData = {
-    number: doc.number,
-    type: doc.type as "quotation" | "proforma",
-    date: doc.date,
-    incoterm: doc.incoterm,
-    freight_type: doc.freight_type,
-    freight_cost: effectiveFreight,
-    insurance_cost: Number(doc.insurance_cost || 0),
-    additional_charges: Array.isArray(doc.additional_charges)
-      ? doc.additional_charges
-      : [],
-    port_of_loading: doc.port_of_loading ?? null,
-    port_of_destination: doc.port_of_destination ?? null,
+  // m177/PRD-006 P2-1 — the PDF data assembly now lives in one shared builder
+  // (lib/quotation-pdf-data.ts) so the on-page/download PDF and the server-side
+  // package render produce a byte-identical document from a single source.
+  const pdfData: QuotationPDFData = buildQuotationPdfData({
+    doc,
+    lines: lines ?? [],
     containers,
-    production_time: productionTime,
-    currency,
-    bank_account: bankAccount,
-    sales_conditions: showSalesConditions ? salesCondition : null,
-    total_price: Number(doc.total_price || 0),
-    payment_label: paymentLabel,
-    payment_mode: paymentMode,
-    payment_terms: paymentTerms,
-    attention_to: (doc as any).attention_to ?? null,
-    // Sales Terms (m037) — defensive reads; the column may not exist
-    // in older envs, in which case the PDF section gracefully omits
-    // those rows.
-    warranty_years: (doc as any).warranty_years ?? null,
-    offer_validity_products_days:
-      (doc as any).offer_validity_products_days ?? null,
-    offer_validity_transport_days:
-      (doc as any).offer_validity_transport_days ?? null,
     client: pdfClient,
-    lines: (lines ?? []).map((l: any) => ({
-      // Internal product name is always the primary display. Falls back to
-      // the line's own SNAPSHOT (product_name) when the catalog product has
-      // been deleted (m089), then to client_product_name for a free-text /
-      // Project Product line (no catalogue product at all) — so the quotation
-      // stays readable instead of showing "—".
-      product_name:
-        l.products?.name ??
-        l.product_name ??
-        (l.client_product_name && String(l.client_product_name).trim()) ??
-        "—",
-      // Client reference is the secondary alias — suppress it for free-text
-      // lines where client_product_name is already the primary name.
-      client_product_name:
-        l.products?.name || l.product_name
-          ? (l.client_product_name && String(l.client_product_name).trim()) ||
-            null
-          : null,
-      category: l.products?.category ?? l.product_category ?? null,
-      selected_options: (l.selected_options ?? {}) as Record<string, string>,
-      // Customer-visible config (CCT, Optic, Bracket, Solar panel, …),
-      // pre-filtered against config_fields.visible_in_quotation.
-      visible_config_fields: buildVisibleConfig(
-        l.products?.category_id ?? null,
-        (l.config_values ?? null) as Record<string, unknown> | null
-      ),
-      quantity: Number(l.quantity || 0),
-      unit_price: Number(l.unit_price || 0),
-      total_price: Number(l.total_price || 0),
-      pricing_mode: l.pricing_mode,
-      pricing_tier: (l.pricing_tier ?? null) as PricingTier | null,
-      original_unit_price:
-        l.original_unit_price == null ? null : Number(l.original_unit_price),
-      discount_type: (l.discount_type ?? null) as DiscountType | null,
-      discount_value: Number(l.discount_value || 0),
-    })),
-    purchase_order_number: doc.purchase_order_number ?? null,
-    commission_amount: doc.show_commission_in_pdf
-      ? Number(doc.commission_amount || 0)
-      : 0,
-    commission_visible: !!doc.show_commission_in_pdf,
-    commission_description: doc.commission_description ?? null,
-    client_custom_fields: clientCustomFields,
-  };
+    clientCustomFields,
+    effectiveFreight,
+    productionTime,
+    currency,
+    bankAccount,
+    salesConditions: showSalesConditions ? salesCondition : null,
+    paymentLabel,
+    paymentMode,
+    paymentTerms,
+    allowedFieldsByCategory,
+    specLabelById,
+  });
 
   let signedPdfUrl: string | null = null;
   if (doc.pdf_url) {
@@ -648,6 +594,7 @@ export default async function DocumentViewPage({
   const canDeleteQuotation = await hasUiCapability("quotation.delete");
   // Invoicing a won deal is the same commercial act as quoting it (m141).
   const canInvoice = await hasUiCapability("quotation.create");
+  const canSendSpecSheet = await hasUiCapability("integration.log_interaction");
   const isArchived = !!(doc as any).archived_at;
 
   // ---- Versioning: is this the LATEST version of its affair? ----------
@@ -1336,6 +1283,8 @@ export default async function DocumentViewPage({
               )}
           </div>
 
+          {canSendSpecSheet ? <SendSpecSheetButton documentId={doc.id} /> : null}
+
           {/* Destructive actions — discreet 3-dot menu. Archive is the
               safe fallback (reversible); Delete is permanent and only
               shows for roles that hold quotation.delete. Hidden entirely
@@ -1650,6 +1599,11 @@ export default async function DocumentViewPage({
                     {(l.products?.category ?? l.product_category) && (
                       <div className="text-xs text-neutral-500 mt-0.5">
                         {l.products?.category ?? l.product_category}
+                      </div>
+                    )}
+                    {specLabelForLine(l) && (
+                      <div className="text-[11px] text-neutral-500 mt-0.5">
+                        Spec {specLabelForLine(l)}
                       </div>
                     )}
                     {/* Configuration summary moved to the Configuration column. */}

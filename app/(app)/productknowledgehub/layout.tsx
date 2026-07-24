@@ -1,4 +1,4 @@
-import { canAccessOrAdmin } from "@/features/Permissions/lib/permissions";
+import { canAccessOrAdmin } from "@/lib/permissions";
 import HubTabs, { type HubTab } from "@/components/HubTabs";
 
 /**

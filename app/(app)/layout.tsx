@@ -1,6 +1,5 @@
 import "./premium.css";
 import { Suspense } from "react";
-import { createClient } from "@/lib/supabase/server";
 import { getEffectiveRole } from "@/lib/auth";
 import { Nav } from "@/components/Nav";
 import NoRoleNotice from "@/components/NoRoleNotice";
@@ -16,17 +15,17 @@ export default async function AppLayout({
 }: {
   children: React.ReactNode;
 }) {
-  const supabase = createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) redirect("/login");
-
   // Layout uses the EFFECTIVE role so the Nav can simulate what other
   // roles would see when a super-admin is in dev mode. Every server
   // action and RLS policy still uses the REAL role independently.
-  const { realRole, effectiveRole, isSuperAdmin, isSimulating } =
+  //
+  // Identity (userId/email) comes from the SAME call — `getEffectiveRole`
+  // (React-`cache()`d) already validates the user via `getCurrentUserRole`,
+  // so we no longer make a separate `supabase.auth.getUser()` round-trip
+  // here. Middleware remains the token-validation gate on every request.
+  const { userId, email, realRole, effectiveRole, isSuperAdmin, isSimulating } =
     await getEffectiveRole();
+  if (!userId) redirect("/login");
   const locale = getLocale();
 
   // S1.5 — an authenticated user with NO role (no user_roles row) used to get a
@@ -36,7 +35,7 @@ export default async function AppLayout({
   if (!realRole && !isSuperAdmin) {
     return (
       <I18nProvider locale={locale}>
-        <NoRoleNotice email={user.email ?? null} />
+        <NoRoleNotice email={email} />
       </I18nProvider>
     );
   }
@@ -45,8 +44,8 @@ export default async function AppLayout({
     <I18nProvider locale={locale}>
     <div className="min-h-screen flex flex-col">
       <Nav
-        userId={user.id}
-        email={user.email}
+        userId={userId}
+        email={email}
         realRole={realRole}
         effectiveRole={effectiveRole}
         isSuperAdmin={isSuperAdmin}

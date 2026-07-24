@@ -124,6 +124,66 @@ export const CAPABILITY_CATALOG = [
   { key: "sales_analytics.view", label: "View the Sales & Analytics register" },
   // Prospects / CRM
   { key: "prospect.access", label: "Access prospects / CRM sandbox" },
+  // Product Knowledge Hub (m150) — versioned product spec source of truth
+  {
+    key: "spec.read",
+    label: "Read the Knowledge Hub",
+    description: "View product families, model datasheets, spec versions and download spec sheets.",
+  },
+  {
+    key: "spec.raise",
+    label: "Raise a spec change request",
+    description: "Create / submit a change request against a product family (attach evidence + signed document).",
+  },
+  {
+    key: "spec.approve",
+    label: "Approve & publish spec changes",
+    description: "Approve a signed change request: apply the diff, bump the version and (re)render affected spec sheets.",
+  },
+  {
+    key: "spec.manage_schema",
+    label: "Manage the spec schema",
+    description: "Edit the spec field schema (which spec keys exist per family and their units).",
+  },
+  {
+    key: "spec.import",
+    label: "Import baseline spec data",
+    description:
+      "Bulk-import baseline spec fields/values from CSV and attach designed spec-sheet PDFs (admin / super_admin only).",
+  },
+  // Integrations — client messaging channels, interaction log, API/webhooks
+  // (docs/PLAN_INTEGRATIONS.md §3.1). All ship UN-GRANTED (fail-closed): a
+  // capability with no role_permissions row is denied until a super-admin
+  // enables it in /permissions. The "Send to customer" hand-off gates on
+  // integration.send_business.
+  {
+    key: "integration.log_interaction",
+    label: "Log & see client interactions",
+    description:
+      "Log a chat/call/email on a client and see that client's interaction timeline (scoped to clients the user can access).",
+  },
+  {
+    key: "integration.send_business",
+    label: "Send business messages to customers",
+    description:
+      "Send from a company channel (Zalo OA / WhatsApp Business / email) and log the interaction, server-checked against client ownership. Gates the Knowledge Hub 'Send to customer' hand-off.",
+  },
+  {
+    key: "integration.view_team_interactions",
+    label: "View team interaction timelines",
+    description:
+      "Supervision view of interactions across a manager's / director's scope (explicit alongside the RLS inheritance).",
+  },
+  {
+    key: "integration.manage",
+    label: "Manage business channel connections",
+    description: "Settings → Integrations: connect / disconnect the workspace business channels (Zalo OA, WhatsApp Business).",
+  },
+  {
+    key: "integration.manage_api_keys",
+    label: "Manage API keys & webhooks",
+    description: "Create / revoke API keys and manage outbound webhook endpoints (n8n and other external callers).",
+  },
   // Administration
   { key: "admin.manage_permissions", label: "Manage the permissions matrix" },
   { key: "admin.manage_users", label: "Manage users & roles" },
@@ -185,6 +245,8 @@ const MODULE_LABEL: Record<string, string> = {
   forecast: "Forecast",
   sales_analytics: "Sales & Analytics",
   prospect: "Prospects / CRM",
+  spec: "Product Knowledge Hub",
+  integration: "Integrations",
   admin: "Administration",
   terminology: "Terminology",
   lighting_rules: "Lighting Rules",

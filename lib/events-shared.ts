@@ -79,6 +79,8 @@ export type EventEntityType =
   | "client"
   | "project_request"
   | "affair"
+  // Product Knowledge Hub (m150) — spec change request workflow.
+  | "spec_change_request"
   // System-wide events (permissions matrix changes, user role changes,
   // dev resets) have no natural single entity — use "system" and set
   // entity_id to a UUID so the row is still uniquely keyed.
@@ -158,6 +160,10 @@ export type EventType =
   | "client.contact_added"
   | "client.contact_updated"
   | "client.contact_deleted"
+  // integration — interaction log (m164)
+  | "client.interaction_logged"
+  // integration — inbound customer message received (area A: WhatsApp/Zalo receiver)
+  | "client.message_received"
   // affair CRM events (m103) — planned actions log into the timeline
   | "affair.action_planned"
   | "affair.action_done"
@@ -187,12 +193,30 @@ export type EventType =
   | "pr.won"
   | "pr.lost"
   | "pr.cancelled"
+  // Product Knowledge Hub (m160) — spec change request workflow
+  | "spec.submitted"
+  | "spec.published"
+  | "spec.rejected"
+  // Product Knowledge Hub (m171) — admin edits the per-family spec schema
+  // (add/edit/remove spec_fields) outside the change-request flow.
+  | "spec.schema_changed"
+  // Integrations — a rep sends a product spec sheet to the customer (fans out
+  // to the spec_sheet.sent webhook so n8n can deliver the PDF).
+  | "spec_sheet.sent"
+  // Integrations Phase 3 — a message sent from a company business channel
+  // (Zalo OA / WhatsApp Business / Telegram).
+  | "business.message.sent"
   | "pr.cost_revision_dismissed"
   // admin / system
   | "admin.permissions_changed"
   | "admin.user_role_changed"
   // historical invoice import (read-only island)
   | "import.batch_completed"
+  // Product Knowledge Hub — baseline spec import (bulk PDF via n8n handoff)
+  | "import.requested"
+  | "import.file_reviewed"
+  // Product Knowledge Hub — a published change means each model's glossy datasheet needs a redo
+  | "datasheet.refresh_needed"
   | "system.dev_reset";
 
 /* ===========================================================================
@@ -235,6 +259,9 @@ export const ACTIONABLE_MEDIUM_EVENTS: ReadonlySet<EventType> = new Set<EventTyp
   "pr.quotation_generated", // → sales
   "pr.info_requested", // → sales (owner)
   "pr.rejected", // → sales (owner)
+  // Knowledge Hub — a published spec needs the datasheet owner to redo the
+  // glossy Figma sheet and re-upload it (bell, not silent feed).
+  "datasheet.refresh_needed", // → datasheet owner / admin (Manuel)
 ]);
 
 /**
@@ -380,6 +407,12 @@ export function eventEntityHref(e: {
       return `/projects/${e.entity_id}`;
     case "affair":
       return `/affairs/${e.entity_id}`;
+    case "spec_change_request":
+      // Spec events (submitted / published / rejected / datasheet.refresh_needed)
+      // belong to the Knowledge Hub governance queue, not the ops feed — this is
+      // where the reviewer/datasheet owner acts. The list carries the "In the
+      // oven / Served" datasheet column.
+      return "/productknowledgehub/requests";
     default:
       return null;
   }
@@ -438,6 +471,8 @@ export function eventTypeLabel(t: EventType): string {
     "client.contact_added": "Contact added",
     "client.contact_updated": "Contact updated",
     "client.contact_deleted": "Contact removed",
+    "client.interaction_logged": "Interaction logged",
+    "client.message_received": "Customer replied",
     "affair.action_planned": "Action planned",
     "affair.action_done": "Action completed",
     "affair.action_deleted": "Planned action removed",
@@ -468,10 +503,19 @@ export function eventTypeLabel(t: EventType): string {
     "pr.won": "Project won",
     "pr.lost": "Project lost",
     "pr.cancelled": "Project cancelled",
+    "spec.submitted": "Spec change submitted",
+    "spec.published": "Spec published",
+    "spec.schema_changed": "Spec schema changed",
+    "spec_sheet.sent": "Spec sheet sent to customer",
+    "business.message.sent": "Business message sent",
+    "spec.rejected": "Spec change rejected",
     "pr.cost_revision_dismissed": "Cost revision dismissed",
     "admin.permissions_changed": "Permissions matrix changed",
     "admin.user_role_changed": "User role changed",
     "import.batch_completed": "Historical invoices imported",
+    "import.requested": "Baseline import requested (bulk PDF)",
+    "import.file_reviewed": "Import file needs review",
+    "datasheet.refresh_needed": "Datasheet needs a glossy refresh",
     "system.dev_reset": "Dev data reset",
   };
   return map[t] ?? t;

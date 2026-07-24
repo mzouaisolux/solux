@@ -48,7 +48,7 @@ import {
   getDocIdsOwnedBySales,
 } from "@/lib/sales-filter";
 import { RoleContextBanner } from "@/components/RoleContextBanner";
-import { getVisibilityScope, canSeeRecord } from "@/lib/visibility";
+import { getVisibilityScope, canSeeRecord } from "@/features/Permissions/lib/visibility";
 
 /**
  * Operations — unified operational workspace.

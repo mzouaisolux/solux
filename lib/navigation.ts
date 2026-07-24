@@ -197,6 +197,11 @@ export const NAVIGATION: NavCategory[] = [
             href: "/business",
             visibility: { kind: "always" },
           },
+          {
+            label: "Team activity",
+            href: "/team-activity",
+            visibility: { kind: "capabilityOrAdmin", capabilities: ["integration.view_team_interactions"] },
+          },
         ],
       },
     ],
@@ -472,6 +477,49 @@ export const NAVIGATION: NavCategory[] = [
     ],
   },
 
+  // 5b) Knowledge Hub — the versioned product-spec source of truth (m150/m161).
+  //     Promoted from a Catalog sub-link to its OWN first-level section. Route,
+  //     page guards and capabilities are unchanged; only its menu home moved.
+  //     The dropdown mirrors each page's guard exactly:
+  //       Browse = spec.read, Import = spec.import (canAccessOrAdmin → admins pass).
+  {
+    id: "product-knowledge-hub",
+    label: "Knowledge Hub",
+    // Clicking the label lands on the hub home; the mega panel still opens.
+    href: "/productknowledgehub",
+    groups: [
+      {
+        title: "Product Knowledge Hub",
+        items: [
+          {
+            label: "Browse specs",
+            href: "/productknowledgehub",
+            visibility: { kind: "capabilityOrAdmin", capabilities: ["spec.read"] },
+            description: "Published product spec source of truth",
+          },
+          {
+            label: "Change requests",
+            href: "/productknowledgehub/requests",
+            visibility: { kind: "capabilityOrAdmin", capabilities: ["spec.read"] },
+            description: "Every spec change request; submit / approve inline",
+          },
+          {
+            label: "Import baseline",
+            href: "/productknowledgehub/import",
+            visibility: { kind: "capabilityOrAdmin", capabilities: ["spec.import"] },
+            description: "Seed specs from CSV / XLSX / PDF (admin)",
+          },
+          {
+            label: "Schema editor",
+            href: "/productknowledgehub/schema",
+            visibility: { kind: "capabilityOrAdmin", capabilities: ["spec.manage_schema"] },
+            description: "Add / edit family spec fields (admin)",
+          },
+        ],
+      },
+    ],
+  },
+
   // 6) Pricing — costs + price lists (catalog structure moved to Catalog).
   {
     id: "pricing",
@@ -502,6 +550,29 @@ export const NAVIGATION: NavCategory[] = [
             href: "/admin/pricing/library",
             visibility: { kind: "capabilityOrAdmin", capabilities: ["pricing.manage"] },
             description: "Manage, assign & publish all lists",
+          },
+        ],
+      },
+    ],
+  },
+
+  // 5c) Settings — workspace/user settings hub. A container category (no own
+  //     href) whose dropdown grows over time. Phase 1 ships Integrations
+  //     (self-scoped "My channels"; admin sections added later).
+  //     Integrations feature code: features/Intergration/.
+  {
+    id: "settings",
+    label: "Settings",
+    visibility: { kind: "always" },
+    groups: [
+      {
+        title: "Workspace",
+        items: [
+          {
+            label: "Integrations",
+            href: "/settings/integrations",
+            visibility: { kind: "always" },
+            description: "Your channels, business connections, API keys & webhooks",
           },
         ],
       },

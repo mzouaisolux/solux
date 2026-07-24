@@ -13,7 +13,11 @@ export const config = {
   // by scripts/copy-pdf-worker.mjs) was 307-redirected to /login without it —
   // a public JS asset must not sit behind the auth wall, and a session-expired
   // race would otherwise feed pdf.js the login page HTML as its worker script.
+  // `api/hooks` is excluded too: those routes authenticate themselves (bearer
+  // CRON_SECRET, no session cookie), so the session guard must not 307-redirect
+  // the Vercel Cron dispatcher to /login before its secret check runs —
+  // otherwise the webhook outbox never drains.
   matcher: [
-    "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:png|jpg|jpeg|gif|svg|webp|ico|css|js|mjs|woff|woff2|ttf|otf|eot)).*)",
+    "/((?!_next/static|_next/image|favicon.ico|api/hooks|.*\\.(?:png|jpg|jpeg|gif|svg|webp|ico|css|js|mjs|woff|woff2|ttf|otf|eot)).*)",
   ],
 };

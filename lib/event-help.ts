@@ -28,6 +28,37 @@ export type EventHelp = {
  * the real-world moment, not the code path.
  */
 export const EVENT_HELP: Record<EventType, EventHelp> = {
+  // ---------------------------------------------------------------- product knowledge hub
+  "spec.submitted": {
+    when: "Operations submits a product spec change request for approval.",
+    why: "The Task List Manager needs to review it and, with a signed document, publish it.",
+    recipients: ["Task list manager", "Operations", "Admin"],
+  },
+  "spec.published": {
+    when: "A spec change is approved and published to the Knowledge Hub — the product version bumps (e.g. v1.0 → v1.1).",
+    why: "The catalog, quotes, production and spec sheets now read the new value.",
+    recipients: ["Operations", "Sales", "Task list manager"],
+  },
+  "spec.rejected": {
+    when: "A submitted spec change request is sent back to Operations for revision.",
+    why: "The change was not approved; Operations needs to fix and re-submit.",
+    recipients: ["Operations", "Task list manager"],
+  },
+  "spec.schema_changed": {
+    when: "An admin adds, edits or removes a spec field on a family's schema.",
+    why: "Schema management is a direct admin action (outside the change-request flow); the log keeps it auditable.",
+    recipients: ["Admin"],
+  },
+  "spec_sheet.sent": {
+    when: "A rep sends a product spec sheet to the customer from a quotation.",
+    why: "Records the touch on the client timeline and (via the spec_sheet.sent webhook) lets n8n deliver the PDF over Zalo / WhatsApp / email.",
+    recipients: ["Sales", "Operations"],
+  },
+  "business.message.sent": {
+    when: "A rep sends a message to the customer from a company business channel (Zalo OA / WhatsApp Business / Telegram).",
+    why: "Records the outbound touch on the client timeline so the whole team can see the customer was contacted.",
+    recipients: ["Sales", "Operations"],
+  },
   // ---------------------------------------------------------------- production_order
   "po.created": {
     when: "A production order is generated — usually right after a quotation is marked Won and production is launched.",
@@ -300,10 +331,37 @@ export const EVENT_HELP: Record<EventType, EventHelp> = {
     why: "Routine bookkeeping on the account.",
     recipients: ["Sales"],
   },
+  "client.interaction_logged": {
+    when: "A chat / call / email / note is logged on a client's timeline.",
+    why: "Keeps the sales↔customer conversation history in one place (append-only).",
+    recipients: ["Sales owner", "Managers"],
+  },
+  "client.message_received": {
+    when: "A customer message arrives on a business channel (WhatsApp/Zalo) and is matched to a client.",
+    why: "Rings the client owner's bell so an inbound reply is answered promptly, not missed.",
+    recipients: ["Sales owner", "Managers"],
+  },
   "client.contact_deleted": {
     when: "A contact is removed from a client.",
     why: "Routine bookkeeping on the account.",
     recipients: ["Sales"],
+  },
+
+  // ---------------------------------------------------------------- baseline spec import (bulk PDF → n8n)
+  "import.requested": {
+    when: "Operations kicks off a bulk baseline spec-sheet import (many PDFs at once).",
+    why: "Hands the batch to n8n, which extracts each sheet and imports it in the background so the operator isn't tied to the page.",
+    recipients: ["Operations", "Admin"],
+  },
+  "import.file_reviewed": {
+    when: "A single imported spec sheet couldn't be auto-matched to a model and needs manual review.",
+    why: "Flags the file so an operator picks the right model before its specs are written.",
+    recipients: ["Operations", "Admin"],
+  },
+  "datasheet.refresh_needed": {
+    when: "A change request publishes and changes the specs of one or more models.",
+    why: "Each affected model's bespoke glossy datasheet is now out of date and needs a design refresh — the auto data sheet already reflects the change, but the designed PDF does not.",
+    recipients: ["Admin"],
   },
 
   // ---------------------------------------------------------------- historical import

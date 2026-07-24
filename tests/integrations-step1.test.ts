@@ -8,7 +8,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { ALL_CAPABILITY_KEYS } from "../features/Permissions/lib/capabilities.ts";
+import { ALL_CAPABILITY_KEYS } from "../lib/capabilities.ts";
 import {
   INTERACTION_CHANNELS,
   INTERACTION_DIRECTIONS,

@@ -25,7 +25,7 @@
  */
 
 import { createClient } from "@/lib/supabase/server";
-import { getVisibilityScope, canSeeRecord, canSeeRow } from "@/lib/visibility";
+import { getVisibilityScope, canSeeRecord, canSeeRow } from "@/features/Permissions/lib/visibility";
 import { resolveUserLabelStrings } from "@/lib/user-display";
 import { eventTypeLabel, type EventEntityType } from "@/lib/events-shared";
 import {

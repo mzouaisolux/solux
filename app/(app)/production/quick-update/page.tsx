@@ -2,7 +2,7 @@ import { createClient } from "@/lib/supabase/server";
 import { getEffectiveRole } from "@/lib/auth";
 import { hasUiCapability } from "@/lib/permissions";
 import AccessDenied from "@/components/AccessDenied";
-import { getVisibilityScope, canSeeRecord } from "@/lib/visibility";
+import { getVisibilityScope, canSeeRecord } from "@/features/Permissions/lib/visibility";
 import { resolveUserLabels } from "@/lib/user-display";
 import { todayISO } from "@/lib/working-days";
 import {

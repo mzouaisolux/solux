@@ -49,6 +49,12 @@ import type { CustomerHistory } from "@/lib/import/history-stats";
 import { ClientMessageComposer } from "@/components/clients/ClientMessageComposer";
 import { AffairRow } from "@/components/affairs/AffairRow";
 import { getClientAffairs } from "@/lib/client-affairs";
+import { ClientInteractions } from "@/features/Intergration/components/ClientInteractions";
+import { SendBusinessMessage } from "@/features/Intergration/components/SendBusinessMessage";
+import { listInteractions } from "@/features/Intergration/actions/interactions";
+import { listMyChannels } from "@/features/Intergration/actions/user-channels";
+import { listActiveSendChannels } from "@/features/Intergration/actions/connections";
+import { listActiveTemplates } from "@/features/Intergration/actions/templates";
 import { loadShippingStatuses, type ShippingStatusLite } from "@/lib/shipping-status-server";
 import { loadProjectRepositories } from "@/lib/project-documents-server";
 import { loadAffairProfitability } from "@/lib/profitability-server";
@@ -154,6 +160,29 @@ export default async function ClientWorkspacePage({
     .order("is_primary", { ascending: false })
     .order("created_at", { ascending: true });
   const contacts = (contactRows ?? []) as any[];
+
+  // Integrations Phase 1 — interaction log + this rep's channels for this client.
+  // Defensive: if the m164/m165 tables aren't applied yet, the reads return
+  // empty and the panel simply shows no history / disabled buttons.
+  const [interactions, myChannelRows, canLogInteraction, canSendBusiness] = await Promise.all([
+    listInteractions(params.id),
+    listMyChannels(),
+    hasUiCapability("integration.log_interaction"),
+    hasUiCapability("integration.send_business"),
+  ]);
+  // Only query connected channels when the rep can send (the action is gated).
+  const activeSendChannels = canSendBusiness ? await listActiveSendChannels().catch(() => []) : [];
+  const sendTemplates = canSendBusiness ? await listActiveTemplates().catch(() => []) : [];
+  const primaryContact = contacts.find((c) => c.is_primary) ?? contacts[0];
+  const interactionCustomer = {
+    phone: (primaryContact?.phone ?? client.phone_number) ?? null,
+    email: (primaryContact?.email ?? client.email) ?? null,
+  };
+  const myChannels = {
+    zalo: myChannelRows.some((c) => c.channel === "zalo"),
+    whatsapp: myChannelRows.some((c) => c.channel === "whatsapp"),
+    telegram: myChannelRows.some((c) => c.channel === "telegram"),
+  };
 
   // Tender pipeline (m112): tenders where this client was identified as
   // the local partner. Defensive pre-migration — error → empty list.
@@ -863,6 +892,23 @@ export default async function ClientWorkspacePage({
       {/* ===== CONTACTS ===== */}
       {tab === "contacts" && (
         <>
+        {/* Integrations Phase 1 — channels, log nudge, interaction timeline. */}
+        <ClientInteractions
+          clientId={client.id}
+          customer={interactionCustomer}
+          myChannels={myChannels}
+          interactions={interactions}
+          canLog={canLogInteraction}
+        />
+        {/* Integrations Phase 3 — send from a company business channel. */}
+        <SendBusinessMessage
+          clientId={client.id}
+          channels={activeSendChannels}
+          defaultPhone={interactionCustomer.phone}
+          templates={sendTemplates}
+          company={client.company_name ?? null}
+          contact={primaryContact?.name ?? null}
+        />
         {/* CRM step 2 (m101) — the people address book (several per client). */}
         <ClientContactsCard clientId={client.id} contacts={contacts} />
         <section className="panel p-5 space-y-4">

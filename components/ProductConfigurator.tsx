@@ -1268,11 +1268,7 @@ export default function ProductConfigurator({
             onClick={() => setPickerOpen((v) => !v)}
             className="rounded border border-neutral-200 px-2.5 py-1 text-sm hover:bg-neutral-50"
           >
-            {pickerOpen
-              ? "Cancel"
-              : value.category_id
-              ? "Change model"
-              : "Change product"}
+            {pickerOpen ? "Cancel" : "Change product"}
           </button>
           {onRemove && (
             <button

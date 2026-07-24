@@ -51,6 +51,8 @@ export type QuotationLineForConversion = {
   quantity?: number | null;
   selected_options?: Record<string, string> | null;
   config_values?: Record<string, string> | null;
+  /** m177 — the spec-version pin frozen on the quotation line, if any. */
+  spec_version_id?: string | null;
 };
 
 /** The production_task_list_lines insert row produced from one document line. */
@@ -65,6 +67,8 @@ export type TaskListLineInsert = {
   config_values: Record<string, string>;
   internal_notes: null;
   position: number;
+  /** m177 — the pin SNAPSHOT: production validates + prints against this. */
+  spec_version_id: string | null;
 };
 
 /**
@@ -111,5 +115,8 @@ export function buildTaskListLineFromQuotationLine(
     },
     internal_notes: null,
     position,
+    // m177 — snapshot the quotation line's frozen pin so the task list reads it
+    // directly (m135: line-order join to document_lines is NOT reliable).
+    spec_version_id: l.spec_version_id ?? null,
   };
 }

@@ -35,7 +35,7 @@ async function ensureLogin(browser: any, role: string): Promise<Page> {
 
 async function dump(page: Page, label: string) {
   const d = await page.evaluate(() => {
-    const t = (e: Element | null) => (e?.textContent || "").trim().replace(/\s+/g, " ");
+    const t = (e: Element | null | undefined) => (e?.textContent || "").trim().replace(/\s+/g, " ");
     const sel = (e: Element) => {
       const el = e as HTMLElement;
       const id = el.id ? `#${el.id}` : "";
